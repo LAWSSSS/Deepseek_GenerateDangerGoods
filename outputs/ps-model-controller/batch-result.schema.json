@@ -1,0 +1,652 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Photoshop batch result v3.0",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "job_id",
+    "status",
+    "calls"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "v3.0"
+    },
+    "job_id": {
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "metric",
+        "preview"
+      ]
+    },
+    "status": {
+      "enum": [
+        "passed",
+        "review",
+        "failed"
+      ]
+    },
+    "calls": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "token_usage": {
+      "type": "object",
+      "required": ["api_calls", "total_tokens", "reported_tokens", "unreported_calls"],
+      "properties": {
+        "api_calls": {"type": "integer", "minimum": 0},
+        "total_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "reported_tokens": {"type": "integer", "minimum": 0},
+        "unreported_calls": {"type": "integer", "minimum": 0},
+        "prompt_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "completion_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "prompt_cache_hit_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "budget_tokens": {"type": "integer", "minimum": 0}
+      }
+    },
+    "reason": {
+      "type": "string"
+    },
+    "reason_code": {
+      "type": "string"
+    },
+    "scale_status": {
+      "enum": [
+        "calibrated",
+        "estimated",
+        "preview"
+      ]
+    },
+    "placement": {
+      "type": "object"
+    },
+    "reference_projections": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "final": {
+      "$ref": "#/$defs/render"
+    },
+    "review_render": {
+      "$ref": "#/$defs/render"
+    },
+    "outputs": {
+      "$ref": "#/$defs/files"
+    },
+    "delivery": {
+      "enum": [
+        "formal",
+        "estimated_preview"
+      ]
+    },
+    "elapsed_seconds": {
+      "type": "number",
+      "minimum": 0
+    },
+    "object_size": {
+      "$ref": "#/$defs/ObjectSize"
+    },
+    "scene_analysis": {
+      "type": "object",
+      "properties": {
+        "vision": {
+          "$ref": "#/$defs/SceneAnswer"
+        }
+      }
+    },
+    "correction": {
+      "$ref": "#/$defs/PhotoFix"
+    },
+    "scene_issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "site",
+          "reason"
+        ]
+      }
+    },
+    "preview_outputs": {
+      "$ref": "#/$defs/files"
+    },
+    "score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 20
+    }
+  },
+  "$defs": {
+    "scale": {
+      "type": "object",
+      "required": [
+        "status",
+        "reference",
+        "reference_points_px",
+        "reference_basis",
+        "px_per_mm",
+        "projected_major_px",
+        "projected_major_px_range",
+        "rendered_major_px",
+        "rendered_minor_px"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "calibrated",
+            "estimated"
+          ]
+        },
+        "reference": {
+          "type": "object"
+        },
+        "reference_points_px": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "number"
+            },
+            "minItems": 2,
+            "maxItems": 2
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "reference_basis": {
+          "enum": [
+            "provided",
+            "vision_estimate"
+          ]
+        },
+        "px_per_mm": {
+          "type": "number"
+        },
+        "px_per_mm_range": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "projected_major_px": {
+          "type": "number"
+        },
+        "projected_minor_px": {
+          "type": "number"
+        },
+        "projected_major_px_range": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "rendered_major_px": {
+          "type": "number"
+        },
+        "rendered_minor_px": {
+          "type": "number"
+        },
+        "references": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "position": {
+      "type": "object",
+      "required": [
+        "center_px",
+        "center_per_mille",
+        "bounds_px",
+        "clockwise_deg",
+        "support_point_px"
+      ],
+      "properties": {
+        "center_px": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "center_per_mille": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "bounds_px": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "clockwise_deg": {
+          "type": "number"
+        },
+        "support_point_px": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "maxItems": 2
+        }
+      }
+    },
+    "render": {
+      "type": "object",
+      "required": [
+        "bounds",
+        "candidate",
+        "occlusion_ratio"
+      ],
+      "properties": {
+        "bounds": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "candidate": {
+          "enum": [
+            "A",
+            "B",
+            "C"
+          ]
+        },
+        "occlusion_ratio": {
+          "type": "number",
+          "minimum": 0.4,
+          "maximum": 0.85
+        },
+        "scale": {
+          "$ref": "#/$defs/scale"
+        },
+        "position": {
+          "$ref": "#/$defs/position"
+        },
+        "photography": {
+          "type": "object",
+          "required": [
+            "status"
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "measured",
+                "insufficient_samples"
+              ]
+            },
+            "scene": {
+              "type": "object"
+            },
+            "object_before": {
+              "type": "object"
+            },
+            "grain_from_scene": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "ObjectSize": {
+      "additionalProperties": false,
+      "properties": {
+        "major_mm": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "number"
+            },
+            {
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "number"
+            }
+          ],
+          "title": "Major Mm",
+          "type": "array"
+        },
+        "minor_mm": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "number"
+            },
+            {
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "number"
+            }
+          ],
+          "title": "Minor Mm",
+          "type": "array"
+        },
+        "basis": {
+          "enum": [
+            "measured",
+            "exact_catalog",
+            "similar_catalog"
+          ],
+          "title": "Basis",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "major_mm",
+        "minor_mm",
+        "basis",
+        "source"
+      ],
+      "title": "ObjectSize",
+      "type": "object"
+    },
+    "SceneAnswer": {
+      "additionalProperties": false,
+      "properties": {
+        "zones": {
+          "items": {
+            "enum": [
+              "Z1",
+              "Z2",
+              "Z3",
+              "Z4"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "title": "Zones",
+          "type": "array"
+        },
+        "refs": {
+          "items": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "pattern": "^[A-Z][A-Z0-9]{0,7}$",
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "plate",
+                  "beam",
+                  "channel",
+                  "pipe",
+                  "frame",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "maximum": 30000,
+                "minimum": 1,
+                "type": "number"
+              },
+              {
+                "maximum": 30000,
+                "minimum": 1,
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "maxItems": 8,
+          "title": "Refs",
+          "type": "array"
+        },
+        "protect": {
+          "items": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "maximum": 1000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "maximum": 1000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "maximum": 1000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "maximum": 1000,
+                "minimum": 0,
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "maxItems": 4,
+          "title": "Protect",
+          "type": "array"
+        }
+      },
+      "required": [
+        "zones",
+        "refs"
+      ],
+      "title": "SceneAnswer",
+      "type": "object"
+    },
+    "PhotoFix": {
+      "additionalProperties": false,
+      "properties": {
+        "brightness": {
+          "default": 0,
+          "maximum": 10,
+          "minimum": -10,
+          "title": "Brightness",
+          "type": "number"
+        },
+        "warmth": {
+          "default": 0,
+          "maximum": 6,
+          "minimum": -6,
+          "title": "Warmth",
+          "type": "number"
+        },
+        "saturation": {
+          "default": 0,
+          "maximum": 8,
+          "minimum": -12,
+          "title": "Saturation",
+          "type": "integer"
+        },
+        "blur_px": {
+          "default": 0,
+          "maximum": 1.2,
+          "minimum": 0,
+          "title": "Blur Px",
+          "type": "number"
+        }
+      },
+      "title": "PhotoFix",
+      "type": "object"
+    },
+    "files": {
+      "type": "object",
+      "required": [
+        "png",
+        "psd"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "png": {
+          "type": "string",
+          "minLength": 1
+        },
+        "psd": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  "if": {
+    "properties": {
+      "status": {
+        "const": "passed"
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "final",
+      "outputs",
+      "scale_status",
+      "delivery"
+    ],
+    "properties": {
+      "scale_status": {
+        "const": "calibrated"
+      },
+      "final": {
+        "required": [
+          "scale",
+          "position"
+        ]
+      },
+      "delivery": {
+        "const": "formal"
+      }
+    }
+  },
+  "else": {
+    "required": [
+      "reason",
+      "reason_code"
+    ]
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "delivery"
+        ],
+        "properties": {
+          "delivery": {
+            "const": "estimated_preview"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "final",
+          "preview_outputs",
+          "scale_status"
+        ],
+        "properties": {
+          "status": {
+            "const": "review"
+          },
+          "scale_status": {
+            "const": "estimated"
+          },
+          "final": {
+            "required": [
+              "scale",
+              "position",
+              "photography"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "delivery"
+        ],
+        "properties": {
+          "delivery": {
+            "const": "formal"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "outputs"
+        ]
+      },
+      "then": {
+        "properties": {
+          "status": {
+            "const": "passed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "preview_outputs"
+        ]
+      },
+      "then": {
+        "required": [
+          "delivery"
+        ],
+        "properties": {
+          "delivery": {
+            "const": "estimated_preview"
+          }
+        }
+      }
+    }
+  ]
+}

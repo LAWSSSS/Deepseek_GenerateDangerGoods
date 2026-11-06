@@ -1,0 +1,165 @@
+"""Place a settled 3-D render on a verified open surface without 2-D pose fakery."""
+import math
+from pathlib import Path
+
+import cv2
+import numpy as np
+from PIL import Image
+
+from batch_v2 import save_mask
+from mesh_checks import placement_gate
+from metric_scale import silhouette_axes
+from photometry import fit_photo
+from relief import RELIEF_PRIORITY
+from scene_v2 import NeedsReview, read_image
+
+
+def mesh_view(folder, target, contacts):
+    """Scale one real Blender render and every component's projected contact patch together."""
+    rgba=np.asarray(read_image(folder/"object.png","RGBA"))
+    with Image.open(folder/"with-shadow.png") as im:
+        with_shadow=np.asarray(im.convert("RGB"),dtype=np.float32)
+    with Image.open(folder/"without-shadow.png") as im:
+        without_shadow=np.asarray(im.convert("RGB"),dtype=np.float32)
+    brightness_with=cv2.cvtColor(with_shadow,cv2.COLOR_RGB2GRAY)
+    brightness_without=cv2.cvtColor(without_shadow,cv2.COLOR_RGB2GRAY)
+    shadow=np.clip(1-brightness_with/np.maximum(brightness_without,8),0,1)
+    shadow[rgba[:,:,3]>1]=0
+    # Noise outside the rendered shadow is not an edit to the scene.
+    shadow=np.where(shadow>.035,shadow,0)
+    major=silhouette_axes(rgba[:,:,3])[0]
+    if major<=0:
+        raise NeedsReview("三维渲染没有物品像素")
+    scale=target/major
+    size=(max(1,round(rgba.shape[1]*scale)),max(1,round(rgba.shape[0]*scale)))
+    # Resize premultiplied RGB so transparent edges cannot pick up dark halos.
+    pixels=rgba.astype(np.float32)/255
+    pixels[:,:,:3]*=pixels[:,:,3:4]
+    pixels=cv2.resize(pixels,size,interpolation=cv2.INTER_AREA if scale<1 else cv2.INTER_LINEAR)
+    np.divide(pixels[:,:,:3],np.maximum(pixels[:,:,3:4],1/255),out=pixels[:,:,:3])
+    pixels=np.rint(np.clip(pixels,0,1)*255).astype(np.uint8)
+    shade=cv2.resize(shadow,size,interpolation=cv2.INTER_AREA if scale<1 else cv2.INTER_LINEAR)
+    bands=[]
+    for group in contacts:
+        points=np.rint(np.asarray(group,dtype=np.float32)*scale).astype(np.int32)
+        if len(points)<1:
+            raise NeedsReview("三维部件没有可投影的接触点")
+        mask=np.zeros(size[::-1],np.uint8)
+        points[:,0]=np.clip(points[:,0],0,size[0]-1)
+        points[:,1]=np.clip(points[:,1],0,size[1]-1)
+        if len(points)>=3:
+            cv2.fillConvexPoly(mask,cv2.convexHull(points),1)
+        else:
+            for point in points:
+                cv2.circle(mask,tuple(point),1,1,-1)
+        radius=max(1,round(.008*target))
+        mask=cv2.dilate(mask,cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(2*radius+1,2*radius+1)))
+        bands.append(mask>0)
+    occupied=(pixels[:,:,3]>0)|(shade>0)|np.logical_or.reduce(bands)
+    x,y,w,h=cv2.boundingRect(occupied.astype("uint8"))
+    if not w or not h:
+        raise NeedsReview("三维渲染为空")
+    crop=np.s_[y:y+h,x:x+w]
+    return pixels[crop],shade[crop],[band[crop] for band in bands]
+
+
+def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics_stable):
+    """Search only clear openings. Unknown intersecting scrap is never accepted."""
+    if candidate["placement_mode"]!="open":
+        raise NeedsReview("堆内钢件体积与物品的深度关系暂不能可靠核验")
+    pixels,shade,bands=view
+    target=candidate["target_px"]
+    l,t,r,b=candidate["crop_px"]
+    support=np.asarray(read_image(folder/candidate["id"]/"support.png","L"))>0
+    foreground=np.asarray(read_image(folder/candidate["id"]/"foreground.png","L"))>=128
+    clearance=atlas.clearance_crop(candidate["support_id"],candidate["crop_px"])
+    plane_distance=cv2.distanceTransform(support.astype("uint8"),cv2.DIST_L2,3)
+    solid=pixels[:,:,3]>=128
+    h,w=solid.shape
+    center=np.asarray(candidate["center_px"],dtype=float)-[l,t]
+    ideal=center-[w/2,h/2]
+    step=max(4,round(.05*target))
+    best=None
+    for dy in (0,-step,step,-2*step,2*step):
+        for dx in (0,-step,step,-2*step,2*step):
+            x,y=np.rint(ideal+[dx,dy]).astype(int)
+            if x<0 or y<0 or x+w>support.shape[1] or y+h>support.shape[0]:
+                continue
+            if t+y<math.ceil(.09*frame.height) or t+y+h>math.floor(.82*frame.height):
+                continue
+            area=np.s_[y:y+h,x:x+w]
+            bed=support[area]
+            parts=[float((part&bed).sum()/part.sum()) for part in bands]
+            if foreground[area][solid].any():
+                continue
+            gap=float(clearance[area][solid].min()) if solid.any() else 0
+            edge=float(plane_distance[area][solid].min()) if solid.any() else 0
+            if gap<max(6,.025*target) or edge<max(4,.012*target):
+                continue
+            evidence={"source_visible_fraction":source_visible_fraction,"physics_stable":physics_stable,
+                      "component_support":parts,"collision":False,"occlusion_order":"clear",
+                      # The scale must be separately supplied by reference consensus below.
+                      "scene_scale":candidate.get("scene_scale_status","unknown")}
+            issues=placement_gate(evidence)
+            if issues:
+                continue
+            context=atlas.native_position_context(candidate["support_id"],l+x,t+y,solid,target,None,
+                                                  measure_relief=True)
+            if context["relief"]["kind"]=="raised":
+                continue
+            rank=(RELIEF_PRIORITY.get(context["relief"]["kind"],0),
+                  -context["cost"], min(parts),min(1.,gap/(.16*target)))
+            if best is None or rank>best["rank"]:
+                best={"rank":rank,"origin":[int(l+x),int(t+y)],"pixels":pixels,
+                      "shadow":np.where(bed,shade,0),"scene_support":support,
+                      "contacts":bands,"evidence":evidence,"context":context,"candidate":candidate,
+                      "clearance_px":round(gap,2)}
+    if best is None:
+        raise NeedsReview("实际三维轮廓、部件接触点或场景尺度未通过空位检查")
+    return best
+
+
+def compose_spec(fit,frame,scratch,label):
+    candidate=fit["candidate"]
+    x,y=fit["origin"]
+    pixels=fit["pixels"]
+    h,w=pixels.shape[:2]
+    alpha=pixels[:,:,3]
+    shade=np.rint(np.clip(fit["shadow"]/.55,0,1)*255).astype(np.uint8)
+    # Restrict receiver edits to the actual support, never the rest of the scene.
+    l,t,r,b=candidate["crop_px"]
+    scratch.mkdir(parents=True,exist_ok=True)
+    object_path=scratch/"object.png"
+    asset=Image.fromarray(pixels)
+    box=asset.getchannel("A").getbbox()
+    if box is None:
+        raise NeedsReview("三维物品透明度为空")
+    asset.crop(box).save(object_path)
+    shadow_entry=save_mask(shade,scratch/"shadow.png",[x,y,x+w,y+h],(12,11,10))
+    if shadow_entry is None:
+        raise NeedsReview("三维物体没有可用的接触光影")
+    patch=frame.crop((l,t,r,b))
+    support=fit["scene_support"]
+    lx,ly=x-l,y-t
+    if lx<0 or ly<0 or lx+w>r-l or ly+h>b-t:
+        raise NeedsReview("物品或阴影超出允许编辑范围")
+    occupied=np.zeros(support.shape,np.uint8)
+    occupied[ly:ly+h,lx:lx+w]=alpha
+    distance=cv2.distanceTransform((occupied<128).astype("uint8"),cv2.DIST_L2,3)
+    nearby=(distance>.04*candidate["target_px"])&(distance<.28*candidate["target_px"])
+    tone,photography,grain=fit_photo(patch,nearby,asset,0,(box[3]-box[1],box[2]-box[0]))
+    # Retain 3-D shading and the approved color: avoid global blur and aggressive curves.
+    tone["blur_px"]=0
+    if tone.get("luma_curve"):
+        tone["luma_curve"]=[[a,round(.75*a+.25*z,2)] for a,z in tone["luma_curve"]]
+    spec={"id":label,"asset":object_path.as_posix(),
+          "center":[x+(box[0]+box[2])/2,y+(box[1]+box[3])/2],"width":box[2]-box[0],"angle":0,
+          "canvas":list(frame.size),"crop":candidate["crop_px"],"tone":tone,"shade":shadow_entry,
+          "occlusion":None,"object_alpha":(scratch/"alpha.png").as_posix(),
+          "png":(scratch/"render.png").as_posix(),"psd":(scratch/"render.psd").as_posix(),
+          "placement_mode":"open"}
+    if grain is not None:
+        grain_path=scratch/"grain.png"
+        Image.fromarray(grain).convert("RGB").save(grain_path)
+        spec["grain"]=grain_path.as_posix()
+    return spec,photography

@@ -1,0 +1,16 @@
+{
+  "planner": {
+    "url": "https://api.deepseek.com/chat/completions",
+    "model": "deepseek-flash",
+    "key_env": "PS_DEEPSEEK_KEY",
+    "reasoning_effort": "none",
+    "max_output_tokens": 192
+  },
+  "vision": {
+    "url": "https://api.deepseek.com/chat/completions",
+    "model": "deepseek-flash",
+    "key_env": "PS_DEEPSEEK_KEY",
+    "reasoning_effort": "none",
+    "max_output_tokens": 192
+  }
+}

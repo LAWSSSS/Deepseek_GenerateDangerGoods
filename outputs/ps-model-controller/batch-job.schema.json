@@ -1,0 +1,299 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$defs": {
+    "ObjectSize": {
+      "additionalProperties": false,
+      "properties": {
+        "major_mm": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "number"
+            },
+            {
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "number"
+            }
+          ],
+          "title": "Major Mm",
+          "type": "array"
+        },
+        "minor_mm": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "number"
+            },
+            {
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "number"
+            }
+          ],
+          "title": "Minor Mm",
+          "type": "array"
+        },
+        "basis": {
+          "enum": [
+            "measured",
+            "exact_catalog",
+            "similar_catalog"
+          ],
+          "title": "Basis",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "major_mm",
+        "minor_mm",
+        "basis",
+        "source"
+      ],
+      "title": "ObjectSize",
+      "type": "object"
+    },
+    "SceneReference": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "span_mm": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "number"
+            },
+            {
+              "maximum": 30000,
+              "minimum": 1,
+              "type": "number"
+            }
+          ],
+          "title": "Span Mm",
+          "type": "array"
+        },
+        "points": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "maximum": 1000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 1000,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "maximum": 1000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 1000,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            }
+          ],
+          "title": "Points",
+          "type": "array"
+        },
+        "id": {
+          "pattern": "^[A-Z][A-Z0-9]{0,7}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "basis": {
+          "enum": [
+            "measured",
+            "exact_catalog"
+          ],
+          "title": "Basis",
+          "type": "string"
+        },
+        "source": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "span_mm",
+        "points",
+        "id",
+        "basis",
+        "source"
+      ],
+      "title": "SceneReference",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "job_id": {
+      "pattern": "^[a-zA-Z0-9_-]{1,60}$",
+      "title": "Job Id",
+      "type": "string"
+    },
+    "background": {
+      "maxLength": 600,
+      "minLength": 1,
+      "title": "Background",
+      "type": "string"
+    },
+    "object": {
+      "anyOf": [
+        {
+          "maxLength": 600,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Object"
+    },
+    "objects": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 4,
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Objects"
+    },
+    "mode": {
+      "default": "metric",
+      "enum": [
+        "metric",
+        "preview"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "object_size": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ObjectSize"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "scene_references": {
+      "items": {
+        "$ref": "#/$defs/SceneReference"
+      },
+      "maxItems": 3,
+      "title": "Scene References",
+      "type": "array"
+    },
+    "width_range": {
+      "default": [
+        0.035,
+        0.1
+      ],
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "type": "number",
+          "minimum": 0.035,
+          "maximum": 0.3
+        },
+        {
+          "type": "number",
+          "minimum": 0.035,
+          "maximum": 0.3
+        }
+      ],
+      "title": "Width Range",
+      "type": "array"
+    }
+  },
+  "required": [
+    "job_id",
+    "background"
+  ],
+  "title": "Job",
+  "type": "object",
+  "oneOf": [
+    {
+      "required": [
+        "object"
+      ],
+      "properties": {
+        "object": {
+          "type": "string"
+        },
+        "objects": {
+          "type": "null"
+        }
+      }
+    },
+    {
+      "required": [
+        "objects"
+      ],
+      "properties": {
+        "objects": {
+          "type": "array"
+        },
+        "object": {
+          "type": "null"
+        }
+      }
+    }
+  ],
+  "description": "A singular object is an asset ID or photo path. Legacy objects holds views of the same photographed item."
+}

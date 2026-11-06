@@ -1,0 +1,14 @@
+/work/
+/external/
+/references/
+/vendor/
+/outputs/*
+!/outputs/ps-model-controller/
+__pycache__/
+*.py[cod]
+*.log
+*.psd
+*.glb
+.env
+.env.*
+!.env.example

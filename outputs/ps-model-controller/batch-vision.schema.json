@@ -1,0 +1,238 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Photoshop v3 vision responses",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SceneAnswer"
+    },
+    {
+      "$ref": "#/$defs/CandidateReview"
+    }
+  ],
+  "$defs": {
+    "SceneAnswer": {
+      "additionalProperties": false,
+      "properties": {
+        "zones": {
+          "items": {
+            "enum": [
+              "Z1",
+              "Z2",
+              "Z3",
+              "Z4"
+            ],
+            "type": "string"
+          },
+          "maxItems": 4,
+          "title": "Zones",
+          "type": "array"
+        },
+        "refs": {
+          "items": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "pattern": "^[A-Z][A-Z0-9]{0,7}$",
+                "type": "string"
+              },
+              {
+                "enum": [
+                  "plate",
+                  "beam",
+                  "channel",
+                  "pipe",
+                  "frame",
+                  "other"
+                ],
+                "type": "string"
+              },
+              {
+                "maximum": 30000,
+                "minimum": 1,
+                "type": "number"
+              },
+              {
+                "maximum": 30000,
+                "minimum": 1,
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "maxItems": 8,
+          "title": "Refs",
+          "type": "array"
+        },
+        "protect": {
+          "items": {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "maximum": 1000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "maximum": 1000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "maximum": 1000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "maximum": 1000,
+                "minimum": 0,
+                "type": "integer"
+              }
+            ],
+            "type": "array"
+          },
+          "maxItems": 4,
+          "title": "Protect",
+          "type": "array"
+        }
+      },
+      "required": [
+        "zones",
+        "refs"
+      ],
+      "title": "SceneAnswer",
+      "type": "object"
+    },
+    "CandidateReview": {
+      "additionalProperties": false,
+      "properties": {
+        "pick": {
+          "anyOf": [
+            {
+              "enum": [
+                "A",
+                "B",
+                "C"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pick"
+        },
+        "scores": {
+          "anyOf": [
+            {
+              "maxItems": 5,
+              "minItems": 5,
+              "prefixItems": [
+                {
+                  "maximum": 4,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 4,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 4,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 4,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "maximum": 4,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              ],
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scores"
+        },
+        "defects": {
+          "items": {
+            "enum": [
+              "floating",
+              "wrong_occlusion",
+              "wrong_scale",
+              "broken_shape",
+              "halo",
+              "overlay_changed"
+            ],
+            "type": "string"
+          },
+          "maxItems": 6,
+          "title": "Defects",
+          "type": "array"
+        },
+        "fix": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PhotoFix"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "pick",
+        "scores",
+        "defects"
+      ],
+      "title": "CandidateReview",
+      "type": "object"
+    },
+    "PhotoFix": {
+      "additionalProperties": false,
+      "properties": {
+        "brightness": {
+          "default": 0,
+          "maximum": 10,
+          "minimum": -10,
+          "title": "Brightness",
+          "type": "number"
+        },
+        "warmth": {
+          "default": 0,
+          "maximum": 6,
+          "minimum": -6,
+          "title": "Warmth",
+          "type": "number"
+        },
+        "saturation": {
+          "default": 0,
+          "maximum": 8,
+          "minimum": -12,
+          "title": "Saturation",
+          "type": "integer"
+        },
+        "blur_px": {
+          "default": 0,
+          "maximum": 1.2,
+          "minimum": 0,
+          "title": "Blur Px",
+          "type": "number"
+        }
+      },
+      "title": "PhotoFix",
+      "type": "object"
+    }
+  }
+}
