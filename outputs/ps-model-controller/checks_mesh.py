@@ -22,6 +22,7 @@ from mesh_runtime import run_bounded
 from mesh_scene import candidate_scale
 from mesh_visibility import coverage
 from batch_v2 import Budget, Runner
+from metric_scale import SceneReference
 from run import Config, Endpoint
 from scene_v2 import NeedsReview
 
@@ -76,6 +77,19 @@ class GeometryChecks(unittest.TestCase):
         changed["depth"][76:81,103:109]=.8
         with self.assertRaises(NeedsReview):
             candidate_scale(row,candidate,np.ones((30,100),np.uint8)*255,changed)
+
+    def test_saved_dimensions_can_be_checked_against_a_measured_reference(self):
+        ref=SceneReference(id="G1",label="measured steel edge",span_mm=(315,325),
+                           points=((400,500),(600,500)),basis="measured",source="test fixture")
+        scene={"size":(800,600),"depth":np.full((150,200),.5,dtype=np.float32),
+               "references":{"G1":ref}}
+        row=json.loads('{"physical_size":{"major_mm":[200,200],"minor_mm":[60,60],'
+                       '"basis":"measured","source":"test fixture"}}')
+        alpha=np.full((30,100),255,np.uint8)
+        candidate={"center_px":[400,300],"target_px":100.}
+        self.assertEqual(candidate_scale(row,candidate,alpha,scene)["status"],"calibrated")
+        with self.assertRaisesRegex(NeedsReview,"超出局部参照范围"):
+            candidate_scale(row,{**candidate,"target_px":105.},alpha,scene)
 
     def test_surface_coverage_uses_new_visible_pixels(self):
         source = np.array([[0,1,1],[0,2,2]], dtype=np.int32)

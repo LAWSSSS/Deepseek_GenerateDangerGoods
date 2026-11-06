@@ -1,4 +1,5 @@
 """Cached scene analysis and scale-consensus checks for the 3-D pilot."""
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Annotated
@@ -88,7 +89,8 @@ def candidate_scale(row,candidate,alpha,scene):
                 "projected_major_px_range":[round(target*.95,2),round(target*1.05,2)],
                 "reference_bounds_px":approved["bounds_px"],"relative_depth_delta":round(delta,4),
                 "distance_px":round(distance,1)}
-    size=ObjectSize.model_validate(row["physical_size"])
+    # The pilot reads persisted JSON, where dimensional tuples are arrays.
+    size=ObjectSize.model_validate_json(json.dumps(row["physical_size"]))
     fit=fit_consensus(alpha,scene["size"],depth,seat,size,list(scene["references"].values()))
     low,high=fit.record["projected_major_px_range"]
     if not low<=candidate["target_px"]<=high:
