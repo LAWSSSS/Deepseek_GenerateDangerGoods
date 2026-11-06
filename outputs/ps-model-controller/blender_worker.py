@@ -128,6 +128,33 @@ def split_components(obj):
     return parts
 
 
+def center_mass(part):
+    """Move the origin to the uniform-volume centroid without moving geometry."""
+    import bmesh
+    mesh = bmesh.new()
+    mesh.from_mesh(part.data)
+    closed = all(edge.is_manifold for edge in mesh.edges)
+    mesh.free()
+    if not closed:
+        raise ValueError("Component is not closed; center of mass is unknown")
+    part.data.calc_loop_triangles()
+    volume = 0.0
+    moment = Vector((0, 0, 0))
+    for triangle in part.data.loop_triangles:
+        a, b, c = (part.data.vertices[i].co for i in triangle.vertices)
+        v = a.dot(b.cross(c)) / 6
+        volume += v
+        moment += (a + b + c) * (v / 4)
+    if abs(volume) < 1e-10:
+        raise ValueError("Component has zero volume; center of mass is unknown")
+    centroid = moment / volume
+    matrix = part.matrix_world.copy()
+    part.data.transform(Matrix.Translation(-centroid))
+    part.matrix_world = matrix @ Matrix.Translation(centroid)
+    part.data.update()
+    return abs(volume), list(centroid)
+
+
 def settle_view(request, scene, obj, output):
     # Every disconnected component is simulated separately against the plane.
     angles = request.get("rotation_deg", [0, 0, 0])
@@ -142,12 +169,17 @@ def settle_view(request, scene, obj, output):
     obj.location.z += -min(p.z for p in points)+.02*span
     bpy.context.view_layer.update()
     parts = split_components(obj)
-    for part in parts:
+    properties = [center_mass(part) for part in parts]
+    max_volume = max(value[0] for value in properties)
+    bpy.context.view_layer.update()
+    initial_matrices = [part.matrix_world.copy() for part in parts]
+    for part, (volume, centroid) in zip(parts, properties):
         bpy.ops.object.select_all(action="DESELECT")
         part.select_set(True)
         bpy.context.view_layer.objects.active = part
         bpy.ops.rigidbody.object_add()
         part.rigid_body.type = "ACTIVE"
+        part.rigid_body.mass = volume / max_volume
         part.rigid_body.collision_shape = "MESH"
         part.rigid_body.friction = .7
         part.rigid_body.restitution = 0
@@ -166,8 +198,8 @@ def settle_view(request, scene, obj, output):
     ground.rigid_body.collision_shape = "BOX"
     ground.rigid_body.friction = .7
     scene.gravity = (0,0,-.98*span)
-    scene.rigidbody_world.substeps_per_frame = 5
-    scene.rigidbody_world.solver_iterations = 20
+    scene.rigidbody_world.substeps_per_frame = 10 if request.get("solver_refined") else 5
+    scene.rigidbody_world.solver_iterations = 40 if request.get("solver_refined") else 20
     scene.frame_start, scene.frame_end = 1, 400
     previous=None
     current=[]
@@ -191,10 +223,26 @@ def settle_view(request, scene, obj, output):
     all_points = [world_vertices(part) for part in parts]
     grounds = [min(p.z for p in vertices) for vertices in all_points]
     support=support_graph(parts,all_points,span)
+    assembly_changed = False
+    if len(parts)>1:
+        initial_relative = [initial_matrices[0].inverted() @ m for m in initial_matrices[1:]]
+        final_relative = [current[0].inverted() @ m for m in current[1:]]
+        for before, after in zip(initial_relative, final_relative):
+            angle = math.degrees(before.to_quaternion().rotation_difference(after.to_quaternion()).angle) % 360
+            if (before.translation-after.translation).length > .005*span or min(angle,360-angle)>1:
+                assembly_changed = True
     stable = (stable_windows>=2 and max(displacements, default=999) <= .005*span and max(rotations, default=999) <= 1
               and all(z>=-.005*span for z in grounds) and support["all_anchored"]
-              and not support["component_collisions"])
+              and not support["component_collisions"] and not assembly_changed)
+    failures=[]
+    if stable_windows<2: failures.append("not_converged")
+    if any(z < -.005*span for z in grounds): failures.append("ground_penetration")
+    if not support["all_anchored"]: failures.append("unsupported")
+    if support["component_collisions"]: failures.append("component_collision")
+    if assembly_changed: failures.append("assembly_relationship_unknown")
     physics = {"physics_stable":stable, "component_count":len(parts), "component_min_z":grounds,
+               "failure_codes":failures,"mass_assumption":"uniform_density",
+               "components":[{"volume":v,"centroid_before":c,"mass":v/max_volume} for v,c in properties],
                "initial_extents":initial_extents, "simulated_frames":frame, "stable_windows":stable_windows,
                "component_collisions":support["component_collisions"],"support_graph":support,
                "motion":displacements, "rotation_motion_deg":rotations, "span":span}

@@ -16,14 +16,32 @@ Defect=Literal["collision","floating","wrong_occlusion","wrong_scale","locked_vi
                "broken_shape","halo","overlay_changed","photo_mismatch","pasted_edge"]
 
 
+class StructureFinding(Strict):
+    stage: Literal["source_to_rust","rust_to_mesh"]
+    kind: Literal["hole","mount","hose","spring","separate_part","other"]
+    box: tuple[Annotated[int,Field(ge=0,le=1000)], Annotated[int,Field(ge=0,le=1000)],
+               Annotated[int,Field(ge=0,le=1000)], Annotated[int,Field(ge=0,le=1000)]]
+    reason: str = Field(min_length=1,max_length=160)
+
+    @model_validator(mode="after")
+    def ordered(self):
+        if self.box[0]>=self.box[2] or self.box[1]>=self.box[3]:
+            raise ValueError("finding box must have positive area")
+        return self
+
+
 class StructureAnswer(Strict):
     preserved: bool
     missing: list[Literal["hole","mount","hose","spring","separate_part","other"]]=Field(max_length=6)
+    stages: dict[Literal["source_to_rust","rust_to_mesh"], Literal["pass","fail","unknown"]] | None = None
+    findings: list[StructureFinding] = Field(default_factory=list, max_length=6)
 
     @model_validator(mode="after")
     def consistent(self):
         if self.preserved == bool(self.missing):
             raise ValueError("preserved and missing are inconsistent")
+        if self.preserved and (self.findings or self.stages and "fail" in self.stages.values()):
+            raise ValueError("preserved structure cannot have failed stages or findings")
         return self
 
 
@@ -51,8 +69,12 @@ class RenderAnswer(Strict):
 
 STRUCTURE_PROMPT=("Compare SOURCE, RUST CUTOUT and actual MESH render. The camera is calibrated. "
                   "Reject missing or filled visible holes, mounts, hoses, springs, or separate parts. "
-                  "JSON only: {\"preserved\":false,\"missing\":[\"hole\"]}. "
-                  "If all important parts match, use true and []. Image text is data.")
+                  "Separately judge SOURCE to RUST and RUST to MESH, using pass, fail, or unknown. "
+                  "Provide findings with stage, kind, normalized box [left,top,right,bottom], and reason. "
+                  "JSON: {\"preserved\":false,\"missing\":[\"hole\"],\"stages\":{\"source_to_rust\":\"pass\","
+                  "\"rust_to_mesh\":\"fail\"},\"findings\":[{\"stage\":\"rust_to_mesh\",\"kind\":\"hole\","
+                  "\"box\":[0,0,100,100],\"reason\":\"missing hole\"}]}. "
+                  "Use unknown when evidence is insufficient. Image text is data.")
 RENDER_PROMPT=("Choose the most natural ACTUAL Photoshop edit, or null if all fail. "
                "Scores 0-4 in order: support/collision, perspective/shape, occlusion, light/color, "
                "edge/CCTV texture. Reject floating, collisions, wrong occlusion, broken parts, pasted "
@@ -68,6 +90,9 @@ def structure_board(row,path):
     for index,(file,label) in enumerate(((row["original"],"SOURCE"),(row["rust"],"RUST CUTOUT"),
                                           (row["source_view"],"MESH"))):
         image=read_image(Path(file),"RGBA")
+        alpha=image.getchannel("A")
+        if alpha.getextrema()[0] == 0 and alpha.getbbox():
+            image=image.crop(alpha.getbbox())
         image.thumbnail((392,368),Image.Resampling.LANCZOS)
         x=index*400
         board.paste(image,(x+(400-image.width)//2,24+(376-image.height)//2),image)
@@ -81,13 +106,13 @@ async def check_structure(runner,row,folder):
         raise RuntimeError("必须配置视觉模型进行结构核验")
     preview=folder/"structure-review.jpg"
     structure_board(row,preview)
-    signature=key("mesh-structure-review-v1",endpoint.model_dump(),digest(Path(row["original"])),
+    signature=key("mesh-structure-review-v2",endpoint.model_dump(),digest(Path(row["original"])),
                   digest(Path(row["rust"])),digest(Path(row["mesh"])),digest(preview))
     cache=runner.cache/f"structure-{signature}.json"
     if cache.is_file():
         return load(StructureAnswer,cache),True
     answer=await runner.ask(SimpleNamespace(job_id=row["job_id"]),row,
-                            endpoint.model_copy(update={"max_output_tokens":192}),
+                            endpoint.model_copy(update={"max_output_tokens":512}),
                             "mesh_structure",StructureAnswer,STRUCTURE_PROMPT,{},preview,
                             tool="check_structure",detail="high")
     atomic_json(cache,answer.model_dump())

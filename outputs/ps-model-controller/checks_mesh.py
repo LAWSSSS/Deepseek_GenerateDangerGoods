@@ -20,7 +20,7 @@ from mesh_placement import compose_spec, open_fit
 from mesh_optimize import optimize
 from mesh_runtime import run_bounded
 from mesh_scene import candidate_scale
-from mesh_visibility import coverage
+from mesh_visibility import coverage, fragments
 from batch_v2 import Budget, Runner
 from metric_scale import SceneReference
 from run import Config, Endpoint
@@ -28,6 +28,43 @@ from scene_v2 import NeedsReview
 
 
 class GeometryChecks(unittest.TestCase):
+    def test_zbuffer_resolves_crossing_depths_per_pixel(self):
+        triangles=np.array([[[-.8,-.8,1],[.8,-.8,3],[0,.8,2]],
+                            [[-.8,-.8,2],[.8,-.8,2],[0,.8,2]]],dtype=float)
+        camera={'eye':[0,0,0],'target':[0,0,1],'up':[0,1,0],'orthographic_scale':2}
+        labels,_,_=fragments(triangles,camera,128)
+        self.assertEqual(labels[90,35],1)
+        self.assertEqual(labels[90,93],0)
+
+    def test_partial_triangle_visibility_is_not_whole_face_evidence(self):
+        from mesh_visibility import _coverage
+        source=np.array([[[-.8,-.8,2],[.8,-.8,2],[0,.8,2]],
+                         [[-.8,-.8,1.5],[0,-.8,1.5],[0,.8,1.5]]],dtype=float)
+        posed=source.copy(); posed[1,:,0]+=4
+        camera={'eye':[0,0,0],'target':[0,0,1],'up':[0,1,0],'orthographic_scale':2}
+        src,_,_=fragments(source,camera,256); dst,_,_=fragments(posed,camera,256)
+        fraction,_=_coverage(source,np.array([0,1]),posed,np.array([0,1]),camera,camera,
+                             (src>=0).astype('uint8')*255,(dst>=0).astype('uint8')*255,
+                             (src>=0).astype('uint8')*255,256)
+        self.assertIsNotNone(fraction)
+        self.assertLess(fraction,.9)
+        self.assertGreater(fraction,.1)
+
+    def test_same_camera_view_retains_visible_surface(self):
+        from mesh_visibility import _coverage
+        triangles=np.array([[[-.8,-.8,2],[.8,-.8,2],[0,.8,2]]],dtype=float)
+        camera={'eye':[0,0,0],'target':[0,0,1],'up':[0,1,0],'orthographic_scale':2}
+        labels,_,_=fragments(triangles,camera,256)
+        alpha=(labels>=0).astype('uint8')*255
+        fraction,_=_coverage(triangles,np.array([0]),triangles,np.array([0]),camera,camera,
+                             alpha,alpha,alpha,256)
+        self.assertGreater(fraction,.99)
+
+    def test_structure_review_rejects_contradictory_stage(self):
+        with self.assertRaises(ValueError):
+            StructureAnswer.model_validate_json('{"preserved":true,"missing":[],"stages":'
+                 '{"source_to_rust":"pass","rust_to_mesh":"fail"}}')
+
     def test_hole_cannot_be_hidden_by_good_iou(self):
         mask = np.zeros((160, 160), np.uint8)
         cv2.rectangle(mask, (15, 20), (145, 140), 255, -1)

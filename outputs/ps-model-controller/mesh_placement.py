@@ -47,14 +47,11 @@ def mesh_view(folder, target, contacts):
         mask=np.zeros(size[::-1],np.uint8)
         points[:,0]=np.clip(points[:,0],0,size[0]-1)
         points[:,1]=np.clip(points[:,1],0,size[1]-1)
-        if len(points)>=3:
-            cv2.fillConvexPoly(mask,cv2.convexHull(points),1)
-        else:
-            for point in points:
-                cv2.circle(mask,tuple(point),1,1,-1)
         radius=max(1,round(.008*target))
-        mask=cv2.dilate(mask,cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(2*radius+1,2*radius+1)))
-        bands.append(mask>0)
+        for point in points:
+            cv2.circle(mask,tuple(point),radius,1,-1)
+        count,components=cv2.connectedComponents(mask)
+        bands.extend(components==i for i in range(1,count))
     occupied=(pixels[:,:,3]>0)|(shade>0)|np.logical_or.reduce(bands)
     x,y,w,h=cv2.boundingRect(occupied.astype("uint8"))
     if not w or not h:
@@ -111,7 +108,7 @@ def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics
                   -context["cost"], min(parts),min(1.,gap/(.16*target)))
             if best is None or rank>best["rank"]:
                 best={"rank":rank,"origin":[int(l+x),int(t+y)],"pixels":pixels,
-                      "shadow":np.where(bed,shade,0),"scene_support":support,
+                      "shadow":np.where(bed,shade,0),"scene_support":support,"scene_foreground":foreground,
                       "contacts":bands,"evidence":evidence,"context":context,"candidate":candidate,
                       "clearance_px":round(gap,2)}
     if best is None:
@@ -146,7 +143,8 @@ def compose_spec(fit,frame,scratch,label):
     occupied=np.zeros(support.shape,np.uint8)
     occupied[ly:ly+h,lx:lx+w]=alpha
     distance=cv2.distanceTransform((occupied<128).astype("uint8"),cv2.DIST_L2,3)
-    nearby=(distance>.04*candidate["target_px"])&(distance<.28*candidate["target_px"])
+    nearby=(distance>.04*candidate["target_px"])&(distance<.28*candidate["target_px"]) & support
+    nearby &= ~fit.get("scene_foreground",np.zeros_like(support))
     tone,photography,grain=fit_photo(patch,nearby,asset,0,(box[3]-box[1],box[2]-box[0]))
     # Retain 3-D shading and the approved color: avoid global blur and aggressive curves.
     tone["blur_px"]=0

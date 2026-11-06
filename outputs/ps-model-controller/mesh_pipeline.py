@@ -31,7 +31,7 @@ from scene_pose import PoseAtlas
 from scene_v2 import NeedsReview, Perception, atomic_json, digest, key, read_image
 
 HERE=Path(__file__).resolve().parent
-VERSION="mesh-pipeline-v1"
+VERSION="mesh-pipeline-v2"
 ROTATIONS=((0,0,0),(0,90,0),(0,0,90))
 
 
@@ -71,6 +71,7 @@ def valid_zone(candidate,scene):
 def prepare_views(row,folder,args,scene):
     views=[]
     orbit=[]
+    deadline=time.monotonic()+600
     row["pose_attempts"]=[]
     reference_alpha=Path(row["source_view"]).parent/"source-alpha.png"
     with Image.open(row["source_view"]) as source,Image.open(reference_alpha) as original:
@@ -78,29 +79,47 @@ def prepare_views(row,folder,args,scene):
         reference_mask=np.asarray(original.convert("L"))
     source_camera=row["reconstruction"]["source_camera"]
 
-    def check(index,rotation,azimuth=0):
+    def check(index,rotation,azimuth=0,elevation=None,record_view=True):
+        remaining=deadline-time.monotonic()
+        if remaining<=1:
+            row["pose_attempts"].append({"rotation_deg":rotation,"reason":"单件姿态诊断达到 600 秒限制"})
+            return
         dest=folder/"views"/str(index)
         dest.mkdir(parents=True,exist_ok=True)
         request=dest/"request.json"
         request.write_text(json.dumps({"mesh":row["mesh"],"out":str(dest),"rotation_deg":rotation,
                                        "render_device":args.render_device,
                                        "camera_azimuth_deg":azimuth,
-                                       "camera_elevation_deg":scene["camera_elevation_deg"]}),encoding="utf8")
+                                       "camera_elevation_deg":scene["camera_elevation_deg"] if elevation is None else elevation}),encoding="utf8")
         execution=run_bounded([args.blender,"--background","--factory-startup","--python-exit-code","1","--python",
                                HERE/"settled_mesh_worker.py","--",request],
-                              log=dest/"blender.log",seconds=300)
-        attempt={"rotation_deg":rotation,"camera_azimuth_deg":azimuth,"execution":execution}
+                              log=dest/"blender.log",seconds=min(300,max(1,remaining)))
+        attempt={"rotation_deg":rotation,"camera_azimuth_deg":azimuth,"camera_elevation_deg":elevation if elevation is not None else scene["camera_elevation_deg"],"execution":execution}
         row["pose_attempts"].append(attempt)
         if execution["state"]!="ok" or not (dest/"blender-result.json").is_file():
             attempt.update(reason="三维姿态渲染失败",detail=safe_tail(dest/"blender.log",220))
             return
         result=json.loads((dest/"blender-result.json").read_text(encoding="utf8"))
+        failures=set(result.get("failure_codes",[]))
+        if (not result["physics_stable"] and failures <= {"ground_penetration","unsupported","not_converged"}
+                and failures & {"ground_penetration","not_converged"} and deadline-time.monotonic()>1):
+            attempt["initial_failure_codes"]=sorted(failures)
+            params=json.loads(request.read_text(encoding="utf8"))
+            request.write_text(json.dumps({**params,"solver_refined":True}),encoding="utf8")
+            retry=run_bounded([args.blender,"--background","--factory-startup","--python-exit-code","1","--python",
+                               HERE/"settled_mesh_worker.py","--",request],log=dest/"blender-refined.log",
+                              seconds=min(300,max(1,deadline-time.monotonic())))
+            attempt["refined_execution"]=retry
+            if retry["state"]!="ok":
+                attempt.update(reason="高精度刚体复验失败",detail=safe_tail(dest/"blender-refined.log",220))
+                return
+            result=json.loads((dest/"blender-result.json").read_text(encoding="utf8"))
         attempt["physics"]={name:result.get(name) for name in
                             ("component_count","component_min_z","component_collisions",
                              "motion","rotation_motion_deg","span","simulated_frames","stable_windows",
-                             "support_graph")}
+                             "support_graph","failure_codes","mass_assumption","components")}
         if not result["physics_stable"]:
-            attempt["reason"]="刚体未落稳或独立部件悬空"
+            attempt["reason"]="刚体验证失败："+",".join(result.get("failure_codes",[]))
             return
         if not (dest/"triangles.npz").is_file():
             attempt["reason"]="稳定姿态缺少同网格的可见面证据"
@@ -110,24 +129,45 @@ def prepare_views(row,folder,args,scene):
                                 np.asarray(posed.getchannel("A")),reference_mask)
         attempt["visibility"]=visibility
         if not visibility["known"] or visibility["source_visible_fraction"]<.80:
-            attempt["reason"]="新视角露出过多未经原照片验证的表面"
+            attempt["reason"]=("可见面证据不确定："+visibility.get("reason","") if not visibility["known"]
+                               else "新视角露出过多未经原照片验证的表面")
             if azimuth==0 and visibility["known"]:
                 orbit.append((dest,result,rotation))
             return
-        views.append((dest,{**result,"rotation_deg":rotation},visibility))
+        found=(dest,{**result,"rotation_deg":rotation},visibility)
+        if record_view:
+            views.append(found)
+        return found
 
     for index,rotation in enumerate(ROTATIONS):
         check(index,rotation)
     if not views and orbit:
-        guesses=[(fraction,degrees,rotation) for dest,result,rotation in orbit
-                 for degrees,fraction in orbit_estimates(dest/"triangles.npz",source_camera,
-                                                          result["camera"],source_mask,reference_mask)]
+        guesses=[]
+        for dest,result,rotation in orbit:
+            for degrees,fraction in orbit_estimates(dest/"triangles.npz",source_camera,result["camera"],source_mask,reference_mask):
+                if time.monotonic()>=deadline:
+                    break
+                guesses.append((fraction,degrees,rotation))
         if guesses:
             fraction,degrees,rotation=max(guesses,key=lambda guess:guess[0])
             row["orbit_estimate"]={"visible_fraction":round(fraction,4),
                                    "camera_azimuth_deg":degrees,"rotation_deg":rotation}
             if fraction>=.80:
                 check(len(ROTATIONS),rotation,degrees)
+    interval=scene.get("camera_elevation_interval")
+    if views and interval:
+        # Limit to one midpoint candidate so the three base poses, optional
+        # orbit, and two uncertainty checks stay within six attempts.
+        midpoint=views[0]
+        rotation=midpoint[1]["rotation_deg"]
+        azimuth=midpoint[1]["camera"]["azimuth_deg"]
+        verified=[check(len(row["pose_attempts"]),rotation,azimuth,angle,False) for angle in interval]
+        if not all(verified):
+            row["camera_interval_review"]="俯角区间端点未全部通过姿态与可见面检查"
+            views=[]
+        else:
+            views=[(midpoint[0],{**midpoint[1],"interval_views":verified},midpoint[2])]
+            row["camera_interval_review"]="pass"
     return views
 
 
@@ -231,6 +271,7 @@ async def pipeline(args):
         for source_row in sorted(source_rows,key=lambda item:item["number"]):
             started=time.monotonic()
             row=dict(source_row)
+            row["schema_version"]=2
             folder=args.out/"items"/f"{row['number']:02}-{row['asset_id']}"
             folder.mkdir(parents=True,exist_ok=True)
             row["folder"]=folder.relative_to(args.out).as_posix()
@@ -244,6 +285,7 @@ async def pipeline(args):
             row["signature"]=key(VERSION,source_row["signature"],digest(HERE/"mesh_pipeline.py"),
                                  digest(HERE/"mesh_runtime.py"),digest(HERE/"mesh_checks.py"),digest(HERE/"mesh_ai.py"),
                                  digest(HERE/"mesh_scene.py"),digest(HERE/"mesh_placement.py"),
+                                 digest(HERE/"scene_pose.py"),digest(HERE/"pose_retest.py"),
                                  digest(HERE/"settled_mesh_worker.py"),digest(HERE/"mesh_visibility.py"),
                                  digest(HERE/"blender_worker.py"),digest(HERE/"blender_support.py"),
                                  row["approved_size_reference"],args.render_device,cached_angle,digest(args.config))
@@ -282,15 +324,31 @@ async def pipeline(args):
                     raise NeedsReview("三维结构未通过原视角轮廓或孔洞检查")
                 if not answer.preserved:
                     raise NeedsReview("视觉模型发现关键结构缺失："+",".join(answer.missing))
+                if not answer.stages or any(answer.stages.get(stage)!="pass" for stage in ("source_to_rust","rust_to_mesh")):
+                    raise NeedsReview("视觉结构分阶段证据缺失或不确定")
                 frame=frame or read_image(background)
                 engine=engine or Perception(args.weights,args.cache)
                 atlas=atlas or PoseAtlas(*engine.scene(background))
                 scene=await analyze_scene(runner,row,background,frame,engine,folder)
+                atlas.elevation=scene["camera_elevation_deg"]
                 row["scene_analysis"]={"answer":scene["answer"].model_dump(),"cache_hit":scene["cache_hit"]}
                 row["protected"]=scene["protected"]
                 proposal_folder=folder/"proposals"
                 proposal_folder.mkdir(exist_ok=True)
+                def scale_filter(item):
+                    _,projection,x,y,surface,_,_,_,_,_,target,_=item
+                    center=atlas.screen(np.array([[x,y]]))[0]
+                    candidate={"center_px":center,"target_px":target}
+                    if not valid_zone(candidate,scene):
+                        return "outside_approved_zone"
+                    try:
+                        candidate_scale(row,candidate,projection.solid.astype(np.uint8)*255,scene)
+                    except NeedsReview as issue:
+                        return getattr(issue,"code","scale_uncertain")
+                    return None
+                atlas.candidate_filter=scale_filter
                 proposals=prepare_item(proposal_folder,dict(row),atlas,frame,engine)
+                atlas.candidate_filter=None
                 views=await asyncio.to_thread(prepare_views,row,folder,args,scene)
                 if not views:
                     raise NeedsReview("现有三维模型没有稳定且可验证的姿态")
@@ -309,6 +367,19 @@ async def pipeline(args):
                             fit=open_fit(actual,proposal_folder,atlas,frame,pixels,
                                          source_visible_fraction=visibility["source_visible_fraction"],
                                          physics_stable=result["physics_stable"])
+                            h,w=fit["pixels"].shape[:2]
+                            fitted={**actual,"center_px":[fit["origin"][0]+w/2,fit["origin"][1]+h/2]}
+                            if not valid_zone(fitted,scene):
+                                raise NeedsReview("实际位置不在认可区域")
+                            scale=candidate_scale(row,fitted,fit["pixels"][:,:,3],scene)
+                            for endpoint_view,endpoint_result,endpoint_visibility in result.get("interval_views",[]):
+                                endpoint_pixels=mesh_view(endpoint_view,candidate["target_px"],endpoint_result["contacts_px"])
+                                candidate_scale(row,actual,endpoint_pixels[0][:,:,3],scene)
+                                endpoint_fit=open_fit(actual,proposal_folder,atlas,frame,endpoint_pixels,
+                                                      source_visible_fraction=endpoint_visibility["source_visible_fraction"],
+                                                      physics_stable=endpoint_result["physics_stable"])
+                                if math.dist(fit["origin"],endpoint_fit["origin"])>2:
+                                    raise NeedsReview("俯角范围内接触位置不一致")
                             fit.update(pose={"rotation_deg":result["rotation_deg"],"matrices":result["matrices"],
                                              "camera":result["camera"]},scale=scale)
                             fits.append(fit)
@@ -328,6 +399,25 @@ async def pipeline(args):
                 row.update(status="review",code="pipeline_review",reason=str(error)[:250])
                 if source_row.get("code")=="reconstruction_failed":
                     row["code"]="reconstruction_failed"
+            attempts=row.get("pose_attempts",[])
+            observed=[a.get("visibility") for a in attempts if a.get("visibility")]
+            known=[v["source_visible_fraction"] for v in observed if v.get("known")]
+            physical=[a["physics"] for a in attempts if a.get("physics")]
+            structure=row.get("structure_review")
+            row["checks"]={
+                "source_fidelity":{"status":"pass" if fidelity.get("passed") else "fail", "value":fidelity,
+                                   "thresholds":{"iou":.90,"thin_recall":.80,"filled_holes":0}},
+                "structure":{"status":("unknown" if not structure else "fail" if structure.get("preserved") is False else
+                                         "pass" if structure.get("stages") and all(structure["stages"].get(k)=="pass" for k in ("source_to_rust","rust_to_mesh")) else "unknown"),
+                             "evidence":structure},
+                "physics":{"status":"unknown" if not physical else "pass" if any(p.get("support_graph",{}).get("all_anchored") and not p.get("failure_codes") for p in physical) else "fail",
+                           "evidence":[p.get("failure_codes") for p in physical]},
+                "source_visibility":{"status":"pass" if known and max(known)>=.8 else "unknown" if not known or any(not v.get("known") for v in observed) else "fail",
+                                     "value":max(known) if known else None,"threshold":.8,
+                                     "version":"visibility-zbuffer-v2"},
+                "scene_scale":{"status":"pass" if row.get("status")=="pilot_review" else "unknown",
+                               "rejections":row.get("placement_rejections",[])},
+            }
             row["token_usage"]=budget.image_usage(row)
             row["elapsed_seconds"]=round(time.monotonic()-started,2)
             atomic_json(marker,row)

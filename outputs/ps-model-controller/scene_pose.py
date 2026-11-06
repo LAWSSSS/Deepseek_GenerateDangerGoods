@@ -97,8 +97,8 @@ def rotation(yaw,pitch,roll):
             np.array([[1,0,0],[0,cc,-sc],[0,sc,cc]]))
 
 
-def project(xyz):
-    elev=math.radians(ELEVATION)
+def project(xyz, elevation=ELEVATION):
+    elev=math.radians(elevation)
     x,y,z=xyz.T
     return np.column_stack((x,-math.sin(elev)*y-math.cos(elev)*z))
 
@@ -122,22 +122,22 @@ class Projection:
     axis: np.ndarray
 
 
-def make_projection(parts, feet, yaw, pitch, roll, major):
+def make_projection(parts, feet, yaw, pitch, roll, major, elevation=ELEVATION):
     matrix=rotation(yaw,pitch,roll)
     shapes=[(v@matrix.T,faces) for v,faces in parts]
     zmin=min(v[:,2].min() for v,_ in shapes)
     shapes=[(v-[0,0,zmin],faces) for v,faces in shapes]
     points=np.vstack([v for v,_ in shapes])
-    projected=project(points)
+    projected=project(points,elevation)
     scale=major/silhouette(projected)
     hull=cv2.convexHull((projected*scale).astype(np.float32)).reshape(-1,2)
-    floors=project(points*np.array([1,1,0]))*scale
+    floors=project(points*np.array([1,1,0]),elevation)*scale
     footprint=cv2.convexHull(floors.astype(np.float32)).reshape(-1,2)
     contact_xy=np.asarray(feet)
     if contact_xy.ndim==1:
         contact_xy=np.c_[contact_xy,np.zeros(len(feet))]
-    contacts=project((np.c_[contact_xy,np.zeros(len(feet))]@matrix.T)*[1,1,0])*scale
-    axis=project((np.array([[-.44,0,.16],[.44,0,.16]])@matrix.T)-[0,0,zmin])*scale
+    contacts=project((np.c_[contact_xy,np.zeros(len(feet))]@matrix.T)*[1,1,0],elevation)*scale
+    axis=project((np.array([[-.44,0,.16],[.44,0,.16]])@matrix.T)-[0,0,zmin],elevation)*scale
     both=np.vstack((hull,footprint))
     left,top=np.floor(both.min(axis=0)).astype(int)-2
     right,bottom=np.ceil(both.max(axis=0)).astype(int)+3
@@ -146,7 +146,7 @@ def make_projection(parts, feet, yaw, pitch, roll, major):
     high=np.full(shape,-np.inf,np.float32)
     mesh=[]
     for vertices,faces in shapes:
-        xy=project(vertices)*scale
+        xy=project(vertices,elevation)*scale
         for face in faces:
             ids=list(face)
             mesh.append((xy[ids],float(np.mean(-vertices[ids,1]+vertices[ids,2]))))
@@ -188,6 +188,7 @@ class Surface:
 class PoseAtlas:
     def __init__(self, rgb, depth, masks, size):
         self.rgb,self.depth,self.masks,self.size=rgb,depth,masks,size
+        self.elevation=ELEVATION
         h,w=depth.shape
         self.factor=np.array([size[0]/w,size[1]/h])
         self.safe=np.ones((h,w),bool)
@@ -316,7 +317,7 @@ class PoseAtlas:
             major=target/self.factor[0]
             stride=max(4,min(26,round(major*.13)))
             for yaw,pitch,roll in poses:
-                p=make_projection(parts,feet,yaw,pitch,roll,major)
+                p=make_projection(parts,feet,yaw,pitch,roll,major,self.elevation)
                 direction=None
                 if discreet and kind in ("ram","shock"):
                     axis=p.axis[1]-p.axis[0]
@@ -385,7 +386,7 @@ class PoseAtlas:
                         noise=max(STEP_MARGIN,surface.error*1.7)
                         # A relative depth gradient along the bed is the local depth conversion.
                         step=float(np.clip((surface.plane[min(y+1,self.depth.shape[0]-1),x]-
-                                            surface.plane[y,x])/math.cos(math.radians(ELEVATION)),.001,.0042))
+                                            surface.plane[y,x])/math.cos(math.radians(self.elevation)),.001,.0042))
                         lo,hi=predicted+p.low*step,predicted+p.high*step
                         above=observed>hi+noise
                         conflict_px=p.solid & ~surface.near[region] & (observed>lo+noise) & ~above
@@ -435,6 +436,12 @@ class PoseAtlas:
         selected=[]
         for item in ranked:
             _,_,x,y,surface,_,_,_,_,_,target,pose=item
+            candidate_filter=getattr(self,"candidate_filter",None)
+            if candidate_filter is not None:
+                reason=candidate_filter(item)
+                if reason:
+                    reasons[reason]+=1
+                    continue
             spacing=max(10,target/self.factor[0]*.25) if discreet else max(25,target/self.factor[0]*.45)
             if any(math.hypot(x-q[2],y-q[3])<spacing
                    and ((not discreet and surface.piece==q[4].piece) or abs(pose[0]-q[-1][0])<28) for q in selected):

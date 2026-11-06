@@ -306,7 +306,7 @@ def prepare_item(folder,row,atlas,frame,engine,*,skip_open=False):
             id=ident,crop_px=list(crop),target_px=target,center_px=atlas.screen([[x,y]])[0],
             placement_mode="open" if open_bed else "scrap",stance=stance,
             contacts_px=atlas.screen(projection.contacts+[x,y]),hull_px=atlas.screen(projection.hull+[x,y]),
-            axis_px=atlas.screen(projection.axis+[x,y]),pose_deg=list(pose),camera_elevation_deg=ELEVATION,
+            axis_px=atlas.screen(projection.axis+[x,y]),pose_deg=list(pose),camera_elevation_deg=atlas.elevation,
             support_id=f"S{surface.piece}",front_ids=[f"S{i}" for i in fronts],footprint_fit=round(supported,3),
             projected_cover=round(covered,3),depth_conflict=round(collision,3),unresolved=round(unknown,3),
             edge_agreement=round(edge,3) if edge is not None else None,score=round(score,4)))

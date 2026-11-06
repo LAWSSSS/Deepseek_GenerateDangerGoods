@@ -64,7 +64,7 @@ async def analyze_scene(runner,row,background,frame,engine,folder):
         raise ScaleReview("camera_uncertain","场景俯视角不足以验证三维相机")
     return {"answer":answer,"zones":zones,"references":measurements,
             "protected":protected_rects(answer,size),"depth":depth,"size":size,"cache_hit":hit,
-            "camera_elevation_deg":(lo+hi)/2}
+            "camera_elevation_deg":(lo+hi)/2,"camera_elevation_interval":[lo,hi]}
 
 
 def candidate_scale(row,candidate,alpha,scene):
