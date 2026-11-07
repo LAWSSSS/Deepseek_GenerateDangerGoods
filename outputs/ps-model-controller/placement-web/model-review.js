@@ -3,6 +3,9 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 
 const $=id=>document.getElementById(id);
+const NUMBER=Number(document.body.dataset.number||1);
+const NEW_VERSION=document.body.dataset.newVersion||'';
+const PREVIOUS_VERSION=document.body.dataset.previousVersion||'';
 const renderer=new THREE.WebGLRenderer({canvas:$('canvas'),antialias:true,alpha:false,preserveDrawingBuffer:true});
 renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 const scene=new THREE.Scene();scene.background=new THREE.Color('#d9dedd');
@@ -42,7 +45,7 @@ async function load(which){
     model.position.sub(center);model.scale.setScalar(1.35/Math.max(size.x,size.y,size.z));model.position.multiplyScalar(model.scale.x);
     model.traverse(obj=>{if(obj.isMesh)obj.userData.originalMaterial=obj.material});current=model;scene.add(model);styleModel();
     mark(['old','previous','new'],which);$('loading').hidden=true;
-    $('status').textContent=which==='new'?'金属材质版：模型和场景均待人工核验。':which==='previous'?'上一版六视图重建：模型与场景待审。':'原始模型由单张做锈素材重建；源视图结构待审。';
+    $('status').textContent=which==='new'?(document.body.dataset.newStatus||'新版：模型和场景均待人工核验。'):which==='previous'?'上一版六视图重建：模型与场景待审。':'原始模型由单张做锈素材重建；源视图结构待审。';
     window.reviewState={which,mode,id:row.id};
   }catch(error){$('loading').textContent='加载失败：'+error.message;$('status').textContent='模型加载失败'}
 }
@@ -53,9 +56,9 @@ window.addEventListener('resize',resize);resize();reset();
 function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera)}animate();
 try{
   const response=await fetch('/api/assets');if(!response.ok)throw Error('模型库不可用');
-  const rows=await response.json();items.old=rows.find(x=>x.number===1&&!x.manual_only);
-  items.previous=rows.find(x=>x.number===1&&x.version==='valve01-parametric-v6');
-  items.new=rows.find(x=>x.number===1&&x.version==='valve01-parametric-v7');
+  const rows=await response.json();items.old=rows.find(x=>x.number===NUMBER&&!x.manual_only);
+  items.previous=PREVIOUS_VERSION?rows.find(x=>x.number===NUMBER&&x.version===PREVIOUS_VERSION):null;
+  items.new=rows.find(x=>x.number===NUMBER&&x.version===NEW_VERSION)||null;
   $('previous').disabled=!items.previous;
   if(items.new)$('downloadModel').href='/api/model/'+items.new.id;
   await load(items.new?'new':'old');

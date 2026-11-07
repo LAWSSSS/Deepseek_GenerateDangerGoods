@@ -162,6 +162,40 @@ def register_rebuilt_candidate(folder=None, variant='v6'):
 
 register_rebuilt_candidate()
 register_rebuilt_candidate(variant='v7')
+
+
+def register_rebuilt_candidate_02(folder=None, variant='v1'):
+    """Register the DN200 candidate separately; keep it manual-only."""
+    if variant != 'v1':
+        return
+    folder = folder or ROOT/f'outputs/02球阀-六视图重建-{variant}'
+    file = folder/'result.json'
+    if not file.is_file():
+        return
+    try:
+        info=json.loads(file.read_text(encoding='utf8'))
+        original=next(r for r in ROWS.values() if r['number']==2 and not r.get('manual_only'))
+        mesh=folder/'mesh.glb'
+        reference=Path(info['reference'])
+        if (info.get('draft') or info.get('status')!='review'
+                or info.get('shape_basis')!='user_six_view_reference'
+                or info.get('version')!=f'valve02-parametric-{variant}'
+                or info.get('number')!=2 or info.get('asset_id')!=original['asset_id']
+                or info.get('original_mesh_sha256')!=original['mesh_sha256']
+                or info.get('inputs',{}).get('rust')!=original['rust_sha256']
+                or not mesh.is_file() or digest(mesh)!=info.get('mesh_sha256')
+                or not reference.is_file() or digest(reference)!=info.get('reference_sha256')):return
+        key=original['asset_id']+'-rebuild-'+variant
+        ROWS[key]={**original, 'asset_id':key, 'file':f'DN200 球阀（六视图重建 {variant}）',
+                   'mesh':str(mesh), 'mesh_sha256':info['mesh_sha256'], 'status':'review',
+                   'reason':'六视图未标定；剖分法兰方向、支脚形式和物理姿态待人工复核',
+                   'reconstruction':{**original['reconstruction'], 'fidelity':info['source_fidelity_diagnostic']},
+                   'manual_only':True, 'version':info['version'], 'shape_basis':info['shape_basis'],
+                   'model_review':'pending', 'scene_validation':'pending'}
+    except (OSError, ValueError, KeyError, StopIteration, TypeError):return
+
+
+register_rebuilt_candidate_02()
 SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
@@ -232,15 +266,37 @@ async def model_review_page(request):
     return FileResponse(HERE/'model-review.html')
 
 
+async def model_review_page_02(request):
+    return FileResponse(HERE/'model-review-02.html')
+
+
+REVIEW_FOLDERS = {
+    1: 'outputs/01阀门-六视图重建-v7',
+    2: 'outputs/02球阀-六视图重建-v1',
+}
+REVIEW_FILES = {
+    1: {'board':'六视图-新旧对照.jpg', 'turntable':'转台-24方向.jpg', 'record':'result.json',
+        'browser':'浏览器核验.json', 'blend':'model.blend', 'metal':'金属材质-同光照对照.jpg',
+        'front':'renders/new-front.png', 'wheel':'renders/detail-wheel.png',
+        'stem':'renders/detail-stem.png', 'side':'renders/detail-side.png',
+        'surface':'renders/detail-surface.png'},
+    2: {'board':'六视图-新旧对照.jpg', 'turntable':'转台-24方向.jpg', 'record':'result.json',
+        'browser':'浏览器核验.json', 'blend':'model.blend', 'metal':'材质-同光照对照.jpg',
+        'light':'材质-变光检查.jpg', 'local':'局部检查.jpg', 'isolated':'结构开口-隔离检查.jpg',
+        'front':'renders/new-front.png', 'wheel':'renders/detail-wheel.png',
+        'flange':'renders/detail-flange.png', 'body':'renders/detail-body.png',
+        'foot':'renders/detail-foot.png', 'bottom':'renders/detail-bottom.png',
+        'surface':'renders/detail-surface.png'},
+}
+
+
 async def model_review_file(request):
-    folder=ROOT/'outputs/01阀门-六视图重建-v7'
-    allowed={'board':'六视图-新旧对照.jpg', 'turntable':'转台-24方向.jpg', 'record':'result.json',
-             'browser':'浏览器核验.json', 'blend':'model.blend', 'metal':'金属材质-同光照对照.jpg',
-             'front':'renders/new-front.png', 'wheel':'renders/detail-wheel.png',
-             'stem':'renders/detail-stem.png', 'side':'renders/detail-side.png',
-             'surface':'renders/detail-surface.png'}
+    number=request.path_params['number']
+    folder_name=REVIEW_FOLDERS.get(number)
+    folder=ROOT/folder_name if folder_name else None
+    allowed=REVIEW_FILES.get(number, {})
     name=allowed.get(request.path_params['name'])
-    path=folder/name if name else None
+    path=folder/name if folder and name else None
     if not path or not path.is_file():return err('检查文件不存在',404)
     return FileResponse(path,filename=path.name,
                         content_disposition_type='attachment' if path.suffix.lower()=='.blend' else 'inline')
@@ -874,7 +930,8 @@ async def status(request):
 
 
 routes = [Route('/', index), Route('/review/01', model_review_page),
-          Route('/api/review/01/{name}', model_review_file),
+          Route('/review/02', model_review_page_02),
+          Route('/api/review/{number:int}/{name}', model_review_file),
           Route('/api/assets', assets), Route('/api/model/{asset}', model),
           Route('/api/sessions', create_session, methods=['POST']),
           Route('/api/sessions/{sid}', status), Route('/api/sessions/{sid}/background', background),

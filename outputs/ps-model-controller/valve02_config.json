@@ -1,0 +1,63 @@
+{
+  "version": "valve02-parametric-v1",
+  "number": 2,
+  "height": 1.0,
+  "radial_segments": 128,
+  "body_radius": 0.197,
+  "body_center_z": 0.255,
+  "body_scale_y": 0.9,
+  "neck_radius": 0.13,
+  "flange_outer_y": 0.335,
+  "flange_inner_y": 0.302,
+  "flange_radius": 0.186,
+  "flange_bolt_circle": 0.15,
+  "flange_bolt_holes": 8,
+  "flange_hole_radius": 0.013,
+  "bore_radius": 0.105,
+  "split_flange_y": -0.1,
+  "split_flange_radius": 0.198,
+  "split_flange_major_y": -0.116,
+  "split_flange_minor_y": -0.084,
+  "split_flange_bolts": 12,
+  "split_bolt_circle": 0.162,
+  "ball_radius": 0.132,
+  "bottom_boss_top": 0.075,
+  "bottom_boss_bottom": 0.025,
+  "stem_top": 0.53,
+  "adapter_top": 0.575,
+  "pedestal_top": 0.705,
+  "gear_bottom": 0.7,
+  "gear_top": 0.85,
+  "gear_center_z": 0.775,
+  "gear_half_x": 0.115,
+  "gear_half_y": 0.1,
+  "wheel_center_x": 0.19,
+  "wheel_radius": 0.205,
+  "wheel_tube": 0.018,
+  "spokes": 3,
+  "foot_y": 0.225,
+  "material_profile": {
+    "cast": {
+      "roughness": 0.5,
+      "metallic": 0.9,
+      "rust_amount": 0.05
+    },
+    "machined": {
+      "roughness": 0.24,
+      "metallic": 0.98,
+      "rust_amount": 0.02
+    },
+    "blue_paint": {
+      "roughness": 0.46,
+      "metallic": 0.04,
+      "rust_amount": 0.16
+    },
+    "rust": {
+      "roughness": 0.84,
+      "metallic": 0.22,
+      "rust_amount": 0.55
+    }
+  },
+  "reference_note": "六视图未标定，按前视面板像素比例估算相对尺寸；顶视/底视面板是斜视展示图，不能作为正交视图精确匹配。",
+  "texture_note": "做锈图局部采样，去除缓变光照后合成可重复细节；背面与不可见零件纹理为延续推断。"
+}
