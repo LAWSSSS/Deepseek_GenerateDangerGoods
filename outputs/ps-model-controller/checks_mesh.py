@@ -28,6 +28,17 @@ from scene_v2 import NeedsReview
 
 
 class GeometryChecks(unittest.TestCase):
+    def test_subpixel_occluder_is_counted_at_exact_source_position(self):
+        from mesh_visibility import SourceProjection
+        camera={'eye':[0,0,0],'target':[0,0,1],'up':[0,1,0],'orthographic_scale':2}
+        triangles=np.array([[[-.8,-.8,2],[.8,-.8,2],[0,.8,2]],
+                            [[-.001,-.001,1],[.001,-.001,1],[0,.001,1]]])
+        labels,_,_=fragments(triangles,camera,64)
+        self.assertFalse(np.any(labels==1))
+        mask=np.full((64,64),255,dtype=np.uint8)
+        source=SourceProjection(triangles,camera,mask,mask)
+        self.assertEqual(source.observed(np.array([[0,0,2],[.1,0,2]])).tolist(),[False,True])
+
     def test_zbuffer_resolves_crossing_depths_per_pixel(self):
         triangles=np.array([[[-.8,-.8,1],[.8,-.8,3],[0,.8,2]],
                             [[-.8,-.8,2],[.8,-.8,2],[0,.8,2]]],dtype=float)
@@ -217,6 +228,13 @@ class GeometryChecks(unittest.TestCase):
             with self.assertRaises(NeedsReview):
                 open_fit({**candidate,"scene_scale_status":"unknown"},root,Atlas(),frame,view,
                          source_visible_fraction=.9,physics_stable=True)
+            unknown={**candidate,"scene_scale_status":"unknown"}
+            preview=open_fit(unknown,root,Atlas(),frame,view,source_visible_fraction=.9,
+                             physics_stable=True,pixel_size_review=True)
+            self.assertEqual(placement_gate(preview["evidence"]),["scene_scale_uncertain"])
+            with self.assertRaises(NeedsReview):
+                open_fit(unknown,root,Atlas(),frame,view,source_visible_fraction=.79,
+                         physics_stable=True,pixel_size_review=True)
 
 
 def blender_smoke(blender):

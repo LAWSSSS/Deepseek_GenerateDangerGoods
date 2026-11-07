@@ -21,11 +21,11 @@ from auto_v3 import save_preview
 from batch_v2 import Budget, BudgetReached, Runner, lock_directory
 from mesh_ai import check_render, check_structure
 from mesh_build import report
-from mesh_placement import compose_spec, mesh_view, open_fit
+from mesh_placement import compose_spec, mesh_open_candidates, mesh_view, open_fit
 from mesh_runtime import run_bounded, safe_tail
 from mesh_scene import MeshSceneAnswer, analyze_scene, candidate_scale
-from mesh_visibility import coverage, orbit_estimates
-from pose_retest import OPEN_PILOT, comparison, prepare_item, validate
+from mesh_visibility import VERSION as VISIBILITY_VERSION, coverage, orbit_estimates
+from pose_retest import OPEN_PILOT, comparison, validate
 from run import Config, load
 from scene_pose import PoseAtlas
 from scene_v2 import NeedsReview, Perception, atomic_json, digest, key, read_image
@@ -131,7 +131,7 @@ def prepare_views(row,folder,args,scene):
         if not visibility["known"] or visibility["source_visible_fraction"]<.80:
             attempt["reason"]=("可见面证据不确定："+visibility.get("reason","") if not visibility["known"]
                                else "新视角露出过多未经原照片验证的表面")
-            if azimuth==0 and visibility["known"]:
+            if azimuth==0 and min(visibility.get("raster_iou",[0]))>=.90:
                 orbit.append((dest,result,rotation))
             return
         found=(dest,{**result,"rotation_deg":rotation},visibility)
@@ -335,56 +335,57 @@ async def pipeline(args):
                 row["protected"]=scene["protected"]
                 proposal_folder=folder/"proposals"
                 proposal_folder.mkdir(exist_ok=True)
-                def scale_filter(item):
-                    _,projection,x,y,surface,_,_,_,_,_,target,_=item
-                    center=atlas.screen(np.array([[x,y]]))[0]
-                    candidate={"center_px":center,"target_px":target}
-                    if not valid_zone(candidate,scene):
-                        return "outside_approved_zone"
-                    try:
-                        candidate_scale(row,candidate,projection.solid.astype(np.uint8)*255,scene)
-                    except NeedsReview as issue:
-                        return getattr(issue,"code","scale_uncertain")
-                    return None
-                atlas.candidate_filter=scale_filter
-                proposals=prepare_item(proposal_folder,dict(row),atlas,frame,engine)
-                atlas.candidate_filter=None
                 views=await asyncio.to_thread(prepare_views,row,folder,args,scene)
                 if not views:
                     raise NeedsReview("现有三维模型没有稳定且可验证的姿态")
                 fits=[]
                 row["placement_rejections"]=[]
-                for candidate in proposals.get("candidates",[]):
-                    zone=valid_zone(candidate,scene)
-                    if not zone:
-                        row["placement_rejections"].append({"id":candidate["id"],"reason":"未在模型认可的区域"})
-                        continue
-                    for view,result,visibility in views:
+                row["scale_prefilter_rejections"]={}
+                target=row["approved_size_reference"]["major_px"]
+                if row["targets_px"] != [target]:
+                    raise NeedsReview("目标投影尺寸与已确认尺寸不一致")
+
+                def scale_at(location, alpha):
+                    if not valid_zone(location,scene):
+                        raise NeedsReview("实际位置不在认可区域")
+                    return candidate_scale(row,location,alpha,scene)
+
+                for index,(view,result,visibility) in enumerate(views):
+                    location_folder=proposal_folder/str(index)
+                    location_folder.mkdir(exist_ok=True)
+                    pixels=mesh_view(view,target,result["contacts_px"])
+
+                    def eligible(location):
                         try:
-                            pixels=mesh_view(view,candidate["target_px"],result["contacts_px"])
-                            scale=candidate_scale(row,candidate,pixels[0][:,:,3],scene)
-                            actual={**candidate,"scene_scale_status":"calibrated" if scale["status"]=="calibrated" else "consistent_estimate"}
-                            fit=open_fit(actual,proposal_folder,atlas,frame,pixels,
+                            scale_at(location,pixels[0][:,:,3])
+                        except NeedsReview as issue:
+                            code=getattr(issue,"code","outside_approved_zone")
+                            counts=row["scale_prefilter_rejections"]
+                            counts[code]=counts.get(code,0)+1
+                            return False
+                        return True
+
+                    candidates=mesh_open_candidates(pixels,target,atlas,location_folder,eligible)
+                    for candidate in candidates:
+                        try:
+                            fit=open_fit(candidate,location_folder,atlas,frame,pixels,
                                          source_visible_fraction=visibility["source_visible_fraction"],
-                                         physics_stable=result["physics_stable"])
-                            h,w=fit["pixels"].shape[:2]
-                            fitted={**actual,"center_px":[fit["origin"][0]+w/2,fit["origin"][1]+h/2]}
-                            if not valid_zone(fitted,scene):
-                                raise NeedsReview("实际位置不在认可区域")
-                            scale=candidate_scale(row,fitted,fit["pixels"][:,:,3],scene)
+                                         physics_stable=result["physics_stable"],
+                                         scale_at=lambda location: scale_at(location,pixels[0][:,:,3]))
                             for endpoint_view,endpoint_result,endpoint_visibility in result.get("interval_views",[]):
-                                endpoint_pixels=mesh_view(endpoint_view,candidate["target_px"],endpoint_result["contacts_px"])
-                                candidate_scale(row,actual,endpoint_pixels[0][:,:,3],scene)
-                                endpoint_fit=open_fit(actual,proposal_folder,atlas,frame,endpoint_pixels,
+                                endpoint_pixels=mesh_view(endpoint_view,target,endpoint_result["contacts_px"])
+                                endpoint_fit=open_fit(candidate,location_folder,atlas,frame,endpoint_pixels,
                                                       source_visible_fraction=endpoint_visibility["source_visible_fraction"],
-                                                      physics_stable=endpoint_result["physics_stable"])
+                                                      physics_stable=endpoint_result["physics_stable"],
+                                                      scale_at=lambda location: scale_at(location,endpoint_pixels[0][:,:,3]))
                                 if math.dist(fit["origin"],endpoint_fit["origin"])>2:
                                     raise NeedsReview("俯角范围内接触位置不一致")
-                            fit.update(pose={"rotation_deg":result["rotation_deg"],"matrices":result["matrices"],
-                                             "camera":result["camera"]},scale=scale)
+                            fit["pose"]={"rotation_deg":result["rotation_deg"],"matrices":result["matrices"],
+                                         "camera":result["camera"]}
                             fits.append(fit)
                         except (NeedsReview,ValueError) as issue:
-                            row["placement_rejections"].append({"id":candidate["id"],"reason":str(issue)[:150]})
+                            row["placement_rejections"].append({"view":index,"id":candidate["id"],
+                                                                "reason":str(issue)[:150]})
                 fits.sort(key=lambda value:value["rank"],reverse=True)
                 chosen=[]
                 for fit in fits:
@@ -414,7 +415,7 @@ async def pipeline(args):
                            "evidence":[p.get("failure_codes") for p in physical]},
                 "source_visibility":{"status":"pass" if known and max(known)>=.8 else "unknown" if not known or any(not v.get("known") for v in observed) else "fail",
                                      "value":max(known) if known else None,"threshold":.8,
-                                     "version":"visibility-zbuffer-v2"},
+                                     "version":VISIBILITY_VERSION},
                 "scene_scale":{"status":"pass" if row.get("status")=="pilot_review" else "unknown",
                                "rejections":row.get("placement_rejections",[])},
             }

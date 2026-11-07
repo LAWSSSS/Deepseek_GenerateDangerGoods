@@ -60,7 +60,57 @@ def mesh_view(folder, target, contacts):
     return pixels[crop],shade[crop],[band[crop] for band in bands]
 
 
-def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics_stable):
+def mesh_open_candidates(view, target, atlas, folder, eligible, *, limit=18):
+    """Propose spaced positions using the actual rendered outline, then save their masks."""
+    pixels, _, _ = view
+    h, w = pixels.shape[:2]
+    sw, sh = np.ceil(np.array([w, h]) / atlas.factor).astype(int)
+    silhouette = cv2.resize((pixels[:,:,3]>=128).astype(np.float32), (sw,sh),
+                            interpolation=cv2.INTER_AREA) > 0
+    stride = max(2, round(.06*target/min(atlas.factor)))
+    padding = max(32, round(.14*target))
+    proposed = []
+    for surface in atlas.surfaces:
+        clear = (surface.distance >= max(4,.012*target)/min(atlas.factor)) & (
+            atlas.open_clearance(surface) >= max(6,.025*target)/min(atlas.factor))
+        if sw > clear.shape[1] or sh > clear.shape[0]:
+            continue
+        collisions = cv2.matchTemplate((~clear).astype(np.float32), silhouette.astype(np.float32), cv2.TM_CCORR)
+        ys, xs = np.nonzero(collisions[::stride,::stride] < .5)
+        for x, y in zip(xs*stride, ys*stride):
+            left, top = map(int,np.rint([x*atlas.factor[0], y*atlas.factor[1]]))
+            crop = (max(0,left-padding),max(0,top-padding),min(atlas.size[0],left+w+padding),
+                    min(atlas.size[1],top+h+padding))
+            candidate = {"placement_mode":"open", "target_px":target, "crop_px":list(crop),
+                         "center_px":[left+w/2,top+h/2], "support_id":f"S{surface.piece}"}
+            if not eligible(candidate):
+                continue
+            context = atlas.position_context(surface,np.s_[y:y+sh,x:x+sw],silhouette,
+                                             target/min(atlas.factor),measure_relief=True)
+            if context['relief']['kind'] != 'raised':
+                rank = (RELIEF_PRIORITY.get(context['relief']['kind'],0),-context['cost'])
+                proposed.append((rank,candidate,surface))
+    selected = []
+    for _, candidate, surface in sorted(proposed,key=lambda item:item[0],reverse=True):
+        if any(math.dist(candidate['center_px'], prior['center_px']) < .14*target for prior in selected):
+            continue
+        ident = f"M{len(selected)+1:02}"
+        candidate['id'] = ident
+        destination = folder / ident
+        destination.mkdir(parents=True,exist_ok=True)
+        l,t,r,b = candidate['crop_px']
+        support = cv2.resize(surface.mask.astype(np.uint8),atlas.size,
+                             interpolation=cv2.INTER_NEAREST)[t:b,l:r]
+        Image.fromarray(support*255).save(destination/'support.png')
+        Image.new('L',(r-l,b-t)).save(destination/'foreground.png')
+        selected.append(candidate)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics_stable,
+             pixel_size_review=False,scale_at=None):
     """Search only clear openings. Unknown intersecting scrap is never accepted."""
     if candidate["placement_mode"]!="open":
         raise NeedsReview("堆内钢件体积与物品的深度关系暂不能可靠核验")
@@ -93,24 +143,36 @@ def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics
             edge=float(plane_distance[area][solid].min()) if solid.any() else 0
             if gap<max(6,.025*target) or edge<max(4,.012*target):
                 continue
+            scale = None
+            scale_status = candidate.get("scene_scale_status","unknown")
+            if scale_at is not None:
+                location = {**candidate,"center_px":[l+x+w/2,t+y+h/2]}
+                try:
+                    scale = scale_at(location)
+                except NeedsReview:
+                    continue
+                scale_status = {"estimated":"consistent_estimate","calibrated":"calibrated"}.get(scale["status"],"unknown")
             evidence={"source_visible_fraction":source_visible_fraction,"physics_stable":physics_stable,
                       "component_support":parts,"collision":False,"occlusion_order":"clear",
-                      # The scale must be separately supplied by reference consensus below.
-                      "scene_scale":candidate.get("scene_scale_status","unknown")}
+                      "scene_scale":scale_status}
             issues=placement_gate(evidence)
+            if pixel_size_review:
+                # A human inspection image can use the approved pixel size
+                # with scale still explicitly unknown in its evidence.
+                issues=[issue for issue in issues if issue!="scene_scale_uncertain"]
             if issues:
                 continue
             context=atlas.native_position_context(candidate["support_id"],l+x,t+y,solid,target,None,
                                                   measure_relief=True)
             if context["relief"]["kind"]=="raised":
                 continue
-            rank=(RELIEF_PRIORITY.get(context["relief"]["kind"],0),
+            rank=(scale_status!="unknown",RELIEF_PRIORITY.get(context["relief"]["kind"],0),
                   -context["cost"], min(parts),min(1.,gap/(.16*target)))
             if best is None or rank>best["rank"]:
                 best={"rank":rank,"origin":[int(l+x),int(t+y)],"pixels":pixels,
                       "shadow":np.where(bed,shade,0),"scene_support":support,"scene_foreground":foreground,
                       "contacts":bands,"evidence":evidence,"context":context,"candidate":candidate,
-                      "clearance_px":round(gap,2)}
+                      "clearance_px":round(gap,2),"scale":scale}
     if best is None:
         raise NeedsReview("实际三维轮廓、部件接触点或场景尺度未通过空位检查")
     return best
