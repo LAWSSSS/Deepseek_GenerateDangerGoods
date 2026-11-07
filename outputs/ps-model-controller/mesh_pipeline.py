@@ -438,12 +438,26 @@ def main():
     cli.add_argument("--budget",type=int,default=2_000_000)
     cli.add_argument("--render-device",choices=("CPU","CUDA","OPTIX"),default="CPU")
     cli.add_argument("--geometry-only-from",type=Path,help="复用同一底图的历史俯角；只做本地姿态诊断")
+    cli.add_argument("--inspection-item",choices=("03",),help="生成单件人工检查图")
+    cli.add_argument("--inspection-pose",type=Path,help="已验证的中点俯角姿态目录")
+    cli.add_argument("--inspection-source-view",type=Path,help="同一网格的源视图渲染")
+    cli.add_argument("--inspection-history",type=Path,default=Path("outputs/固定场景-v2最终几何复测"))
     cli.add_argument("--retry",action="store_true",help="重试待审项（如已补齐 API 配置）")
     args=cli.parse_args()
     if not 0<=args.budget<=2_000_000:
         cli.error("budget must be between 0 and 2000000")
     for name,value in vars(args).items():
         if isinstance(value,Path): setattr(args,name,value.resolve())
+    if args.inspection_item:
+        if args.budget!=0 or not args.inspection_pose or not args.inspection_source_view:
+            cli.error("人工检查需要 --budget 0、--inspection-pose 和 --inspection-source-view")
+        from types import SimpleNamespace
+        from mesh_inspection import inspect
+        request=SimpleNamespace(out=args.out,pose=args.inspection_pose,source_view=args.inspection_source_view,
+                                scene=args.scene,weights=args.weights,cache=args.cache,mcp=args.mcp,
+                                history=args.inspection_history,config=args.config,approved_from=args.approved_from)
+        asyncio.run(inspect(request))
+        return
     args.out.mkdir(parents=True,exist_ok=True)
     with lock_directory(args.cache),lock_directory(args.out):
         asyncio.run(pipeline(args))

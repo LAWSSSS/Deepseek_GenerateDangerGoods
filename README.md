@@ -41,4 +41,26 @@ $common = @(
 
 `--geometry-only-from` 仍是离线姿态诊断入口：需要同一背景的历史场景俯角，设 `--budget 0`，不会运行结构模型、场景选位或 Photoshop。输出中的 `checks` 记录已完成检查与未知项。正式复测仍需要本机进程环境变量 `PS_DEEPSEEK_KEY`，并以 `--budget 30000` 限制本轮模型用量。
 
-当前尚未接入自动生成结构细节局部图、缺失特征修复、独立阶段诊断开关，以及物理与渲染分离缓存；这些能力不应由 v2 状态推断为已完成。
+正式批处理中的自动结构缺陷修复、独立阶段诊断开关和物理与渲染分离缓存仍待接入。
+
+## 03 轴承座单件检查图
+
+轴承座检查流程会比较 48k、96k 面网格，对源图孔沿和外轮廓进行保护，生成 1024 像素纹理并自动筛选方位。正式尺寸参考仍按来源标记为估算或测量。人工检查图可在参照不足时标记待验，正式流程仍要求完整尺度与模型复核。
+
+在前面的 PowerShell 设置之后，可从同一批次重新生成网格和姿态，再输出到一个新目录：
+
+```powershell
+$prior = Get-Content 'outputs/固定场景-v2最终几何复测/results.jsonl' -First 1 | ConvertFrom-Json
+$camera = 'work/03-source-camera.json'
+$prior.reconstruction.source_camera | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 $camera
+$alpha = Join-Path (Split-Path $prior.source_view) 'source-alpha.png'
+$detail = 'work/03-detail'
+$poses = 'work/03-poses'
+& $py "$code/mesh_detail.py" --mesh $prior.pre_optimization_mesh --alpha $alpha --camera $camera --asset $prior.rust --out $detail --blender $blender --render-device OPTIX
+if ($LASTEXITCODE -ne 0) { throw '网格细节处理失败' }
+& $py "$code/mesh_prepare_pose.py" --mesh "$detail/mesh-texture/mesh.glb" --source-view "$detail/mesh-texture/source-view.png" --alpha $alpha --camera $camera --out $poses --blender $blender --render-device OPTIX
+if ($LASTEXITCODE -ne 0) { throw '姿态检查失败' }
+& $py "$code/mesh_pipeline.py" @common --out 'outputs/轴承座-新检查' --budget 0 --inspection-item 03 --inspection-pose "$poses/pose-45" --inspection-source-view "$detail/mesh-texture/source-view.png"
+```
+
+输出包含全图、分层 PSD、局部与结构对照，以及记录接触位置、视角、尺度依据和光色指标的 `result.json`。

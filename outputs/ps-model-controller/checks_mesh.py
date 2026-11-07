@@ -138,6 +138,63 @@ class GeometryChecks(unittest.TestCase):
         self.assertEqual(candidate_scale(row,candidate,alpha,scene)["status"],"calibrated")
         with self.assertRaisesRegex(NeedsReview,"超出局部参照范围"):
             candidate_scale(row,{**candidate,"target_px":105.},alpha,scene)
+        row["approved_size_reference"]={"major_px":105.,"bounds_px":[350,250,450,350]}
+        adjusted=candidate_scale(row,{**candidate,"target_px":105.},alpha,scene,allow_size_adjustment=True)
+        self.assertGreaterEqual(adjusted["selected_target_px"],105*.95)
+        self.assertLessEqual(adjusted["selected_target_px"],adjusted["projected_major_px_range"][1])
+
+    def test_contact_anchor_is_used_instead_of_shadow_extent(self):
+        scene={"size":(800,600),"depth":np.full((150,200),.5,dtype=np.float32)}
+        row={"physical_size":None,"approved_size_reference":{"bounds_px":[350,250,450,350],"major_px":100.}}
+        candidate={"center_px":[750,500],"support_anchor_px":[420,310],"target_px":100.}
+        result=candidate_scale(row,candidate,np.ones((30,100),np.uint8)*255,scene)
+        self.assertEqual(result["method"],"approved_pixels_at_comparable_depth")
+
+    def test_three_dimensional_scale_uses_projected_length_and_plane_direction(self):
+        ref=SceneReference(id="G1",label="vertical plane edge",span_mm=(315,325),
+                           points=((500,400),(500,600)),basis="measured",source="fixture")
+        scene={"size":(800,600),"depth":np.full((150,200),.5,dtype=np.float32),
+               "references":{"G1":ref}}
+        row=json.loads('{"physical_size":{"major_mm":[200,200],"minor_mm":[60,60],'
+                       '"basis":"measured","source":"fixture"}}')
+        candidate={"center_px":[400,300],"target_px":75.}
+        projection={"elevation_deg":30.,"projected_major_mm":[100.,100.]}
+        result=candidate_scale(row,candidate,np.full((30,100),255,np.uint8),scene,projection=projection)
+        self.assertEqual(result["projection_model"],"orthographic_horizontal_plane_estimate")
+        self.assertGreater(result["projected_major_px"],70)
+        self.assertLess(result["projected_major_px"],80)
+
+    def test_contact_projection_survives_render_resolution_change(self):
+        from mesh_placement import mesh_view
+        with tempfile.TemporaryDirectory() as temp:
+            anchors=[]
+            for size in (512,1024):
+                folder=Path(temp)/str(size)
+                folder.mkdir()
+                rgba=np.zeros((size,size,4),np.uint8)
+                rgba[size//4:3*size//4,size//4:3*size//4]=(100,100,100,255)
+                Image.fromarray(rgba).save(folder/"object.png")
+                Image.new("RGB",(size,size),(120,120,120)).save(folder/"without-shadow.png")
+                shade=np.full((size,size,3),120,np.uint8)
+                shade[3*size//4:3*size//4+size//32,size//4:3*size//4]=80
+                Image.fromarray(shade).save(folder/"with-shadow.png")
+                contacts=[[[size*.30,size*.75],[size*.70,size*.75]]]
+                _,_,bands=mesh_view(folder,100,contacts)
+                ys,xs=np.nonzero(np.logical_or.reduce(bands))
+                anchors.append((xs.mean(),ys.mean()))
+            self.assertLess(np.linalg.norm(np.subtract(*anchors)),1.5)
+
+    def test_mounting_ratio_requires_two_mounts_and_central_bore(self):
+        from mesh_inspection import mounting_ratio
+        alpha=np.zeros((160,220),np.uint8)
+        cv2.rectangle(alpha,(10,10),(210,150),255,-1)
+        cv2.circle(alpha,(110,65),24,0,-1)
+        cv2.circle(alpha,(35,125),7,0,-1)
+        cv2.circle(alpha,(185,125),7,0,-1)
+        self.assertAlmostEqual(mounting_ratio(alpha),.75,places=2)
+        cv2.circle(alpha,(185,125),8,255,-1)
+        with self.assertRaises(NeedsReview):
+            mounting_ratio(alpha)
 
     def test_surface_coverage_uses_new_visible_pixels(self):
         source = np.array([[0,1,1],[0,2,2]], dtype=np.int32)
@@ -220,6 +277,11 @@ class GeometryChecks(unittest.TestCase):
                        "center_px":[400,270],"support_id":"S1","scene_scale_status":"calibrated"}
             fit=open_fit(candidate,root,Atlas(),frame,view,source_visible_fraction=.9,physics_stable=True)
             self.assertGreaterEqual(min(fit["evidence"]["component_support"]),.9)
+            padded=(np.pad(pixels,((0,0),(0,24),(0,0))),np.pad(shadow,((0,0),(0,24))),
+                    [np.pad(band,((0,0),(0,24))) for band in (left,right)])
+            fixed=open_fit(candidate,root,Atlas(),frame,padded,source_visible_fraction=.9,
+                           physics_stable=True,fixed_anchor=fit["support_anchor_px"])
+            self.assertLess(np.linalg.norm(np.subtract(fixed["support_anchor_px"],fit["support_anchor_px"])),1.)
             spec,_=compose_spec(fit,frame,root/"output","A")
             self.assertTrue(Path(spec["shade"]["path"]).is_file())
             self.assertEqual(spec["tone"]["blur_px"],0)

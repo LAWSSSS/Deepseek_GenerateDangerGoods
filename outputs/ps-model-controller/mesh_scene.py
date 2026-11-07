@@ -67,9 +67,9 @@ async def analyze_scene(runner,row,background,frame,engine,folder):
             "camera_elevation_deg":(lo+hi)/2,"camera_elevation_interval":[lo,hi]}
 
 
-def candidate_scale(row,candidate,alpha,scene):
+def candidate_scale(row,candidate,alpha,scene,*,allow_size_adjustment=False,projection=None):
     width,height=scene["size"]
-    x,y=candidate["center_px"]
+    x,y=candidate.get("support_anchor_px",candidate["center_px"])
     seat=(round(1000*x/(width-1)),round(1000*y/(height-1)))
     if "depth_native" not in scene:
         scene["depth_native"]=cv2.resize(scene["depth"],scene["size"],interpolation=cv2.INTER_LINEAR)
@@ -91,8 +91,17 @@ def candidate_scale(row,candidate,alpha,scene):
                 "distance_px":round(distance,1)}
     # The pilot reads persisted JSON, where dimensional tuples are arrays.
     size=ObjectSize.model_validate_json(json.dumps(row["physical_size"]))
-    fit=fit_consensus(alpha,scene["size"],depth,seat,size,list(scene["references"].values()))
+    fit=fit_consensus(alpha,scene["size"],depth,seat,size,list(scene["references"].values()),projection=projection)
     low,high=fit.record["projected_major_px_range"]
     if not low<=candidate["target_px"]<=high:
-        raise ScaleReview("approved_size_conflicts_with_scene","已确认的画面尺寸超出局部参照范围")
+        if not allow_size_adjustment:
+            raise ScaleReview("approved_size_conflicts_with_scene","已确认的画面尺寸超出局部参照范围")
+        approved=row.get("approved_size_reference",{}).get("major_px",candidate["target_px"])
+        lower=max(low,approved*.95)
+        upper=min(high,approved*1.05)
+        if lower>upper:
+            raise ScaleReview("approved_size_conflicts_with_scene","局部参照与已确认尺寸范围没有交集")
+        return {**fit.record,"selected_target_px":min(max(approved,lower),upper)}
+    if allow_size_adjustment:
+        return {**fit.record,"selected_target_px":candidate["target_px"]}
     return fit.record

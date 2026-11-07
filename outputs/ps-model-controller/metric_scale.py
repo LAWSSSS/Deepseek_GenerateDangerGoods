@@ -192,7 +192,7 @@ def verify_scale(alpha, record):
     return {**record,"rendered_major_px":round(major,2),"rendered_minor_px":round(minor,2)}
 
 
-def fit_consensus(alpha, frame_size, depth, seat, object_size, references):
+def fit_consensus(alpha, frame_size, depth, seat, object_size, references, *, projection=None):
     """Intersect local scale intervals without promoting guesses to measurements."""
     from scene_v2 import angle_delta
 
@@ -200,6 +200,8 @@ def fit_consensus(alpha, frame_size, depth, seat, object_size, references):
     aspect = major/cross
     low = max(object_size.major_mm[0],aspect*object_size.minor_mm[0]*.85)
     high = min(object_size.major_mm[1],aspect*object_size.minor_mm[1]*1.18)
+    if projection is not None:
+        low,high=projection["projected_major_mm"]
     if low>high:
         raise ScaleReview("view_size_mismatch","素材外廓与所给实物尺寸不符")
     support = frame_point(seat,frame_size)
@@ -219,7 +221,13 @@ def fit_consensus(alpha, frame_size, depth, seat, object_size, references):
         except ScaleReview as error:
             rejected.append({"ref":reference.id,"code":error.code})
             continue
-        _,interval,_ = project_span(reference,pixels,(low,high))
+        scale_pixels=pixels
+        if projection is not None:
+            sine=math.sin(math.radians(projection["elevation_deg"]))
+            if sine<=0:
+                raise ScaleReview("camera_uncertain","相机俯角不能用于承托面尺度估计")
+            scale_pixels=math.hypot(q[0]-p[0],(q[1]-p[1])/sine)
+        _,interval,_ = project_span(reference,scale_pixels,(low,high))
         angle = math.degrees(math.atan2(q[1]-p[1],q[0]-p[0]))
         usable.append((known,reference,p,q,pixels,ref_depth,tolerance,delta,interval,angle))
     known = [m for m in usable if m[0]]
@@ -257,4 +265,8 @@ def fit_consensus(alpha, frame_size, depth, seat, object_size, references):
               "projected_minor_px":round(nominal_px/aspect,2),
               "projected_major_px_range":[round(span_low,2),round(span_high,2)],
               "rejected_references":rejected}
+    if projection is not None:
+        record["projection_model"]="orthographic_horizontal_plane_estimate"
+        record["projected_major_mm_range"]=[round(low,3),round(high,3)]
+        record["camera_elevation_deg"]=projection["elevation_deg"]
     return ScaleFit(asset_angle,angle,ref_depth,tolerance,nominal_px/major,record)

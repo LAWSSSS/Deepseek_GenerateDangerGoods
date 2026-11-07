@@ -53,12 +53,10 @@ def optimize(mesh_path,alpha_path,render_path,camera,out):
             candidate=original.copy()
         else:
             candidate=simplify(original,count)
-            candidate.process(validate=True)
             if not candidate.is_watertight:
                 # Repair only small open triangle/quad cracks. The checks below
                 # must still preserve the original topology and visible holes.
                 trimesh.repair.fill_holes(candidate)
-                candidate.process(validate=True)
         fidelity=source_fidelity(source,mask_for(candidate,camera))
         accepted=(candidate.is_watertight
                   and candidate.euler_number==original.euler_number

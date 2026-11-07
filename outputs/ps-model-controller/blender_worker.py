@@ -34,7 +34,7 @@ def make_camera(scene, eye, target, *, fov=40, ortho_scale=None):
     return camera
 
 
-def setup_scene(render_device="CPU"):
+def setup_scene(render_device="CPU", resolution=512):
     bpy.ops.wm.read_factory_settings(use_empty=True)
     scene = bpy.context.scene
     scene.render.engine = "CYCLES"
@@ -55,8 +55,10 @@ def setup_scene(render_device="CPU"):
     scene.cycles.use_denoising = False
     scene.render.threads_mode = "FIXED"
     scene.render.threads = 4
-    scene.render.resolution_x = 512
-    scene.render.resolution_y = 512
+    if resolution not in (512,1024):
+        raise ValueError("Unsupported render resolution")
+    scene.render.resolution_x = resolution
+    scene.render.resolution_y = resolution
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
@@ -274,7 +276,8 @@ def settle_view(request, scene, obj, output):
         low = min(p.z for p in vertices)
         touching = [p for p in vertices if p.z <= low+.015*span]
         projected = [world_to_camera_view(scene, camera, p) for p in touching]
-        contacts.append([[round(p.x*512, 2), round((1-p.y)*512, 2)] for p in projected])
+        contacts.append([[round(p.x*scene.render.resolution_x, 2),
+                          round((1-p.y)*scene.render.resolution_y, 2)] for p in projected])
     # Produce separate object and two receiver renders for an actual shadow delta.
     ground.hide_render = True
     render(scene, output/"object.png")
@@ -297,7 +300,7 @@ def main():
     output = Path(request["out"])
     output.mkdir(parents=True, exist_ok=True)
     render_device = request.get("render_device", "CPU")
-    scene = setup_scene(render_device)
+    scene = setup_scene(render_device, request.get("render_resolution",512))
     obj = load_mesh(request["mesh"])
     if request["operation"] == "source":
         result = source_view(request, scene, obj, output)

@@ -21,9 +21,12 @@ def mesh_view(folder, target, contacts):
         with_shadow=np.asarray(im.convert("RGB"),dtype=np.float32)
     with Image.open(folder/"without-shadow.png") as im:
         without_shadow=np.asarray(im.convert("RGB"),dtype=np.float32)
-    brightness_with=cv2.cvtColor(with_shadow,cv2.COLOR_RGB2GRAY)
-    brightness_without=cv2.cvtColor(without_shadow,cv2.COLOR_RGB2GRAY)
-    shadow=np.clip(1-brightness_with/np.maximum(brightness_without,8),0,1)
+    def linear(rgb):
+        rgb=rgb/255
+        return np.where(rgb<=.04045,rgb/12.92,((rgb+.055)/1.055)**2.4)
+    brightness_with=cv2.cvtColor(linear(with_shadow),cv2.COLOR_RGB2GRAY)
+    brightness_without=cv2.cvtColor(linear(without_shadow),cv2.COLOR_RGB2GRAY)
+    shadow=np.clip(1-brightness_with/np.maximum(brightness_without,.01),0,1)
     shadow[rgba[:,:,3]>1]=0
     # Noise outside the rendered shadow is not an edit to the scene.
     shadow=np.where(shadow>.035,shadow,0)
@@ -62,8 +65,12 @@ def mesh_view(folder, target, contacts):
 
 def mesh_open_candidates(view, target, atlas, folder, eligible, *, limit=18):
     """Propose spaced positions using the actual rendered outline, then save their masks."""
-    pixels, _, _ = view
+    pixels, _, contacts = view
     h, w = pixels.shape[:2]
+    contact_y,contact_x=np.nonzero(np.logical_or.reduce(contacts))
+    if not len(contact_x):
+        raise NeedsReview("三维物体缺少接触锚点")
+    anchor=[float(contact_x.mean()),float(contact_y.mean())]
     sw, sh = np.ceil(np.array([w, h]) / atlas.factor).astype(int)
     silhouette = cv2.resize((pixels[:,:,3]>=128).astype(np.float32), (sw,sh),
                             interpolation=cv2.INTER_AREA) > 0
@@ -82,7 +89,9 @@ def mesh_open_candidates(view, target, atlas, folder, eligible, *, limit=18):
             crop = (max(0,left-padding),max(0,top-padding),min(atlas.size[0],left+w+padding),
                     min(atlas.size[1],top+h+padding))
             candidate = {"placement_mode":"open", "target_px":target, "crop_px":list(crop),
-                         "center_px":[left+w/2,top+h/2], "support_id":f"S{surface.piece}"}
+                         "center_px":[left+w/2,top+h/2],
+                         "support_anchor_px":[left+anchor[0],top+anchor[1]],
+                         "support_id":f"S{surface.piece}"}
             if not eligible(candidate):
                 continue
             context = atlas.position_context(surface,np.s_[y:y+sh,x:x+sw],silhouette,
@@ -110,7 +119,7 @@ def mesh_open_candidates(view, target, atlas, folder, eligible, *, limit=18):
 
 
 def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics_stable,
-             pixel_size_review=False,scale_at=None):
+             pixel_size_review=False,scale_at=None,fixed_anchor=None):
     """Search only clear openings. Unknown intersecting scrap is never accepted."""
     if candidate["placement_mode"]!="open":
         raise NeedsReview("堆内钢件体积与物品的深度关系暂不能可靠核验")
@@ -125,10 +134,18 @@ def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics
     h,w=solid.shape
     center=np.asarray(candidate["center_px"],dtype=float)-[l,t]
     ideal=center-[w/2,h/2]
+    contact=np.logical_or.reduce(bands)
+    cy,cx=np.nonzero(contact)
+    if not len(cx):
+        raise NeedsReview("三维物体缺少接触锚点")
+    contact_offset=np.array([cx.mean(),cy.mean()])
+    if fixed_anchor is not None:
+        ideal=np.asarray(fixed_anchor,dtype=float)-[l,t]-contact_offset
     step=max(4,round(.05*target))
     best=None
-    for dy in (0,-step,step,-2*step,2*step):
-        for dx in (0,-step,step,-2*step,2*step):
+    offsets=(0,) if fixed_anchor is not None else (0,-step,step,-2*step,2*step)
+    for dy in offsets:
+        for dx in offsets:
             x,y=np.rint(ideal+[dx,dy]).astype(int)
             if x<0 or y<0 or x+w>support.shape[1] or y+h>support.shape[0]:
                 continue
@@ -146,7 +163,7 @@ def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics
             scale = None
             scale_status = candidate.get("scene_scale_status","unknown")
             if scale_at is not None:
-                location = {**candidate,"center_px":[l+x+w/2,t+y+h/2]}
+                location = {**candidate,"support_anchor_px":[l+x+float(cx.mean()),t+y+float(cy.mean())]}
                 try:
                     scale = scale_at(location)
                 except NeedsReview:
@@ -172,7 +189,8 @@ def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics
                 best={"rank":rank,"origin":[int(l+x),int(t+y)],"pixels":pixels,
                       "shadow":np.where(bed,shade,0),"scene_support":support,"scene_foreground":foreground,
                       "contacts":bands,"evidence":evidence,"context":context,"candidate":candidate,
-                      "clearance_px":round(gap,2),"scale":scale}
+                      "clearance_px":round(gap,2),"scale":scale,
+                      "support_anchor_px":[l+x+float(cx.mean()),t+y+float(cy.mean())]}
     if best is None:
         raise NeedsReview("实际三维轮廓、部件接触点或场景尺度未通过空位检查")
     return best
@@ -207,11 +225,14 @@ def compose_spec(fit,frame,scratch,label):
     distance=cv2.distanceTransform((occupied<128).astype("uint8"),cv2.DIST_L2,3)
     nearby=(distance>.04*candidate["target_px"])&(distance<.28*candidate["target_px"]) & support
     nearby &= ~fit.get("scene_foreground",np.zeros_like(support))
+    shadow_mask=np.zeros(support.shape,bool)
+    shadow_mask[ly:ly+h,lx:lx+w]=fit["shadow"]>.035
+    nearby &= ~shadow_mask
     tone,photography,grain=fit_photo(patch,nearby,asset,0,(box[3]-box[1],box[2]-box[0]))
     # Retain 3-D shading and the approved color: avoid global blur and aggressive curves.
     tone["blur_px"]=0
     if tone.get("luma_curve"):
-        tone["luma_curve"]=[[a,round(.75*a+.25*z,2)] for a,z in tone["luma_curve"]]
+        tone["luma_curve"]=[[a,round(.25*a+.75*z,2)] for a,z in tone["luma_curve"]]
     spec={"id":label,"asset":object_path.as_posix(),
           "center":[x+(box[0]+box[2])/2,y+(box[1]+box[3])/2],"width":box[2]-box[0],"angle":0,
           "canvas":list(frame.size),"crop":candidate["crop_px"],"tone":tone,"shade":shadow_entry,

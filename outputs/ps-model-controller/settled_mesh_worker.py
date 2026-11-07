@@ -30,7 +30,7 @@ def main():
     output = Path(request["out"])
     output.mkdir(parents=True, exist_ok=True)
     render_device = request.get("render_device", "CPU")
-    scene = worker.setup_scene(render_device)
+    scene = worker.setup_scene(render_device, request.get("render_resolution",512))
     obj = worker.load_mesh(request["mesh"])
     attribute = obj.data.attributes.new("source_face_id", "INT", "FACE")
     attribute.data.foreach_set("value", np.arange(len(obj.data.polygons),dtype=np.int32))
