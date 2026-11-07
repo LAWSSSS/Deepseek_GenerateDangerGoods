@@ -86,9 +86,13 @@ async def inspect(args):
         raise ValueError("unverified source silhouette or pixel target")
     view = args.pose.resolve()
     pose = json.loads((view/"blender-result.json").read_text(encoding="utf8"))
-    baseline_dir=(args.baseline.parent if args.baseline else Path("outputs/固定场景-轴承座三维检查图"))
-    baseline_record=json.loads((args.baseline if args.baseline else baseline_dir/"result.json").read_text(encoding="utf8"))
-    if args.baseline:
+    reference=getattr(args,"reference",None)
+    if args.baseline and reference:
+        raise ValueError("固定接触点和仅对照不能同时指定")
+    baseline_path=args.baseline or reference
+    baseline_dir=(baseline_path.parent if baseline_path else Path("outputs/固定场景-轴承座三维检查图"))
+    baseline_record=json.loads((baseline_path if baseline_path else baseline_dir/"result.json").read_text(encoding="utf8"))
+    if baseline_path:
         if (baseline_record.get("status")!="human_inspection" or baseline_record.get("number")!=3 or
                 baseline_record.get("approved_target_px")!=target or
                 not isinstance(baseline_record.get("support_anchor_px"),list) or
@@ -108,9 +112,14 @@ async def inspect(args):
     material_result=source_view.parent/"result.json"
     if material_result.exists():
         data=json.loads(material_result.read_text(encoding="utf8"))
-        if data.get("mesh_sha256")!=digest(Path(pose_request["mesh"])) or data.get("source_asset_sha256")!=digest(Path(row["rust"])):
-            raise NeedsReview("纹理来源或网格记录不匹配")
-        material={key:data[key] for key in ("texture_size","detail_strength","detail_gain","normal_detail") if key in data}
+        if "source_asset_sha256" in data:
+            if data.get("mesh_sha256")!=digest(Path(pose_request["mesh"])) or data.get("source_asset_sha256")!=digest(Path(row["rust"])):
+                raise NeedsReview("纹理来源或网格记录不匹配")
+            material={key:data[key] for key in ("texture_size","detail_strength","detail_gain","normal_detail") if key in data}
+        elif "surface_refinement" in data:
+            if data.get("mesh_sha256")!=digest(Path(pose_request["mesh"])) or data.get("rust_sha256")!=digest(Path(row["rust"])):
+                raise NeedsReview("平滑网格或素材的来源记录不匹配")
+            material={"texture_preserved":data["surface_refinement"].get("texture_preserved",False)}
     if source_request.get("camera")!=row["reconstruction"]["source_camera"]:
         raise NeedsReview("源视图相机与已标定相机不一致")
     with Image.open(source_view) as source, Image.open(source_alpha) as ref:
@@ -318,8 +327,10 @@ async def inspect(args):
             tile(board,enlarged(normalized.crop(feature),290,420),900,0,300,450,"Rust source / bearing detail")
             tile(board,enlarged(read_image(source_view).crop(feature),290,420),1200,0,300,450,"Mesh / bearing detail")
             tile(board,read_image(Path(row["original"])),1500,0,300,450,"Original object")
-            tile(board,enlarged(baseline.crop(crop),885,560),0,450,900,600,"Previous / same scene coordinates")
-            tile(board,enlarged(rendered.crop(crop),885,560),900,450,900,600,"New / same scene coordinates")
+            old_label="Previous / comparison region" if reference else "Previous / same scene coordinates"
+            new_label="New / reselected contact" if reference else "New / same scene coordinates"
+            tile(board,enlarged(baseline.crop(crop),885,560),0,450,900,600,old_label)
+            tile(board,enlarged(rendered.crop(crop),885,560),900,450,900,600,new_label)
             hole_ids=sorted(range(1,count),key=lambda i:stats[i,cv2.CC_STAT_AREA],reverse=True)
             if len(hole_ids)<3:
                 raise NeedsReview("源图缺少可确认的三个贯通孔")
@@ -352,7 +363,9 @@ async def inspect(args):
                               "material":material},
                       "projection":measured,"geometry":fit["evidence"],"visibility":visibility,
                       "support_anchor_px":fit["support_anchor_px"],"camera_endpoint_checks":fit["camera_endpoint_checks"],
-                      "baseline_record":str(args.baseline) if args.baseline else None,
+                      "baseline_record":str(baseline_path) if baseline_path else None,
+                      "baseline_anchor_distance_px":round(math.dist(fit["support_anchor_px"],baseline_record["support_anchor_px"]),3)
+                          if baseline_path else None,
                       "pose":pose["camera"],"scene_scale":fit["scale"],"photography":photo,
                       "review":{"structure_v2":"pending","visual_model":"pending",
                                 "camera_interval":interval_status,
@@ -368,6 +381,7 @@ def main():
     parser.add_argument("--pose",type=Path,required=True)
     parser.add_argument("--source-view",type=Path,required=True)
     parser.add_argument("--baseline",type=Path,help="固定上一版检查图的接触位置和尺寸")
+    parser.add_argument("--reference",type=Path,help="以指定检查图对照，允许重新选位")
     parser.add_argument("--scene",type=Path,required=True)
     parser.add_argument("--weights",type=Path,required=True)
     parser.add_argument("--cache",type=Path,required=True)

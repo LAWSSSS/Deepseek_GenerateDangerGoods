@@ -19,6 +19,20 @@
 
 场景分析复用按背景和配置签名的缓存；新场景没有缓存时需要配置视觉模型和本机密钥，并传入 `--budget`（最高 30000）。默认预算为 0，不会调用外部模型。
 
+## 六视图参考与圆润处理
+
+六视图拼图按物品外观关联，关联清单位于 `outputs/ps-model-controller/six-view-map.json`。参考图没有相机标定，部分是相似类别或包含多个物品，不能直接作为精确几何。程序记录这些不确定性；目前使用它们进行视觉对照，并未进行多视图重建或补齐不可见结构。
+
+```powershell
+& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/mesh_smooth_library.py `
+  --six-views '<六视图文件夹>' --out 'outputs/三维模型库-圆润复验'
+& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/mesh_smooth_report.py
+```
+
+平滑限制顶点位移，并保护源视图边缘；输出前检查面翻转、连通性、纹理、体积及源视图中的轮廓和孔洞。未通过保护门槛时保留原模型。局部起伏指标仅用于量化变化，不表示外观或隐藏结构已经验收。使用圆润模型进行场景选角时，给 `mesh_select_view.py` 增加 `--library 'outputs/三维模型库-圆润复验/results.jsonl'`；几何发生变化后应重新验证落稳，不复用旧的刚体姿态。
+
+轴承座示例可通过 `mesh_sixview_review.py` 将同一组近似方向上的平滑前后渲染与参考拼图并列。图中 IoU 是新旧模型之间的轮廓一致性，不是对参考图的精确匹配。使用 `mesh_pipeline.py --inspection-reference <上一版/result.json>` 可以保留旧图作为对照，同时允许重新搜索实际接触点；`--inspection-baseline` 则继续锁定原接触点。
+
 在工作区根目录打开 PowerShell，使用已经安装的环境和减面结果运行：
 
 ```powershell

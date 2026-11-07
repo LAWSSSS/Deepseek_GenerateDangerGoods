@@ -30,6 +30,49 @@ from scene_v2 import NeedsReview
 
 
 class GeometryChecks(unittest.TestCase):
+    def test_bounded_smoothing_preserves_topology_and_source_boundary(self):
+        import trimesh
+        from skimage.measure import marching_cubes
+        from mesh_carve import project
+        from mesh_smooth_library import smooth_mesh
+        x,y,z=np.indices((53,53,53)); center=26
+        occupied=((x-center)**2+(y-center)**2+(z-center)**2)<24**2
+        vertices,faces,_,_=marching_cubes(occupied.astype(float),.5)
+        mesh=trimesh.Trimesh(vertices=(vertices-center)*(.45/24),faces=faces,process=False)
+        source=np.asarray(mesh.vertices).copy()
+        alpha=np.zeros((512,512),np.uint8);cv2.rectangle(alpha,(90,90),(422,422),255,-1)
+        camera={"eye":[1.9,0,0],"target":[0,0,0],"fov_deg":40}
+        u,v,z=project(source,camera)
+        x=np.clip(np.rint(u).astype(int),0,511);y=np.clip(np.rint(v).astype(int),0,511)
+        distance=cv2.distanceTransform((alpha>=128).astype("uint8"),cv2.DIST_L2,5)
+        fixed=(distance[y,x]<=3)|(z<=0)|(u<0)|(u>=512)|(v<0)|(v>=512)
+        smoothed,details=smooth_mesh(mesh,alpha,camera)
+        np.testing.assert_array_equal(smoothed.faces,mesh.faces)
+        np.testing.assert_allclose(np.asarray(smoothed.vertices)[fixed],source[fixed],atol=1e-12)
+        self.assertEqual(smoothed.euler_number,mesh.euler_number)
+        self.assertLessEqual(details["max_displacement_fraction"],.00300001)
+        self.assertLess(details["normal_laplacian_after_p50_p90_p99"][1],details["normal_laplacian_before_p50_p90_p99"][1])
+
+    def test_smoothing_detects_texture_or_uv_changes(self):
+        import trimesh
+        from mesh_smooth_library import same_material
+        mesh=trimesh.creation.box()
+        image=Image.new("RGB",(8,8),(120,130,140))
+        uv=np.zeros((len(mesh.vertices),2),np.float64)
+        material=trimesh.visual.material.PBRMaterial(baseColorTexture=image)
+        mesh.visual=trimesh.visual.TextureVisuals(uv=uv,material=material)
+        clone=mesh.copy()
+        self.assertTrue(same_material(mesh,clone))
+        clone.visual.uv[0,0]=.1
+        self.assertFalse(same_material(mesh,clone))
+
+    def test_six_view_reference_mapping_covers_inventory(self):
+        path=Path(__file__).with_name("six-view-map.json")
+        rows=json.loads(path.read_text(encoding="utf8"))["views"]
+        self.assertEqual({row["number"] for row in rows},set(range(1,40)))
+        self.assertEqual(len(rows),39)
+        self.assertTrue(all(row["role"] in ("visual_match_unverified","category_reference","missing") for row in rows))
+
     def test_seeded_pose_endpoint_verification_obeys_shared_deadline(self):
         from mesh_pipeline import prepare_views
         with tempfile.TemporaryDirectory() as tmp:

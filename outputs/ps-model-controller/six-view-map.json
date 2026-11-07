@@ -1,0 +1,239 @@
+{
+  "schema_version": 1,
+  "views": [
+    {
+      "number": 1,
+      "file": "工业阀门六视图目录图.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 2,
+      "file": "工业球阀六视角展示_grid.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 3,
+      "file": "轴承座六视图工程图.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 4,
+      "file": "ChatGPT 图像 2026年10月14日 10_20_00.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 5,
+      "file": "不锈钢立式储罐六视图 каталогу.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 6,
+      "file": "不锈钢压力罐六视图技术图册.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 7,
+      "file": "不锈钢立式储罐六视图 каталогу.png",
+      "role": "category_reference",
+      "note": "立式罐类型相近，顶部搅拌部件不一致"
+    },
+    {
+      "number": 8,
+      "file": "蓝色工业压力容器六视图目录图.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 9,
+      "file": "不锈钢工业容器六视图展示.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 10,
+      "file": "红色液压千斤顶六视图目录.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 11,
+      "file": "ChatGPT 图像 2026年10月14日 10_06_50.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 12,
+      "file": "ChatGPT 图像 2026年10月14日 10_06_57.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 13,
+      "file": "白色塑料圆罐六视图产品展示.png",
+      "role": "category_reference",
+      "note": "参考图为单罐，原素材为两只"
+    },
+    {
+      "number": 14,
+      "file": "蓝色榄菊杀虫喷雾六视图.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 15,
+      "file": "ChatGPT 图像 2026年10月14日 10_08_40-2.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 16,
+      "file": "ChatGPT 图像 2026年10月14日 10_08_37-1.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 17,
+      "file": "黑色AERO减震器六视图图册.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 18,
+      "file": "黑色山地车后避震六视图图册.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 19,
+      "file": "蓝色气瓶六视图技术展示.png",
+      "role": "category_reference",
+      "note": "参考图是一只气瓶，原素材是多只气瓶"
+    },
+    {
+      "number": 20,
+      "file": "ChatGPT 图像 2026年10月14日 10_01_29-1.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 21,
+      "file": "ChatGPT 图像 2026年10月14日 10_01_32-2.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 22,
+      "file": "气动缸六视图产品布局.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 23,
+      "file": "气缸六视图工程产品图.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 24,
+      "file": "气动缸六视图产品图册.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 25,
+      "file": "蓝色液压缸六视图技术图解.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 26,
+      "file": "ChatGPT 图像 2026年10月14日 10_19_49.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 27,
+      "file": "黑蓝摩托车后减震器六视图展示.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 28,
+      "file": "ChatGPT 图像 2026年10月14日 10_18_28-2.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 29,
+      "file": "ChatGPT 图像 2026年10月14日 10_18_26-1.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 30,
+      "file": "ChatGPT 图像 2026年10月14日 10_10_23-1.png",
+      "role": "category_reference",
+      "note": "同类液压缸，型号和接口未确认"
+    },
+    {
+      "number": 31,
+      "file": "ChatGPT 图像 2026年10月14日 10_10_24-2.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 32,
+      "file": "ChatGPT 图像 2026年10月14日 10_10_23-1.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 33,
+      "file": "红色GLORIA灭火器六视图技术展示.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 34,
+      "file": "绿色灭火器六视图产品展示.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 35,
+      "file": "红色干粉灭火器六视图展示.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 36,
+      "file": "保赐利喷漆六视图产品目录.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 37,
+      "file": null,
+      "role": "missing",
+      "note": "型号及部件类别未确认，无可靠对应六视图"
+    },
+    {
+      "number": 38,
+      "file": "红色储气罐六视图产品图.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    },
+    {
+      "number": 39,
+      "file": "六视角青绿色压力油罐产品图лириға.png",
+      "role": "visual_match_unverified",
+      "note": "按外观匹配，图片未提供相机标定，结构不能视为实测"
+    }
+  ]
+}
