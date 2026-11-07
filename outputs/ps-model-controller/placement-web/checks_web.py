@@ -1,5 +1,6 @@
 """Offline checks for state, masking, and loopback boundaries."""
 import io
+import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -103,6 +104,46 @@ class PlacementChecks(unittest.TestCase):
         self.client.post(self.url+'/state',json={**self.state,'asset':candidate})
         response=self.client.post(self.url+'/automatic')
         self.assertEqual(response.status_code,400)
+
+    def test_reference_rebuild_stays_manual_with_failed_source_diagnostic(self):
+        original=server.ROWS[self.asset]
+        folder=Path(self.tmp.name)/'candidate';folder.mkdir()
+        mesh=folder/'mesh.glb';mesh.write_bytes(b'review-only fixture')
+        reference=folder/'reference.png';reference.write_bytes(b'reference fixture')
+        info={'draft':False,'status':'review','shape_basis':'user_six_view_reference','number':1,
+              'asset_id':original['asset_id'],'original_mesh_sha256':original['mesh_sha256'],
+              'inputs':{'rust':original['rust_sha256'],'reference':server.digest(reference)},
+              'reference':str(reference),'mesh_sha256':server.digest(mesh),
+              'version':'fixture','source_fidelity_diagnostic':{'passed':False,'iou':.67}}
+        (folder/'result.json').write_text(json.dumps(info),encoding='utf8')
+        with patch.object(server,'ROWS',{original['asset_id']:original}):
+            server.register_rebuilt_candidate(folder)
+            rebuilt=next(row for row in server.ROWS.values() if row.get('manual_only'))
+            self.assertFalse(rebuilt['reconstruction']['fidelity']['passed'])
+            self.assertEqual(rebuilt['model_review'],'pending')
+            self.assertEqual(rebuilt['scene_validation'],'pending')
+            self.assertEqual(self.client.post(self.url+'/state',json={**self.state,'asset':rebuilt['asset_id']}).status_code,200)
+            self.assertEqual(self.client.post(self.url+'/automatic').status_code,400)
+        mesh.write_bytes(b'tampered')
+        with patch.object(server,'ROWS',{original['asset_id']:original}):
+            server.register_rebuilt_candidate(folder)
+            self.assertEqual(len(server.ROWS),1)
+
+    def test_model_review_page_and_api_contract(self):
+        page=self.client.get('/review/01')
+        self.assertEqual(page.status_code,200)
+        self.assertIn('模型待人工检查',page.text)
+        rows=self.client.get('/api/assets').json()
+        self.assertTrue(all('version' in r and 'shape_basis' in r and 'model_review' in r and 'scene_validation' in r for r in rows))
+        self.assertEqual(self.client.get('/api/review/01/unknown').status_code,404)
+
+    def test_review_images_open_inline_and_blend_downloads(self):
+        root=Path(self.tmp.name);folder=root/'outputs/01阀门-六视图重建-v6';folder.mkdir(parents=True)
+        (folder/'六视图-新旧对照.jpg').write_bytes(b'image fixture')
+        (folder/'model.blend').write_bytes(b'blend fixture')
+        with patch.object(server,'ROOT',root):
+            self.assertTrue(self.client.get('/api/review/01/board').headers['content-disposition'].startswith('inline'))
+            self.assertTrue(self.client.get('/api/review/01/blend').headers['content-disposition'].startswith('attachment'))
 
     def test_thin_line_cannot_be_support(self):
         self.masks();self.live['candidates'][0]['kind']='thin_line_proposal'

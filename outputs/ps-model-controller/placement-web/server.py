@@ -130,6 +130,35 @@ def register_cylinder_candidate(number):
 
 
 for _number in (15,16,36):register_cylinder_candidate(_number)
+
+
+def register_rebuilt_candidate(folder=None):
+    """Register 01 separately; source-photo fidelity is diagnostic for this version."""
+    folder = folder or ROOT/'outputs/01阀门-六视图重建-v6'
+    file = folder/'result.json'
+    if not file.is_file(): return
+    try:
+        info=json.loads(file.read_text(encoding='utf8'))
+        original=next(r for r in ROWS.values() if r['number']==1 and not r.get('manual_only'))
+        mesh=folder/'mesh.glb'
+        reference=Path(info['reference'])
+        if (info.get('draft') or info.get('status')!='review' or info.get('shape_basis')!='user_six_view_reference'
+                or info.get('number')!=1 or info.get('asset_id')!=original['asset_id']
+                or info.get('original_mesh_sha256')!=original['mesh_sha256']
+                or info.get('inputs',{}).get('rust')!=original['rust_sha256']
+                or not mesh.is_file() or digest(mesh)!=info.get('mesh_sha256')
+                or not reference.is_file() or digest(reference)!=info['inputs']['reference']):return
+        key=original['asset_id']+'-rebuild-v6'
+        ROWS[key]={**original, 'asset_id':key, 'file':'长阀杆阀门（六视图重建 v6）',
+                   'mesh':str(mesh), 'mesh_sha256':info['mesh_sha256'], 'status':'review',
+                   'reason':'六视图未标定；侧背面与物理姿态仍待人工复核',
+                   'reconstruction':{**original['reconstruction'], 'fidelity':info['source_fidelity_diagnostic']},
+                   'manual_only':True, 'version':info['version'], 'shape_basis':info['shape_basis'],
+                   'model_review':'pending', 'scene_validation':'pending'}
+    except (OSError, ValueError, KeyError, StopIteration, TypeError):return
+
+
+register_rebuilt_candidate()
 SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
@@ -178,6 +207,10 @@ async def assets(request):
                           'status': r.get('status'), 'reason': r.get('reason'),
                           'manual_only': bool(r.get('manual_only')),
                           'available': Path(r.get('mesh', '')).is_file(),
+                          'version':r.get('version', 'library-v1'),
+                          'shape_basis':r.get('shape_basis', 'single_image_reconstruction'),
+                          'model_review':r.get('model_review', 'pending'),
+                          'scene_validation':r.get('scene_validation', 'pending'),
                           'passed': bool(r.get('reconstruction', {}).get('fidelity', {}).get('passed'))}
                          for r in sorted(ROWS.values(),key=lambda row:(row['number'],bool(row.get('manual_only'))))])
 
@@ -190,6 +223,24 @@ async def model(request):
     if digest(path) != row.get('mesh_sha256'):
         return err('模型哈希与库记录不一致', 409)
     return FileResponse(path, media_type='model/gltf-binary')
+
+
+async def model_review_page(request):
+    return FileResponse(HERE/'model-review.html')
+
+
+async def model_review_file(request):
+    folder=ROOT/'outputs/01阀门-六视图重建-v6'
+    allowed={'board':'六视图-新旧对照.jpg', 'turntable':'转台-24方向.jpg', 'record':'result.json',
+             'browser':'浏览器核验.json', 'blend':'model.blend',
+             'front':'renders/new-front.png', 'wheel':'renders/detail-wheel.png',
+             'stem':'renders/detail-stem.png', 'side':'renders/detail-side.png',
+             'surface':'renders/detail-surface.png'}
+    name=allowed.get(request.path_params['name'])
+    path=folder/name if name else None
+    if not path or not path.is_file():return err('检查文件不存在',404)
+    return FileResponse(path,filename=path.name,
+                        content_disposition_type='attachment' if path.suffix.lower()=='.blend' else 'inline')
 
 
 async def create_session(request):
@@ -819,7 +870,9 @@ async def status(request):
         return err(e, 404)
 
 
-routes = [Route('/', index), Route('/api/assets', assets), Route('/api/model/{asset}', model),
+routes = [Route('/', index), Route('/review/01', model_review_page),
+          Route('/api/review/01/{name}', model_review_file),
+          Route('/api/assets', assets), Route('/api/model/{asset}', model),
           Route('/api/sessions', create_session, methods=['POST']),
           Route('/api/sessions/{sid}', status), Route('/api/sessions/{sid}/background', background),
           Route('/api/sessions/{sid}/state', update_state, methods=['POST']),
