@@ -6,8 +6,9 @@ let session=null, assets=[], model=null, position={x:0,y:0,size:300,azimuth:80,e
 const renderer=new THREE.WebGLRenderer({canvas:$('modelCanvas'),alpha:true,antialias:true,preserveDrawingBuffer:true});
 renderer.setSize(768,768,false); renderer.setClearColor(0,0); renderer.outputColorSpace=THREE.SRGBColorSpace;
 const scene=new THREE.Scene(), camera=new THREE.OrthographicCamera(-1,1,1,-1,.01,50);
-scene.add(new THREE.HemisphereLight(0xffffff,0x6a6256,2.0));
-const light=new THREE.DirectionalLight(0xffffff,2);light.position.set(-3,5,4);scene.add(light);
+// Neutral lighting while the user manipulates the original model. Scene-specific
+// light and color are estimated only after a support area has been selected.
+scene.add(new THREE.AmbientLight(0xffffff,2));
 async function api(path, options={}) {let r=await fetch(path,options);let data=await r.json();if(!r.ok)throw Error(data.error||'请求失败');return data}
 function post(data){return {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}}
 function endpoint(tail=''){return `/api/sessions/${session.id}${tail}`}

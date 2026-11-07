@@ -12,6 +12,13 @@ import blender_worker as worker
 
 request = json.loads(Path(sys.argv[sys.argv.index('--') + 1]).read_text(encoding='utf8'))
 scene = worker.setup_scene('CPU', 1024)
+# Isotropic, neutral illumination keeps the source view free of a baked-in
+# scene-specific key light. The scene match is applied after placement.
+for obj in tuple(bpy.data.objects):
+    if obj.type == 'LIGHT':
+        bpy.data.objects.remove(obj, do_unlink=True)
+scene.world.node_tree.nodes.get('Background').inputs['Color'].default_value = (1, 1, 1, 1)
+scene.world.node_tree.nodes.get('Background').inputs['Strength'].default_value = 1.0
 bpy.ops.import_scene.gltf(filepath=request['mesh'])
 objects = [obj for obj in bpy.context.selected_objects if obj.type == 'MESH']
 if not objects:

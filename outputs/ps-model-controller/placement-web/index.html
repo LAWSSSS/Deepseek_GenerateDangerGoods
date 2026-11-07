@@ -7,7 +7,7 @@
 <main><aside><div class="tabs"><button id="manualTab" class="active">人工放置</button><button id="autoTab">自动放置</button></div>
 <section><h2>1. 选择素材</h2><label>背景照片<input id="backgroundInput" type="file" accept="image/png,image/jpeg,image/webp"></label><button id="sceneButton" class="secondary">使用现有监控背景</button>
 <label>异物<select id="asset"><option>正在加载…</option></select></label><p id="assetStatus" class="hint"></p></section>
-<section id="manualControls"><h2>2. 摆放和视角</h2><p class="hint">拖动物体移动；拖动右上方圆点调整视角；拖动右下方方块调整大小。坐标对应原图像素。</p>
+<section id="manualControls"><h2>2. 摆放和视角</h2><p class="hint">模型先使用均衡中性光；选择承托面后，按局部环境的明暗和颜色生成待审效果。拖动物体移动；拖动右上方圆点调整视角；拖动右下方方块调整大小。坐标对应原图像素。</p>
 <div class="grid"><label>水平角<input id="azimuth" type="number" min="0" max="359" value="80"></label><label>俯角<input id="elevation" type="number" min="10" max="85" value="45"></label><label>占位宽度 px<input id="size" type="number" min="16" value="300"></label></div>
 <button id="analyze">识别可能的遮挡</button><div id="regions"></div><button id="undo" class="secondary">撤销上次遮挡调整</button>
 <h2>3. 对话确认</h2><p class="hint">对话会向 DeepSeek 发送缩小的背景和候选区域；密钥仅从本机环境变量读取。</p><div id="messages"></div><textarea id="chatText" placeholder="例如：编号 2 的钢筋在物体前面"></textarea><button id="chat" class="secondary">发送给 AI</button>

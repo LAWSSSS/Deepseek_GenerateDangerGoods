@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 from starlette.testclient import TestClient
 import server
+from relight import ambient_match
 
 
 class PlacementChecks(unittest.TestCase):
@@ -90,6 +91,43 @@ class PlacementChecks(unittest.TestCase):
             response=self.client.post(self.url+'/state',json={**self.state,**bad}) if 'size' not in bad else None
             if response is not None:self.assertEqual(response.status_code,400)
         with self.assertRaises(ValueError):server.validate_state({**self.state,'size':float('nan')},self.live)
+
+
+class RelightChecks(unittest.TestCase):
+    def test_ambient_matching_preserves_alpha_and_excludes_foreground(self):
+        frame = Image.new('RGB',(240,240),(75,80,85))
+        obj = Image.new('RGBA',(80,80),(150,130,110,0))
+        alpha = np.zeros((80,80),np.uint8); alpha[10:70,10:70]=255; alpha[30:50,30:50]=0
+        obj.putalpha(Image.fromarray(alpha))
+        support = np.ones((240,240),bool)
+        foreground = np.zeros((240,240),bool); foreground[:,120:]=True
+        result, info = ambient_match(frame,support,foreground,obj,80,80)
+        self.assertEqual(info['status'],'measured')
+        self.assertEqual(info['light_direction'],'unknown')
+        self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')),alpha))
+        self.assertLess(info['support_samples'],np.count_nonzero(support))
+        self.assertFalse(np.array_equal(np.asarray(result)[:,:,:3],np.asarray(obj)[:,:,:3]))
+        self.assertTrue(np.all(np.asarray(obj)[:,:,0]==150))
+
+    def test_insufficient_support_keeps_original(self):
+        frame=Image.new('RGB',(100,100),(80,80,80))
+        obj=Image.new('RGBA',(30,30),(120,110,100,255))
+        mask=np.zeros((100,100),bool)
+        result,info=ambient_match(frame,mask,mask,obj,35,35)
+        self.assertEqual(info['status'],'insufficient_samples')
+        self.assertTrue(np.array_equal(np.asarray(obj),np.asarray(result)))
+
+    def test_gradient_is_bounded_and_not_claimed_as_light_direction(self):
+        x = np.linspace(65,150,240,dtype=np.uint8)
+        pixels = np.repeat(np.broadcast_to(x,(240,240))[:,:,None],3,axis=2).copy()
+        frame = Image.fromarray(pixels)
+        obj = Image.new('RGBA',(80,80),(145,135,125,255))
+        support = np.ones((240,240),bool)
+        result,info = ambient_match(frame,support,np.zeros_like(support),obj,80,80)
+        self.assertEqual(info['light_direction'],'unknown')
+        self.assertIsNotNone(info['screen_gradient_rgb_per_object_width'])
+        self.assertLessEqual(max(abs(v) for v in info['screen_gradient_rgb_per_object_width']),5.4)
+        self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')),np.asarray(obj.getchannel('A'))))
 
 
 if __name__=='__main__':

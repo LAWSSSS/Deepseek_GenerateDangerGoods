@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE.parent))
 from scene_v2 import Perception, digest
-from photometry import fit_photo
+from relight import ambient_match
 
 LIBRARY = ROOT / 'outputs/三维模型库-圆润复验/results.jsonl'
 SCENE = ROOT / 'outputs/固定场景-39件尺寸标注/场景配置.json'
@@ -37,6 +37,7 @@ SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
 CHAT_ACTIVE = set()
+RENDER_ALGORITHM = 'neutral-ambient-v1'
 
 
 def err(message, status=400):
@@ -304,41 +305,20 @@ def foreground(s):
 
 
 def match_local_photo(s, obj, x, y):
-    """Match only an explicitly selected support mask, excluding foreground and dark pixels."""
+    """Estimate ambient appearance only from the explicitly selected support."""
     n = s.get('support')
     if not n:
-        return obj, None, None
+        return obj.copy(), None
     path = Path(s['directory']) / f"analysis-{s['revision']}" / f'{n}.png'
-    mask = np.asarray(Image.open(path).convert('L')) > 127
-    mask &= np.asarray(foreground(s)) < 128
     side = obj.width
-    # Restrict sampling to a neighborhood around the rendered object.
-    yy, xx = np.ogrid[:s['height'], :s['width']]
-    cx, cy = x+side/2, y+side/2
-    distance = np.sqrt((xx-cx)**2 + (yy-cy)**2)
-    mask &= (distance > side*.55) & (distance < side*.9)
-    frame = Image.open(s['background']).convert('RGB')
-    gray = np.asarray(frame.convert('L'))
-    if mask.sum() < 100:
-        return obj, None, {'status':'insufficient_samples'}
-    mask &= gray >= np.percentile(gray[mask], 20)
-    bbox = obj.getchannel('A').getbbox()
-    if not bbox:
-        return obj,None,{'status':'insufficient_samples'}
-    tone, photo, _ = fit_photo(frame, mask, obj.crop(bbox), 0, (bbox[3]-bbox[1],bbox[2]-bbox[0]))
-    tone['blur_px'] = 0
-    if photo.get('status') != 'measured':
-        return obj,None,photo
-    # Approximation of the Photoshop curves for the review image; the PSD applies
-    # the original curve to a clipped layer and remains the definitive export.
-    arr = np.array(obj, dtype=np.uint8)
-    curve = tone.get('luma_curve')
-    if curve:
-        lut = np.interp(np.arange(256), [v[0] for v in curve], [v[1] for v in curve])
-        arr[:,:,:3] = np.clip(lut[arr[:,:,:3]],0,255).astype('uint8')
-    if tone.get('rgb_cast'):
-        arr[:,:,:3] = np.clip(arr[:,:,:3].astype('float32') + np.asarray(tone['rgb_cast']),0,255).astype('uint8')
-    return Image.fromarray(arr),tone,photo
+    pad = round(side*.5)
+    crop = (max(0,x-pad), max(0,y-pad), min(s['width'],x+side+pad), min(s['height'],y+side+pad))
+    with Image.open(path) as im:
+        mask = np.asarray(im.convert('L').crop(crop)) > 127
+    front = np.asarray(foreground(s).crop(crop)) >= 128
+    with Image.open(s['background']) as im:
+        frame = im.convert('RGB').crop(crop)
+    return ambient_match(frame, mask, front, obj, x-crop[0], y-crop[1])
 
 
 async def preview(request):
@@ -395,7 +375,7 @@ async def preview(request):
         side = round(st['size'])
         obj = obj.resize((side, side), Image.Resampling.LANCZOS)
         x, y = round(st['x']-side/2), round(st['y']-side/2)
-        matched, tone, photo = await asyncio.to_thread(match_local_photo,s,obj,x,y)
+        matched, photo = await asyncio.to_thread(match_local_photo,s,obj,x,y)
         base = Image.open(s['background']).convert('RGBA')
         result = base.copy()
         result.alpha_composite(matched, (x, y))
@@ -404,17 +384,19 @@ async def preview(request):
             if revision != s['revision'] or generation != s['generation']:
                 return err('摆位已变化，忽略旧预览', 409)
             obj.save(Path(s['directory']) / 'object.png')
+            matched.save(Path(s['directory']) / 'object-matched.png')
             result.convert('RGB').save(Path(s['directory']) / 'preview.png')
             s['preview_revision'] = revision
             s['preview_generation'] = generation
+            s['render_algorithm'] = RENDER_ALGORITHM
             s['projection_iou'] = round(iou, 4)
             bounds = obj.getchannel('A').getbbox()
             s['rendered_bounds_px'] = [x+bounds[0], y+bounds[1], x+bounds[2], y+bounds[3]]
             s['rendered_major_px'] = max(bounds[2]-bounds[0], bounds[3]-bounds[1])
-            s['tone'] = tone
+            s['tone'] = None
             s['photometry'] = photo
             s['warnings'] = ['Blender 视角渲染，未验证刚体、接触、尺度和遮挡；不是 Photoshop 最终结果。',
-                             '已按人工选择的区域估算调色；承托面及保护区仍待确认。' if tone else '未选择可用的承托面，尚未自动调色。',
+                             '已依据所选区域估算局部环境光和颜色；实际光源方向、承托面及保护区仍待确认。' if photo and photo.get('status')=='measured' else '未选择可用的承托面，尚未重建环境光和调色。',
                              '没有经过验证的接触点，尚未生成接触阴影。']
             save(s)
         return JSONResponse(snapshot(s))
@@ -425,7 +407,8 @@ async def preview(request):
 async def preview_image(request):
     try:
         s = session(request)
-        if s['preview_revision'] != s['revision'] or s.get('preview_generation') != s['generation']:
+        if (s['preview_revision'] != s['revision'] or s.get('preview_generation') != s['generation']
+                or s.get('render_algorithm') != RENDER_ALGORITHM):
             raise ValueError('预览已过期')
         return FileResponse(Path(s['directory']) / 'preview.png', media_type='image/png')
     except ValueError as e:
@@ -441,12 +424,13 @@ async def photoshop_export(request):
         from run import Config, load
         s = session(request)
         rev, generation = s['revision'], s['generation']
-        if s['preview_revision'] != rev or s.get('preview_generation') != generation:
+        if (s['preview_revision'] != rev or s.get('preview_generation') != generation
+                or s.get('render_algorithm') != RENDER_ALGORITHM):
             raise ValueError('请先生成当前版本的预览')
         folder = Path(s['directory']) / ('export-' + secrets.token_hex(8))
         folder.mkdir()
         st = s['state'].copy()
-        with Image.open(Path(s['directory'])/'object.png') as im:
+        with Image.open(Path(s['directory'])/'object-matched.png') as im:
             asset = im.convert('RGBA')
         bbox = asset.getchannel('A').getbbox()
         if not bbox:
@@ -456,11 +440,14 @@ async def photoshop_export(request):
         if l < 0 or t < 0 or r > s['width'] or b > s['height']:
             raise ValueError('物体超出背景边界，不能导出')
         asset.crop(bbox).save(folder/'asset.png')
+        with Image.open(Path(s['directory'])/'object.png') as im:
+            im.convert('RGBA').crop(bbox).save(folder/'neutral.png')
         mask = np.asarray(foreground(s))
         entry = save_mask(mask, folder/'foreground.png', [0,0,s['width'],s['height']], (255,255,255))
         spec = {'id':'manual','asset':str(folder/'asset.png'),'center':[(l+r)/2,(t+b)/2],
                 'width':r-l,'angle':0,'canvas':[s['width'],s['height']], 'crop':[0,0,s['width'],s['height']],
-                'tone':s.get('tone') or {'brightness':0,'warmth':0,'saturation':0,'blur_px':0},'shade':None,'occlusion':entry,
+                'unmatched_asset':str(folder/'neutral.png'),
+                'tone':{'brightness':0,'warmth':0,'saturation':0,'blur_px':0},'shade':None,'occlusion':entry,
                 'png':str(folder/'manual.png'),'psd':str(folder/'manual.psd')}
         mcp = ROOT/'work/photoshop-mcp-env/Scripts/photoshop-mcp-server.exe'
         if not mcp.is_file():
