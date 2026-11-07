@@ -55,12 +55,14 @@ def opening_clearance(holes):
     return np.where(holes,inside-.5,.5-outside)
 
 
-def cut_opening(field,u,v,depth,pitch,focal):
+def cut_opening(field,u,v,depth,pitch,focal,padding_factor=.85):
     # Center-only carving leaves voxel edges protruding into narrow openings.
     # Allow a bounded rim for the projected voxel footprint, then verify the
     # result against the unchanged source-view gates in the actual render.
     near=np.maximum(depth-pitch/2,1e-6)
-    half_span=focal*pitch/near*.85
+    if not 0<=padding_factor<=.85:
+        raise ValueError('开孔外扩系数超出范围')
+    half_span=focal*pitch/near*padding_factor
     padding=np.minimum(half_span,2.5)
     distance=ndimage.map_coordinates(field,[v,u],order=1,mode="constant",cval=-1e6)
     return (depth>0)&(distance>=-padding)
@@ -74,7 +76,7 @@ def adaptive_resolution(holes):
     return 384 if smallest<=4 else (256 if smallest<=6 else 192)
 
 
-def carve(mesh_path,alpha_path,texture_path,camera,out,resolution=None):
+def carve(mesh_path,alpha_path,texture_path,camera,out,resolution=None,padding_factor=.85):
     mesh=trimesh.load(mesh_path,force="mesh",process=False)
     if not mesh.is_watertight:
         raise ValueError("原始重建网格不闭合，无法可靠进行孔洞体积修复")
@@ -101,7 +103,7 @@ def carve(mesh_path,alpha_path,texture_path,camera,out,resolution=None):
         selected=occupied[start:start+150000]
         points=grid.indices_to_points(selected)
         u,v,depth=project(points,camera)
-        chosen=selected[cut_opening(field,u,v,depth,pitch,focal)]
+        chosen=selected[cut_opening(field,u,v,depth,pitch,focal,padding_factor)]
         if len(chosen):
             dense[chosen[:,0],chosen[:,1],chosen[:,2]]=False
             removed+=len(chosen)
@@ -131,7 +133,7 @@ def carve(mesh_path,alpha_path,texture_path,camera,out,resolution=None):
     repaired.visual.vertex_colors=np.column_stack((colors,np.full(len(colors),255,dtype=np.uint8)))
     out.mkdir(parents=True,exist_ok=True)
     repaired.export(out/"mesh.glb")
-    result={"method":"source_hole_voxel_footprint_carve","resolution":resolution,"source_holes":count,
+    result={"method":"source_hole_voxel_footprint_carve","resolution":resolution,"source_holes":count,"padding_factor":padding_factor,
             "removed_voxels":removed,"removed_fraction":round(fraction,5),
             "components":substantial,"watertight":bool(repaired.is_watertight),
             "vertices":len(repaired.vertices),"faces":len(repaired.faces),
@@ -144,9 +146,10 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     for name in ("mesh","alpha","texture","camera","out"):
         parser.add_argument("--"+name,type=Path,required=True)
+    parser.add_argument('--padding-factor',type=float,default=.85)
     args=parser.parse_args()
     camera=json.loads(args.camera.read_text(encoding="utf8"))
-    carve(args.mesh,args.alpha,args.texture,camera,args.out)
+    carve(args.mesh,args.alpha,args.texture,camera,args.out,padding_factor=args.padding_factor)
 
 
 if __name__=="__main__":

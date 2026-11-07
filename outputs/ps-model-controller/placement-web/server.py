@@ -27,6 +27,8 @@ ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE.parent))
 from scene_v2 import Perception, digest
 from relight import ambient_match
+from occlusion import refine_thin_mask, thin_line_seeds
+from lighting_estimate import estimate_light_from_rods
 
 LIBRARY = ROOT / 'outputs/三维模型库-圆润复验/results.jsonl'
 SCENE = ROOT / 'outputs/固定场景-39件尺寸标注/场景配置.json'
@@ -61,11 +63,79 @@ def register_review_candidate():
 
 
 register_review_candidate()
+
+
+def register_opening_candidate():
+    """Expose only a source-verified candidate with corroborated source holes."""
+    folder=ROOT/'outputs/三维模型-已证实孔洞修复试验-v4/29'
+    file=folder/'result.json'
+    if not file.is_file():return
+    try:
+        info=json.loads(file.read_text(encoding='utf8'))
+        original=next(r for r in ROWS.values() if r['number']==29 and not r.get('manual_only'))
+        mesh=folder/'candidate/mesh.glb';proof=info['fidelity']
+        if (info['status']!='source_pass_pending_structure' or not info['source_hole_corroboration']['corroborated']
+                or not proof['passed'] or proof['iou']<.90 or proof['filled_holes']!=0
+                or proof['narrow_recall']<.80 or not mesh.is_file() or digest(mesh)!=info['mesh_sha256']
+                or info['original_mesh_sha256']!=original['mesh_sha256']):return
+        key=original['asset_id']+'-hole-repair'
+        ROWS[key]={**original,'asset_id':key,'file':'液压减震器2（孔洞修复候选）',
+                   'mesh':str(mesh),'mesh_sha256':info['mesh_sha256'],'status':'review',
+                   'reason':'已核对源图孔洞；隐藏结构、外观和落稳仍待复核',
+                   'reconstruction':{**original['reconstruction'],'fidelity':proof},'manual_only':True}
+    except (OSError,ValueError,KeyError,StopIteration):return
+
+
+register_opening_candidate()
+
+
+def register_fragment_candidate(number,folder_name,name):
+    folder=ROOT/'outputs'/folder_name;file=folder/'result.json'
+    if not file.is_file():return
+    try:
+        info=json.loads(file.read_text(encoding='utf8'))
+        original=next(r for r in ROWS.values() if r['number']==number and not r.get('manual_only'))
+        mesh=folder/'mesh.glb';proof=info['fidelity']
+        if (info['status']!='source_pass_pending_structure' or not proof['passed'] or proof['iou']<.90
+                or proof['filled_holes']!=0 or proof['narrow_recall']<.80 or not mesh.is_file()
+                or digest(mesh)!=info['mesh_sha256'] or info['source_sha256']!=original['mesh_sha256']):return
+        key=original['asset_id']+'-fragment-repair'
+        ROWS[key]={**original,'asset_id':key,'file':name,
+                   'mesh':str(mesh),'mesh_sha256':info['mesh_sha256'],'status':'review',
+                   'reason':'原图未见的小漂浮碎片已移除；隐藏结构和落稳仍待复核',
+                   'reconstruction':{**original['reconstruction'],'fidelity':proof},'manual_only':True}
+    except (OSError,ValueError,KeyError,StopIteration):return
+
+
+register_fragment_candidate(8,'分离过滤器-漂浮碎片修复候选','分离过滤器（漂浮碎片修复候选）')
+register_fragment_candidate(19,'气瓶组-背部浮片修复候选','气瓶组（背部浮片修复候选）')
+
+
+def register_cylinder_candidate(number):
+    folder=ROOT/'outputs/圆柱物品-形体修复试验'/f'{number:02d}';file=folder/'result.json'
+    if not file.is_file():return
+    try:
+        info=json.loads(file.read_text(encoding='utf8'))
+        original=next(r for r in ROWS.values() if r['number']==number and not r.get('manual_only'))
+        mesh=folder/'mesh.glb';proof=info['fidelity']
+        if (info['status']!='source_pass_pending_structure' or not proof['passed'] or proof['iou']<.90
+                or proof['filled_holes']!=0 or proof['narrow_recall']<.80 or not mesh.is_file()
+                or digest(mesh)!=info['mesh_sha256'] or info['original_mesh_sha256']!=original['mesh_sha256']):return
+        key=original['asset_id']+'-cylinder-repair'
+        ROWS[key]={**original,'asset_id':key,'file':original['file']+'（圆柱形体修复候选）',
+                   'mesh':str(mesh),'mesh_sha256':info['mesh_sha256'],'status':'review',
+                   'reason':'依据参考图近似调整截面；侧背面和落稳仍待复核',
+                   'reconstruction':{**original['reconstruction'],'fidelity':proof},'manual_only':True}
+    except (OSError,ValueError,KeyError,StopIteration):return
+
+
+for _number in (15,16,36):register_cylinder_candidate(_number)
 SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
 CHAT_ACTIVE = set()
-RENDER_ALGORITHM = 'neutral-ambient-canonical-axis-v3'
+RENDER_ALGORITHM = 'scene-light-canonical-axis-v4'
+ANALYSIS_ALGORITHM = 'native-thin-occlusion-v1'
 
 
 def err(message, status=400):
@@ -192,6 +262,7 @@ async def update_state(request):
                 s['support'] = None
                 s['support_mode'] = None
                 s['candidates'] = []
+                s['analysis_algorithm'] = None
                 s['history'] = []
                 s['preview_revision'] = None
                 s.pop('export', None)
@@ -226,13 +297,43 @@ def compute_candidates(s, revision, state):
         candidates.append((mask, overlap))
     candidates.sort(key=lambda item: item[1], reverse=True)
     results = []
+    with Image.open(s['background']) as source:
+        frame=ImageOps.exif_transpose(source).convert('RGB')
+    side=state['size'];cx=state['x'];cy=state['y']
+    rect=(max(0,int(cx-side)),max(0,int(cy-side)),min(original[0],int(cx+side)),min(original[1],int(cy+side)))
     for i, (mask, _) in enumerate(candidates[:12], 1):
         ys, xs = np.nonzero(mask)
-        full = cv2.resize(mask.astype('uint8') * 255, original, interpolation=cv2.INTER_NEAREST)
-        Image.fromarray(full).save(folder / f'{i}.png')
+        full = cv2.resize(mask.astype('uint8'), original, interpolation=cv2.INTER_NEAREST)>0
+        full, refinement=refine_thin_mask(ENGINE,frame,full,rect,radius=min(16,max(5,round(2/max(sx,sy)))))
+        Image.fromarray(full.astype('uint8')*255).save(folder / f'{i}.png')
         results.append({'id': i, 'bounds': [round(xs.min()/sx), round(ys.min()/sy), round((xs.max()+1)/sx), round((ys.max()+1)/sy)],
                         'support_score':round(float((mask & contact).sum()/max(1,contact.sum())),3),
+                        'boundary_refinement':refinement,
                         'relative_depth': round(float(np.median(depth[mask])), 3), 'order': 'unknown'})
+    local=frame.crop(rect)
+    for seed in thin_line_seeds(local,(cx-rect[0],cy-rect[1]),side,limit=4):
+        full=np.zeros((original[1],original[0]),dtype=bool)
+        full[rect[1]:rect[3],rect[0]:rect[2]]=seed
+        full,refinement=refine_thin_mask(ENGINE,frame,full,rect,radius=6)
+        # Reject almost-identical duplicates, but retain distinct crossings.
+        part=full[rect[1]:rect[3],rect[0]:rect[2]]
+        duplicate=False
+        for c in results:
+            with Image.open(folder/f"{c['id']}.png") as im:
+                other=np.asarray(im.crop(rect))>0
+            if np.count_nonzero(part&other)/max(1,np.count_nonzero(part|other))>.65:
+                duplicate=True;break
+        if duplicate:
+            continue
+        ys,xs=np.nonzero(full)
+        if not len(xs):continue
+        i=len(results)+1
+        Image.fromarray(full.astype('uint8')*255).save(folder/f'{i}.png')
+        depthmask=cv2.resize(full.astype('uint8'),(depth.shape[1],depth.shape[0]),interpolation=cv2.INTER_NEAREST)>0
+        results.append({'id':i,'bounds':[int(xs.min()),int(ys.min()),int(xs.max()+1),int(ys.max()+1)],
+                        'support_score':0,'boundary_refinement':refinement,'kind':'thin_line_proposal',
+                        'relative_depth':round(float(np.median(depth[depthmask])),3) if depthmask.any() else None,
+                        'order':'unknown'})
     return results
 
 
@@ -248,6 +349,7 @@ async def analyze(request):
             if rev != s['revision'] or generation != s['generation']:
                 return err('摆位或遮挡已变化，忽略旧分析', 409)
             s['candidates'], s['selected'] = candidates, []
+            s['analysis_algorithm'] = ANALYSIS_ALGORITHM
             s['support'] = None
             s['support_mode'] = None
             s['generation'] += 1
@@ -319,6 +421,8 @@ async def support_selection(request):
         n = data.get('support')
         if n is not None and (type(n) is not int or n not in [c['id'] for c in s['candidates']]):
             raise ValueError('承托面区域无效')
+        if n is not None and next(c for c in s['candidates'] if c['id']==n).get('kind')=='thin_line_proposal':
+            raise ValueError('细钢件候选不能作为承托面')
         if n in s['selected']:
             raise ValueError('同一区域不能同时作为前景和承托面')
         async with s['lock']:
@@ -391,6 +495,7 @@ async def preview(request):
                     if revision != s['revision'] or old_generation != s['generation']:
                         return err('摆位或遮挡已变化，忽略旧分析',409)
                     s['candidates'] = found
+                    s['analysis_algorithm'] = ANALYSIS_ALGORITHM
                     s['generation'] += 1
                     save(s)
             except (FileNotFoundError,RuntimeError,ValueError):
@@ -415,7 +520,13 @@ async def preview(request):
         folder = Path(s['directory']) / ('render-' + run_id)
         folder.mkdir()
         output = folder / 'object.png'
-        req = {'mesh':str(mesh), 'azimuth':st['azimuth'], 'elevation':st['elevation'], 'output':str(output)}
+        side=round(st['size']);cx=st['x'];cy=st['y']
+        light_rect=(max(0,int(cx-side)),max(0,int(cy-side)),min(s['width'],int(cx+side)),min(s['height'],int(cy+side)))
+        with Image.open(s['background']) as background:
+            light_frame=ImageOps.exif_transpose(background).convert('RGB').crop(light_rect)
+        lighting=await asyncio.to_thread(estimate_light_from_rods,light_frame,(cx-light_rect[0],cy-light_rect[1]),side)
+        req = {'mesh':str(mesh), 'azimuth':st['azimuth'], 'elevation':st['elevation'], 'output':str(output),
+               'lighting':lighting}
         (folder/'request.json').write_text(json.dumps(req), encoding='utf8')
         blender = ROOT/'work/blender45/blender-4.5.3-windows-x64/blender.exe'
         if not blender.is_file():
@@ -451,6 +562,11 @@ async def preview(request):
         object_pixels = np.asarray(obj.getchannel('A')) >= 128
         overlap = np.asarray(front_mask.crop((x,y,x+side,y+side))) >= 128
         visible_ratio = 1-float(np.count_nonzero(object_pixels & overlap))/max(1,int(object_pixels.sum()))
+        overlaps={}
+        for candidate in s['candidates']:
+            with Image.open(Path(s['directory'])/f"analysis-{revision}"/f"{candidate['id']}.png") as im:
+                mask=np.asarray(im.convert('L').crop((x,y,x+side,y+side)))>=128
+            overlaps[candidate['id']]=int(np.count_nonzero(mask&object_pixels))
         result.paste(base, (0, 0), front_mask)
         async with s['lock']:
             if revision != s['revision'] or generation != s['generation']:
@@ -463,7 +579,10 @@ async def preview(request):
             s['render_algorithm'] = RENDER_ALGORITHM
             s.pop('export',None)
             s['projection_iou'] = round(iou, 4)
+            s['lighting']=lighting
             s['object_visible_fraction'] = round(visible_ratio,4)
+            for candidate in s['candidates']:
+                candidate['object_overlap_pixels']=overlaps[candidate['id']]
             bounds = obj.getchannel('A').getbbox()
             s['rendered_bounds_px'] = [x+bounds[0], y+bounds[1], x+bounds[2], y+bounds[3]]
             s['rendered_major_px'] = max(bounds[2]-bounds[0], bounds[3]-bounds[1])
@@ -474,6 +593,12 @@ async def preview(request):
                              '没有经过验证的接触点，尚未生成接触阴影。']
             if visible_ratio<.5:
                 s['warnings'].append(f'遮挡后物体仅露出约 {visible_ratio:.0%}，请确认前景选择。')
+            if s['selected'] and all(overlaps.get(n,0)==0 for n in s['selected']):
+                s['warnings'].append('所选前景区域没有与物体相交，未形成遮挡。')
+            if s['candidates'] and s.get('analysis_algorithm')!=ANALYSIS_ALGORITHM:
+                s['warnings'].append('当前遮挡候选来自旧版分析；请重新识别以获得细钢件候选。')
+            s['warnings'].append('光向由局部钢件明暗低置信度估计，非实测。' if lighting['status']=='estimated'
+                                 else '未找到足够一致的光向线索，使用中性环境光。')
             save(s)
         return JSONResponse(snapshot(s))
     except (ValueError, OSError, TypeError) as e:

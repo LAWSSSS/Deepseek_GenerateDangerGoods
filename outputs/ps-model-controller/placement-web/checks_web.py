@@ -2,6 +2,7 @@
 import io
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,8 @@ from PIL import Image
 from starlette.testclient import TestClient
 import server
 from relight import ambient_match
+from occlusion import refine_thin_mask, thin_line_seeds
+from lighting_estimate import estimate_light_from_rods
 
 
 class PlacementChecks(unittest.TestCase):
@@ -101,6 +104,11 @@ class PlacementChecks(unittest.TestCase):
         response=self.client.post(self.url+'/automatic')
         self.assertEqual(response.status_code,400)
 
+    def test_thin_line_cannot_be_support(self):
+        self.masks();self.live['candidates'][0]['kind']='thin_line_proposal'
+        result=self.client.post(self.url+'/support',json={'revision':self.live['revision'],'support':1})
+        self.assertEqual(result.status_code,400)
+
     def test_validate_bad_pose_and_model(self):
         for bad in ({'size':float('nan')},{'asset':'../../bad'},{'elevation':90}):
             response=self.client.post(self.url+'/state',json={**self.state,**bad}) if 'size' not in bad else None
@@ -157,6 +165,60 @@ class RelightChecks(unittest.TestCase):
         result,info=ambient_match(frame,np.ones((240,240),bool),np.zeros((240,240),bool),obj,80,80)
         self.assertGreater(info['detail_blur_sigma_px'],0)
         self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')),pixels[:,:,3]))
+
+
+class ThinOcclusionChecks(unittest.TestCase):
+    def test_native_line_pair_proposal(self):
+        pixels=np.full((240,240,3),180,np.uint8)
+        pixels[30:210,115:121]=40
+        seeds=thin_line_seeds(Image.fromarray(pixels),(120,120),160)
+        self.assertTrue(seeds)
+        self.assertGreater(max(int(seed[30:210,115:121].sum()) for seed in seeds),200)
+
+    def test_refinement_is_bounded_and_does_not_change_depth_order(self):
+        frame=Image.new('RGB',(100,100),(100,100,100))
+        seed=np.zeros((100,100),bool);seed[15:85,48:52]=True
+        class Fake:
+            def refine_crop(self,image,mask):
+                output=mask.copy();output[:,1:] |= mask[:,:-1];return output
+        refined,info=refine_thin_mask(Fake(),frame,seed,(0,0,100,100),radius=3)
+        self.assertEqual(info['status'],'refined')
+        self.assertEqual(info['order'],'unknown')
+        self.assertTrue(refined[20:80,52].all())
+        self.assertFalse(refined[:,60:].any())
+
+    def test_untrusted_refinement_is_not_applied(self):
+        frame=Image.new('RGB',(100,100),(100,100,100))
+        seed=np.zeros((100,100),bool);seed[15:85,48:52]=True
+        class Fake:
+            def refine_crop(self,image,mask):return np.ones(mask.shape,bool)
+        refined,info=refine_thin_mask(Fake(),frame,seed,(0,0,100,100),radius=3)
+        self.assertEqual(info['status'],'unknown')
+        self.assertTrue(np.array_equal(refined,seed))
+
+
+class SceneLightChecks(unittest.TestCase):
+    def test_no_cues_remains_unknown(self):
+        frame=Image.new('RGB',(200,200),(100,100,100))
+        result=estimate_light_from_rods(frame,(100,100),150)
+        self.assertEqual(result['status'],'unknown')
+
+    def test_diverse_consistent_cues_produce_bounded_direction(self):
+        import cv2
+        shape=(300,300);masks=[]
+        for start,end in [((30,50),(120,50)),((170,40),(170,130)),((90,180),(170,260)),((200,200),(260,260))]:
+            mask=np.zeros(shape,np.uint8);cv2.line(mask,start,end,1,12);masks.append(mask>0)
+        yy,xx=np.indices(shape);pixels=np.full(shape,120.0)
+        for mask in masks:
+            y,x=np.nonzero(mask);cx=x.mean();cy=y.mean()
+            pixels[y,x]=120+2*(x-cx)+1*(y-cy)
+        pixels=np.uint8(np.clip(pixels,0,255))
+        frame=Image.fromarray(np.repeat(pixels[:,:,None],3,axis=2))
+        with patch('lighting_estimate.thin_line_seeds',return_value=masks):
+            result=estimate_light_from_rods(frame,(150,150),250)
+        self.assertEqual(result['status'],'estimated')
+        self.assertEqual(result['confidence'],'low')
+        self.assertGreater(result['direction_screen'][0],.5)
 
 
 if __name__=='__main__':

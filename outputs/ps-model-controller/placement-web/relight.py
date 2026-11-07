@@ -30,7 +30,7 @@ def ambient_match(frame, support, foreground, obj, x, y):
     bbox = obj.getchannel('A').getbbox()
     if not bbox:
         return obj.copy(), {'status':'insufficient_samples', 'reason':'物体透明度为空'}
-    tone, photo, _ = fit_photo(frame, mask, obj.crop(bbox), 0, (bbox[3]-bbox[1],bbox[2]-bbox[0]))
+    tone, photo, grain = fit_photo(frame, mask, obj.crop(bbox), 0, (bbox[3]-bbox[1],bbox[2]-bbox[0]))
     if photo.get('status') != 'measured':
         return obj.copy(), photo
     arr = np.array(obj, dtype=np.uint8)
@@ -98,6 +98,11 @@ def ambient_match(frame, support, foreground, obj, x, y):
         premultiplied=cv2.GaussianBlur(rgb.astype(np.float32)*coverage[:,:,None],(0,0),blur)
         softened=premultiplied/np.maximum(weight[:,:,None],1e-5)
         rgb=np.where((weight>1e-5)[:,:,None],softened,rgb)
+    grain_applied=False
+    if grain is not None and x>=0 and y>=0 and x+obj.width<=width and y+obj.height<=height:
+        residual=(grain[y:y+obj.height,x:x+obj.width].astype(np.float32)-128)/2.5
+        rgb+=np.clip(residual,-2,2)[:,:,None]
+        grain_applied=True
     arr[:,:,:3] = np.rint(np.clip(rgb,0,255)).astype(np.uint8)
     arr[:,:,3] = original_alpha
     output = Image.fromarray(arr)
@@ -106,6 +111,7 @@ def ambient_match(frame, support, foreground, obj, x, y):
                   'screen_gradient_rgb_per_object_width':gradient,
                   'exposure_gain':round(exposure_gain,4),
                   'detail_blur_sigma_px':round(blur,3) if blur>=.15 else 0,
+                  'grain_from_scene':grain_applied,
                   'light_direction':'unknown', 'support_verification':'user_selected_pending',
                   'object_after': measured[0] if measured else None})
     return output, photo
