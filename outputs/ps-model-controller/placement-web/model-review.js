@@ -8,12 +8,20 @@ renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.setPixelRatio(Math.min(d
 const scene=new THREE.Scene();scene.background=new THREE.Color('#d9dedd');
 const camera=new THREE.PerspectiveCamera(35,1,.01,100);
 const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;
-scene.add(new THREE.AmbientLight(0xffffff,1.0));
-for(const [position,intensity] of [[[4,6,5],2.0],[[-4,3,-4],1.0]]){
+scene.add(new THREE.AmbientLight(0xffffff,.75));
+for(const [position,intensity] of [[[4,6,5],1.4],[[-4,3,-4],.7]]){
   const light=new THREE.DirectionalLight(0xffffff,intensity);light.position.set(...position);scene.add(light);
 }
-// Metals need a neutral reflected environment as well as direct lights.
-const pixels=new Uint8Array(64*32*4).fill(255), texture=new THREE.DataTexture(pixels,64,32,THREE.RGBAFormat);
+// Neutral softbox-shaped reflections reveal metal without embedding light in
+// the model. This environment is used only in the standalone review page.
+const width=512,height=256,pixels=new Uint8Array(width*height*4);
+const panels=[[.13,.46,.045,.28,.82],[.39,.43,.055,.34,.92],[.72,.47,.035,.25,.74],[.91,.30,.09,.11,.52]];
+for(let y=0;y<height;y++)for(let x=0;x<width;x++){
+  const u=x/width,v=y/height;let value=.30+.10*Math.cos((v-.35)*Math.PI);
+  for(const [cx,cy,sx,sy,power] of panels){const d=Math.abs(u-cx),dx=Math.min(d,1-d)/sx,dy=Math.abs(v-cy)/sy;value+=power*Math.exp(-Math.pow(dx,6)-Math.pow(dy,6))}
+  const channel=Math.round(Math.min(1,value)*255),i=(y*width+x)*4;pixels[i]=pixels[i+1]=pixels[i+2]=channel;pixels[i+3]=255;
+}
+const texture=new THREE.DataTexture(pixels,width,height,THREE.RGBAFormat);
 texture.colorSpace=THREE.SRGBColorSpace;texture.mapping=THREE.EquirectangularReflectionMapping;texture.needsUpdate=true;
 const generator=new THREE.PMREMGenerator(renderer);scene.environment=generator.fromEquirectangular(texture).texture;
 texture.dispose();generator.dispose();
@@ -33,19 +41,22 @@ async function load(which){
     model.updateMatrixWorld(true);const box=new THREE.Box3().setFromObject(model),center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3());
     model.position.sub(center);model.scale.setScalar(1.35/Math.max(size.x,size.y,size.z));model.position.multiplyScalar(model.scale.x);
     model.traverse(obj=>{if(obj.isMesh)obj.userData.originalMaterial=obj.material});current=model;scene.add(model);styleModel();
-    mark(['old','new'],which);$('loading').hidden=true;
-    $('status').textContent=which==='new'?'新版按六视图重建；模型和场景均待人工核验。':'旧版由单张做锈素材重建；源视图结构待审。';
+    mark(['old','previous','new'],which);$('loading').hidden=true;
+    $('status').textContent=which==='new'?'金属材质版：模型和场景均待人工核验。':which==='previous'?'上一版六视图重建：模型与场景待审。':'原始模型由单张做锈素材重建；源视图结构待审。';
     window.reviewState={which,mode,id:row.id};
   }catch(error){$('loading').textContent='加载失败：'+error.message;$('status').textContent='模型加载失败'}
 }
-for(const which of ['new','old'])$(which).onclick=()=>load(which);
+for(const which of ['new','previous','old'])$(which).onclick=()=>load(which);
 for(const m of ['clay','material'])$(m).onclick=()=>{mode=m;styleModel();mark(['clay','material'],m);if(window.reviewState)window.reviewState.mode=m};
 $('reset').onclick=reset;
 window.addEventListener('resize',resize);resize();reset();
 function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera)}animate();
 try{
   const response=await fetch('/api/assets');if(!response.ok)throw Error('模型库不可用');
-  const rows=await response.json();items.old=rows.find(x=>x.number===1&&!x.manual_only);items.new=rows.find(x=>x.number===1&&x.shape_basis==='user_six_view_reference');
+  const rows=await response.json();items.old=rows.find(x=>x.number===1&&!x.manual_only);
+  items.previous=rows.find(x=>x.number===1&&x.version==='valve01-parametric-v6');
+  items.new=rows.find(x=>x.number===1&&x.version==='valve01-parametric-v7');
+  $('previous').disabled=!items.previous;
   if(items.new)$('downloadModel').href='/api/model/'+items.new.id;
   await load(items.new?'new':'old');
 }catch(error){$('loading').textContent='无法读取模型库：'+error.message}

@@ -258,12 +258,13 @@ def draw(scene, path, *, resolution, samples):
 
 
 scene=legacy.setup_scene('CPU', 512)
-scene.world.node_tree.nodes.get('Background').inputs['Strength'].default_value=.7
+scene.world.node_tree.nodes.get('Background').inputs['Strength'].default_value=.35
 scene.world.node_tree.nodes.get('Background').inputs['Color'].default_value=(1,1,1,1)
 for obj in tuple(bpy.data.objects):
     if obj.type == 'LIGHT': bpy.data.objects.remove(obj, do_unlink=True)
-for name, location, energy, size in (('large softbox', (3,-4,5), 180, 5), ('fill softbox', (-4,3,2), 90, 5)):
-    data=bpy.data.lights.new(name, 'AREA'); data.energy=energy; data.shape='DISK'; data.size=size
+for name, location, energy, width, height in (('large softbox', (2.4,-2.8,3.8), 170, 3, 3),
+        ('fill softbox', (-3,2.5,2), 95, 3, 3), ('front reflection', (3.0,1.4,1), 95, 1.4, 3.2)):
+    data=bpy.data.lights.new(name, 'AREA'); data.energy=energy; data.shape='RECTANGLE'; data.size=width; data.size_y=height
     light=bpy.data.objects.new(name, data); scene.collection.objects.link(light)
     light.location=location; light.rotation_euler=(-light.location).to_track_quat('-Z','Y').to_euler()
 material=atlas_material()
@@ -290,6 +291,9 @@ cam=legacy.make_camera(scene,(1.9,0,.45),(0,0,0),fov=source['fov_deg'])
 cam.data.shift_x=source.get('shift_x',0);cam.data.shift_y=source.get('shift_y',0)
 draw(scene,render_dir/'new-source.png',resolution=512,samples=samples)
 bpy.data.objects.remove(cam,do_unlink=True)
+cam=camera(scene,(3,-.4,.25),Vector((.18,0,-.21)),.32)
+draw(scene,render_dir/'new-material-close.png',resolution=640 if request['draft'] else 1024,samples=8 if request['draft'] else 32)
+bpy.data.objects.remove(cam,do_unlink=True)
 if not request['draft']:
     for i in range(24):
         angle=math.tau*i/24
@@ -310,7 +314,7 @@ if not request['draft']:
     cam=camera(scene,directions['front'],center,span)
     draw(scene,render_dir/'new-light-alternate.png',resolution=768,samples=24)
     bpy.data.objects.remove(cam,do_unlink=True)
-    key.location=(3,-4,5);key.rotation_euler=(-key.location).to_track_quat('-Z','Y').to_euler()
+    key.location=(2.4,-2.8,3.8);key.rotation_euler=(-key.location).to_track_quat('-Z','Y').to_euler()
     wheel_names={'Four-spoke wheel rim','Handwheel center hub','Wheel center cap'} | {f'Handwheel spoke {i}' for i in range(1,5)}
     for obj in objects: obj.hide_render=obj.name not in wheel_names
     cam=camera(scene,(0,0,1),Vector((0,0,config['wheel_height']-.496)),.38)
@@ -327,6 +331,21 @@ _, _, oldcenter, oldspan=bounds([old])
 for name, direction in directions.items():
     cam=camera(scene,direction,oldcenter,oldspan);draw(scene,render_dir/f'old-{name}.png',resolution=resolution,samples=samples)
     bpy.data.objects.remove(cam,do_unlink=True)
+bpy.data.objects.remove(old,do_unlink=True)
+previous=legacy.load_mesh(request['previous_mesh'])
+_,_,previous_center,previous_span=bounds([previous])
+if abs(previous_span-span) > .01*span:
+    raise ValueError('上一版模型的导入尺度与新版不一致')
+# Joining imported glTF components keeps the first component's origin. Move
+# only the comparison object so both versions have the same world center.
+previous.location += center-previous_center
+bpy.context.view_layer.update()
+cam=camera(scene,directions['front'],center,span)
+draw(scene,render_dir/'previous-front.png',resolution=resolution,samples=samples)
+bpy.data.objects.remove(cam,do_unlink=True)
+cam=camera(scene,(3,-.4,.25),Vector((.18,0,-.21)),.32)
+draw(scene,render_dir/'previous-material-close.png',resolution=640 if request['draft'] else 1024,samples=8 if request['draft'] else 32)
+bpy.data.objects.remove(cam,do_unlink=True)
 data={'parts':parts,'bounds':[list(low),list(high)],'span':span,'wheel_spokes':4,'bottom_mounting_holes':8,
       'polygons':sum(len(o.data.polygons) for o in objects),
       'triangles':sum(max(0,len(p.vertices)-2) for o in objects for p in o.data.polygons), 'texture_size':2048,

@@ -1,5 +1,5 @@
 {
-  "version": "valve01-parametric-v6",
+  "version": "valve01-parametric-v7",
   "number": 1,
   "height": 1.0,
   "radial_segments": 128,
@@ -14,6 +14,12 @@
   "wheel_height": 0.965,
   "side_axis_height": 0.262,
   "side_radius": 0.122,
+  "material_profile": {
+    "cast": {"roughness": 0.44, "metallic": 0.93},
+    "machined": {"roughness": 0.22, "metallic": 0.98},
+    "blue_paint": {"roughness": 0.43, "metallic": 0.05},
+    "rust": {"roughness": 0.82, "metallic": 0.25}
+  },
   "reference_note": "六视图未标定，按面板估算相对比例；底部盲孔和背面细节为推断。",
   "texture_note": "做锈图中对应材质采样后去除缓变明暗；背面纹理为延续，不是实拍。"
 }

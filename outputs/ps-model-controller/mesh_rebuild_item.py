@@ -48,7 +48,7 @@ def _tile_detail(image, rect, size=1024):
     return np.clip(synthesized, -25, 25)
 
 
-def make_atlas(source, out):
+def make_atlas(source, out, profile):
     """Create one base-color, metallic-roughness and normal atlas from source."""
     im = Image.open(source).convert('RGBA')
     if im.size != (1086, 1448):
@@ -62,8 +62,10 @@ def make_atlas(source, out):
     mr = np.empty_like(base)
     normal = np.empty_like(base)
     # Image coordinates are top-left; Blender UV mapping is bottom-left.
-    specs = [((159, 158, 152), .75, .62, .045), ((164, 164, 158), .42, .78, .012),
-             ((28, 73, 115), .49, .05, .025), ((132, 123, 109), .79, .38, .12)]
+    specs = [((159, 158, 152), profile['cast']['roughness'], profile['cast']['metallic'], .045),
+             ((164, 164, 158), profile['machined']['roughness'], profile['machined']['metallic'], .012),
+             ((28, 73, 115), profile['blue_paint']['roughness'], profile['blue_paint']['metallic'], .025),
+             ((132, 123, 109), profile['rust']['roughness'], profile['rust']['metallic'], .12)]
     for i, (color, roughness, metal, rust_amount) in enumerate(specs):
         detail = patches[i]
         coarse = cv2.resize(rng.random((46, 46), dtype=np.float32), (size, size), interpolation=cv2.INTER_CUBIC)
@@ -169,6 +171,27 @@ def make_turntable(out):
     board.save(out/'转台-24方向.jpg',quality=94)
 
 
+def make_material_comparison(out):
+    """Compare both versions in the same camera and neutral studio light."""
+    font=ImageFont.truetype('C:/Windows/Fonts/msyh.ttc',24)
+    board=Image.new('RGB',(1440,1240),'#eef1f2');draw=ImageDraw.Draw(board)
+    draw.text((24,14),'01 阀门 · 同光照下的金属材质对照',font=font,fill='#1d2c31')
+    for i,(name,label) in enumerate((('previous-front','上一版 · 整体'),('new-front','新版 · 整体'),
+                                     ('previous-material-close','上一版 · 金属表面'),('new-material-close','新版 · 金属表面'))):
+        x=(i%2)*720;y=60+(i//2)*585
+        draw.text((x+12,y),label,font=font,fill='#27363c')
+        image=Image.open(out/'renders'/f'{name}.png').convert('RGBA')
+        if i<2:
+            rect=image.getchannel('A').getbbox()
+            if rect:image=image.crop(rect)
+        factor=min(680/image.width,530/image.height)
+        image=image.resize((max(1,round(image.width*factor)),max(1,round(image.height*factor))),Image.Resampling.LANCZOS)
+        tile=Image.new('RGBA',(700,535),'white')
+        tile.alpha_composite(image,((700-image.width)//2,(535-image.height)//2))
+        board.paste(tile.convert('RGB'),(x+10,y+36))
+    board.save(out/'金属材质-同光照对照.jpg',quality=96)
+
+
 def inspect_mesh(path):
     scene=trimesh.load(path,force='scene')
     open_parts=[];nonfinite=[];counts=[]
@@ -194,11 +217,12 @@ def main():
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--draft', action='store_true', help='快速检查，只渲染六方向')
     p.add_argument('--library', type=Path, default=ROOT/'outputs/三维模型库-圆润复验/results.jsonl')
+    p.add_argument('--previous', type=Path, default=ROOT/'outputs/01阀门-六视图重建-v6')
     p.add_argument('--blender', type=Path, default=ROOT/'work/blender45/blender-4.5.3-windows-x64/blender.exe')
     a = p.parse_args()
     if a.number != 1:
         p.error('当前仅支持 01；后续物品需单独建立参考与建模方案')
-    a.reference, a.out, a.library, a.blender = (x.resolve() for x in (a.reference, a.out, a.library, a.blender))
+    a.reference, a.out, a.library, a.blender, a.previous = (x.resolve() for x in (a.reference, a.out, a.library, a.blender, a.previous))
     row = next(r for r in (json.loads(line) for line in a.library.read_text(encoding='utf8').splitlines() if line.strip()) if r['number']==a.number)
     for name, expected in (('mesh', 'mesh_sha256'), ('rust', 'rust_sha256')):
         if digest(Path(row[name])) != row[expected]:
@@ -209,8 +233,13 @@ def main():
     config_path = HERE/'valve01_config.json'
     worker_path = HERE/'mesh_rebuild_item_worker.py'
     config = json.loads(config_path.read_text(encoding='utf8'))
+    previous_info=json.loads((a.previous/'result.json').read_text(encoding='utf8'))
+    previous_mesh=a.previous/'mesh.glb'
+    if previous_info.get('number')!=1 or previous_info.get('mesh_sha256')!=digest(previous_mesh):
+        raise ValueError('上一版模型与记录不一致')
     version = subprocess.run([str(a.blender), '--version'], capture_output=True, text=True, check=True).stdout.splitlines()[0]
     signature_input = {'reference':digest(a.reference), 'mesh':row['mesh_sha256'], 'rust':row['rust_sha256'],
+                       'previous_mesh':previous_info['mesh_sha256'],
                        'source_alpha':digest(alpha_path), 'source_camera':row['reconstruction']['source_camera'],
                        'config':digest(config_path), 'builder':digest(Path(__file__)), 'worker':digest(worker_path),
                        'helpers':{name:digest(HERE/name) for name in ('blender_worker.py','mesh_checks.py','mesh_carve.py')},
@@ -222,7 +251,9 @@ def main():
         if record.is_file() and mesh.is_file():
             old=json.loads(record.read_text(encoding='utf8'))
             required=[a.out/'model.blend', a.out/'base_color.png', a.out/'metallic_roughness.png',
-                      a.out/'normal.png', a.out/'六视图-新旧对照.jpg']
+                      a.out/'normal.png', a.out/'六视图-新旧对照.jpg', a.out/'金属材质-同光照对照.jpg',
+                      a.out/'renders/previous-front.png',a.out/'renders/previous-material-close.png',
+                      a.out/'renders/new-material-close.png']
             required += [a.out/'renders'/f'{which}-{view}.png' for which in ('old','new') for view in VIEWS]
             if not a.draft:
                 required += [a.out/'转台-24方向.jpg']+[a.out/'renders'/f'turn-{i:02}.png' for i in range(24)]
@@ -232,9 +263,9 @@ def main():
                 print(json.dumps({'status':'review','cache_hit':True,'out':str(a.out)},ensure_ascii=False));return
         raise FileExistsError('输出已存在但签名或文件不匹配，请选择新的空目录')
     a.out.mkdir(parents=True, exist_ok=True)
-    textures = make_atlas(Path(row['rust']), a.out)
+    textures = make_atlas(Path(row['rust']), a.out, config['material_profile'])
     request = {'out':str(a.out), 'original_mesh':row['mesh'], 'textures':textures, 'config':config,
-               'source_camera':row['reconstruction']['source_camera'], 'draft':a.draft}
+               'previous_mesh':str(previous_mesh), 'source_camera':row['reconstruction']['source_camera'], 'draft':a.draft}
     (a.out/'request.json').write_text(json.dumps(request, ensure_ascii=False, indent=2), encoding='utf8')
     with (a.out/'blender.log').open('w', encoding='utf8') as log:
         process = subprocess.run([str(a.blender), '--background', '--factory-startup', '--python-exit-code', '1',
@@ -245,6 +276,7 @@ def main():
     with Image.open(Path(row['source_view']).parent/'source-alpha.png') as alpha, Image.open(a.out/'renders'/'new-source.png') as rendered:
         fidelity = source_fidelity(np.asarray(alpha.convert('L')), np.asarray(rendered.getchannel('A')))
     views = make_report(a.out, a.reference)
+    make_material_comparison(a.out)
     worker = json.loads((a.out/'worker-result.json').read_text(encoding='utf8'))
     mesh_audit=inspect_mesh(a.out/'mesh.glb')
     hole_checks={}
@@ -267,7 +299,8 @@ def main():
               'status':'review', 'model_review':'pending', 'scene_validation':'pending', 'manual_only':True,
               'shape_basis':'user_six_view_reference', 'reference':str(a.reference), 'inputs':signature_input,
               'signature':signature, 'mesh':str(a.out/'mesh.glb'), 'mesh_sha256':digest(a.out/'mesh.glb'),
-              'original_mesh_sha256':row['mesh_sha256'], 'source_fidelity_diagnostic':fidelity,
+              'original_mesh_sha256':row['mesh_sha256'], 'previous_mesh_sha256':previous_info['mesh_sha256'],
+              'material_profile':config['material_profile'], 'source_fidelity_diagnostic':fidelity,
               'source_diagnostic_camera':'原重建相机的焦距与偏移，增加约 13° 俯角；近似对照，并非重新标定',
               'reference_views':views, 'front_ratio_diagnostics':ratios, 'mesh_audit':mesh_audit,
               'isolated_opening_checks':hole_checks,

@@ -132,9 +132,10 @@ def register_cylinder_candidate(number):
 for _number in (15,16,36):register_cylinder_candidate(_number)
 
 
-def register_rebuilt_candidate(folder=None):
+def register_rebuilt_candidate(folder=None, variant='v6'):
     """Register 01 separately; source-photo fidelity is diagnostic for this version."""
-    folder = folder or ROOT/'outputs/01阀门-六视图重建-v6'
+    if variant not in ('v6','v7'):return
+    folder = folder or ROOT/f'outputs/01阀门-六视图重建-{variant}'
     file = folder/'result.json'
     if not file.is_file(): return
     try:
@@ -143,13 +144,14 @@ def register_rebuilt_candidate(folder=None):
         mesh=folder/'mesh.glb'
         reference=Path(info['reference'])
         if (info.get('draft') or info.get('status')!='review' or info.get('shape_basis')!='user_six_view_reference'
+                or info.get('version')!=f'valve01-parametric-{variant}'
                 or info.get('number')!=1 or info.get('asset_id')!=original['asset_id']
                 or info.get('original_mesh_sha256')!=original['mesh_sha256']
                 or info.get('inputs',{}).get('rust')!=original['rust_sha256']
                 or not mesh.is_file() or digest(mesh)!=info.get('mesh_sha256')
                 or not reference.is_file() or digest(reference)!=info['inputs']['reference']):return
-        key=original['asset_id']+'-rebuild-v6'
-        ROWS[key]={**original, 'asset_id':key, 'file':'长阀杆阀门（六视图重建 v6）',
+        key=original['asset_id']+'-rebuild-'+variant
+        ROWS[key]={**original, 'asset_id':key, 'file':f'长阀杆阀门（六视图重建 {variant}）',
                    'mesh':str(mesh), 'mesh_sha256':info['mesh_sha256'], 'status':'review',
                    'reason':'六视图未标定；侧背面与物理姿态仍待人工复核',
                    'reconstruction':{**original['reconstruction'], 'fidelity':info['source_fidelity_diagnostic']},
@@ -159,6 +161,7 @@ def register_rebuilt_candidate(folder=None):
 
 
 register_rebuilt_candidate()
+register_rebuilt_candidate(variant='v7')
 SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
@@ -230,9 +233,9 @@ async def model_review_page(request):
 
 
 async def model_review_file(request):
-    folder=ROOT/'outputs/01阀门-六视图重建-v6'
+    folder=ROOT/'outputs/01阀门-六视图重建-v7'
     allowed={'board':'六视图-新旧对照.jpg', 'turntable':'转台-24方向.jpg', 'record':'result.json',
-             'browser':'浏览器核验.json', 'blend':'model.blend',
+             'browser':'浏览器核验.json', 'blend':'model.blend', 'metal':'金属材质-同光照对照.jpg',
              'front':'renders/new-front.png', 'wheel':'renders/detail-wheel.png',
              'stem':'renders/detail-stem.png', 'side':'renders/detail-side.png',
              'surface':'renders/detail-surface.png'}
