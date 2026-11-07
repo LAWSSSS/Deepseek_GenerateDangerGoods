@@ -33,11 +33,39 @@ SCENE = ROOT / 'outputs/固定场景-39件尺寸标注/场景配置.json'
 DATA = ROOT / 'work/placement-web'
 DATA.mkdir(parents=True, exist_ok=True)
 ROWS = {r['asset_id']: r for r in (json.loads(x) for x in LIBRARY.read_text(encoding='utf8').splitlines() if x.strip())}
+
+
+def register_review_candidate():
+    """Offer the verified-source candidate separately; never replace the library mesh."""
+    folder = ROOT/'outputs/轴承座-六视图背面修复候选-v8'
+    info_file, proof_file = folder/'result.json', folder/'sourcecheck/fidelity.json'
+    if not info_file.is_file() or not proof_file.is_file():
+        return
+    try:
+        info = json.loads(info_file.read_text(encoding='utf8'))
+        proof = json.loads(proof_file.read_text(encoding='utf8'))
+        original = next(r for r in ROWS.values() if r['number']==3)
+        mesh = folder/'mesh.glb'
+        if (not proof.get('passed') or proof.get('iou',0)<.90 or proof.get('filled_holes')!=0
+                or proof.get('narrow_recall',0)<.80 or not mesh.is_file()
+                or digest(mesh)!=info['mesh_sha256'] or info['source_sha256']!=original['mesh_sha256']):
+            return
+        key=original['asset_id']+'-sixview'
+        ROWS[key]={**original,'asset_id':key,'file':'轴承座（六视图背面修复候选）',
+                   'mesh':str(mesh),'mesh_sha256':info['mesh_sha256'], 'status':'review',
+                   'reason':'背面依据未标定参考镜像推断；顶部过渡接缝和落稳待复核',
+                   'reconstruction':{**original['reconstruction'],'fidelity':proof},
+                   'manual_only':True}
+    except (OSError,ValueError,KeyError,StopIteration):
+        return
+
+
+register_review_candidate()
 SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
 CHAT_ACTIVE = set()
-RENDER_ALGORITHM = 'neutral-ambient-v1'
+RENDER_ALGORITHM = 'neutral-ambient-canonical-axis-v3'
 
 
 def err(message, status=400):
@@ -78,9 +106,10 @@ async def index(request):
 async def assets(request):
     return JSONResponse([{'id': r['asset_id'], 'number': r['number'], 'name': r['file'],
                           'status': r.get('status'), 'reason': r.get('reason'),
+                          'manual_only': bool(r.get('manual_only')),
                           'available': Path(r.get('mesh', '')).is_file(),
                           'passed': bool(r.get('reconstruction', {}).get('fidelity', {}).get('passed'))}
-                         for r in ROWS.values()])
+                         for r in sorted(ROWS.values(),key=lambda row:(row['number'],bool(row.get('manual_only'))))])
 
 
 async def model(request):
@@ -118,7 +147,7 @@ async def create_session(request):
         background_path = folder / 'background.png' if upload and getattr(upload, 'filename', '') else source
         s = {'id': sid, 'directory': str(folder), 'background': str(background_path),
              'background_sha256': digest(background_path), 'width': width, 'height': height,
-             'revision': 0, 'generation': 0, 'state': None, 'candidates': [], 'selected': [], 'support': None, 'history': [],
+             'revision': 0, 'generation': 0, 'state': None, 'candidates': [], 'selected': [], 'support': None, 'support_mode': None, 'history': [],
              'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0, 'accounted_tokens': 0},
              'preview_revision': None, 'warnings': [], 'lock': asyncio.Lock()}
         SESSIONS[sid] = s
@@ -161,6 +190,7 @@ async def update_state(request):
                 s['generation'] += 1
                 s['selected'] = []
                 s['support'] = None
+                s['support_mode'] = None
                 s['candidates'] = []
                 s['history'] = []
                 s['preview_revision'] = None
@@ -180,6 +210,9 @@ def compute_candidates(s, revision, state):
     x, y, radius = state['x'] * sx, state['y'] * sy, state['size'] * max(sx, sy) * .65
     yy, xx = np.ogrid[:rgb.shape[0], :rgb.shape[1]]
     roi = ((xx-x)**2 + (yy-y)**2) < radius**2
+    # Provisional contact neighborhood only: projected bottom of the square
+    # is not a physical contact point and cannot prove a support relation.
+    contact = (np.abs(xx-x)<radius*.50)&(np.abs(yy-(y+radius*.42))<radius*.22)
     candidates = []
     folder = Path(s['directory']) / f'analysis-{revision}'
     folder.mkdir(exist_ok=True)
@@ -198,6 +231,7 @@ def compute_candidates(s, revision, state):
         full = cv2.resize(mask.astype('uint8') * 255, original, interpolation=cv2.INTER_NEAREST)
         Image.fromarray(full).save(folder / f'{i}.png')
         results.append({'id': i, 'bounds': [round(xs.min()/sx), round(ys.min()/sy), round((xs.max()+1)/sx), round((ys.max()+1)/sy)],
+                        'support_score':round(float((mask & contact).sum()/max(1,contact.sum())),3),
                         'relative_depth': round(float(np.median(depth[mask])), 3), 'order': 'unknown'})
     return results
 
@@ -215,6 +249,7 @@ async def analyze(request):
                 return err('摆位或遮挡已变化，忽略旧分析', 409)
             s['candidates'], s['selected'] = candidates, []
             s['support'] = None
+            s['support_mode'] = None
             s['generation'] += 1
             s['preview_revision'] = None
             s.pop('export', None)
@@ -243,13 +278,16 @@ async def selection(request):
         selected = data.get('selected')
         if not isinstance(selected, list) or any(type(x) is not int or x not in [c['id'] for c in s['candidates']] for x in selected):
             raise ValueError('遮挡区域无效')
-        if s.get('support') in selected:
+        if s.get('support') in selected and s.get('support_mode') != 'estimated':
             raise ValueError('同一区域不能同时作为前景和承托面')
         async with s['lock']:
             if data.get('revision') != s['revision']:
                 return err('摆位已变化，请重新分析', 409)
             s['history'].append(s['selected'].copy())
             s['selected'] = sorted(set(selected))
+            if s.get('support') in selected:
+                s['support'] = None
+                s['support_mode'] = None
             s['generation'] += 1
             s['preview_revision'] = None
             s.pop('export', None)
@@ -287,6 +325,7 @@ async def support_selection(request):
             if data.get('revision') != s['revision']:
                 return err('摆位已变化，请重新分析',409)
             s['support'] = n
+            s['support_mode'] = 'user_confirmed' if n else None
             s['generation'] += 1
             s['preview_revision'] = None
             s.pop('export',None)
@@ -305,20 +344,25 @@ def foreground(s):
 
 
 def match_local_photo(s, obj, x, y):
-    """Estimate ambient appearance only from the explicitly selected support."""
+    """Use selected support, or explicitly unverified nearby scene pixels."""
     n = s.get('support')
-    if not n:
-        return obj.copy(), None
-    path = Path(s['directory']) / f"analysis-{s['revision']}" / f'{n}.png'
     side = obj.width
     pad = round(side*.5)
     crop = (max(0,x-pad), max(0,y-pad), min(s['width'],x+side+pad), min(s['height'],y+side+pad))
-    with Image.open(path) as im:
-        mask = np.asarray(im.convert('L').crop(crop)) > 127
+    if n:
+        path = Path(s['directory']) / f"analysis-{s['revision']}" / f'{n}.png'
+        with Image.open(path) as im:
+            mask = np.asarray(im.convert('L').crop(crop)) > 127
+    else:
+        # A surrounding-scene sample is a fallback for light and color only;
+        # it is not evidence of a common support or of a 3-D light direction.
+        mask = np.ones((crop[3]-crop[1],crop[2]-crop[0]),dtype=bool)
     front = np.asarray(foreground(s).crop(crop)) >= 128
     with Image.open(s['background']) as im:
         frame = im.convert('RGB').crop(crop)
-    return ambient_match(frame, mask, front, obj, x-crop[0], y-crop[1])
+    result, photo = ambient_match(frame, mask, front, obj, x-crop[0], y-crop[1])
+    photo['support_verification'] = (s.get('support_mode') or 'surrounding_scene_unverified')
+    return result, photo
 
 
 async def preview(request):
@@ -337,6 +381,30 @@ async def preview(request):
             obj = im.convert('RGBA')
         if not obj.getchannel('A').getbbox():
             raise ValueError('占位图为空')
+        if not s['candidates']:
+            old_generation = s['generation']
+            state = s['state'].copy()
+            try:
+                async with ENGINE_LOCK:
+                    found = await asyncio.to_thread(compute_candidates,s,revision,state)
+                async with s['lock']:
+                    if revision != s['revision'] or old_generation != s['generation']:
+                        return err('摆位或遮挡已变化，忽略旧分析',409)
+                    s['candidates'] = found
+                    s['generation'] += 1
+                    save(s)
+            except (FileNotFoundError,RuntimeError,ValueError):
+                # Continue as an explicitly unlit, review-only preview.
+                pass
+        if s.get('support') is None:
+            ranked = sorted((c for c in s['candidates'] if c['id'] not in s['selected']),
+                            key=lambda c:c.get('support_score',0),reverse=True)
+            if ranked and ranked[0].get('support_score',0)>=.25 and (len(ranked)==1 or
+                    ranked[0]['support_score']-ranked[1].get('support_score',0)>=.08):
+                s['support'] = ranked[0]['id']
+                s['support_mode'] = 'estimated'
+                s['generation'] += 1
+                save(s)
         generation = s['generation']
         st = s['state'].copy()
         row = ROWS[st['asset']]
@@ -379,7 +447,11 @@ async def preview(request):
         base = Image.open(s['background']).convert('RGBA')
         result = base.copy()
         result.alpha_composite(matched, (x, y))
-        result.paste(base, (0, 0), foreground(s))
+        front_mask = foreground(s)
+        object_pixels = np.asarray(obj.getchannel('A')) >= 128
+        overlap = np.asarray(front_mask.crop((x,y,x+side,y+side))) >= 128
+        visible_ratio = 1-float(np.count_nonzero(object_pixels & overlap))/max(1,int(object_pixels.sum()))
+        result.paste(base, (0, 0), front_mask)
         async with s['lock']:
             if revision != s['revision'] or generation != s['generation']:
                 return err('摆位已变化，忽略旧预览', 409)
@@ -389,15 +461,19 @@ async def preview(request):
             s['preview_revision'] = revision
             s['preview_generation'] = generation
             s['render_algorithm'] = RENDER_ALGORITHM
+            s.pop('export',None)
             s['projection_iou'] = round(iou, 4)
+            s['object_visible_fraction'] = round(visible_ratio,4)
             bounds = obj.getchannel('A').getbbox()
             s['rendered_bounds_px'] = [x+bounds[0], y+bounds[1], x+bounds[2], y+bounds[3]]
             s['rendered_major_px'] = max(bounds[2]-bounds[0], bounds[3]-bounds[1])
             s['tone'] = None
             s['photometry'] = photo
             s['warnings'] = ['Blender 视角渲染，未验证刚体、接触、尺度和遮挡；不是 Photoshop 最终结果。',
-                             '已依据所选区域估算局部环境光和颜色；实际光源方向、承托面及保护区仍待确认。' if photo and photo.get('status')=='measured' else '未选择可用的承托面，尚未重建环境光和调色。',
+                             ('已依据'+('自动估计的承托区域' if s.get('support_mode')=='estimated' else '人工选择的区域' if s.get('support') else '周边像素（承托面未确认）')+'估算局部环境光和颜色；实际光源方向、承托面及保护区仍待确认。') if photo and photo.get('status')=='measured' else '可用的环境像素不足，尚未重建环境光和调色。',
                              '没有经过验证的接触点，尚未生成接触阴影。']
+            if visible_ratio<.5:
+                s['warnings'].append(f'遮挡后物体仅露出约 {visible_ratio:.0%}，请确认前景选择。')
             save(s)
         return JSONResponse(snapshot(s))
     except (ValueError, OSError, TypeError) as e:
@@ -578,6 +654,8 @@ async def automatic(request):
         s = session(request)
         if not s['state']:
             raise ValueError('请先选择物品')
+        if ROWS[s['state']['asset']].get('manual_only'):
+            raise ValueError('六视图修复候选仅供人工预览，尚未通过自动放置的物理校验')
         out = DATA / f"auto-{s['id']}-{int(time.time())}"
         command = [sys.executable, '-X', 'utf8', '-B', str(HERE.parent / 'mesh_location_first.py'),
                    '--asset', s['state']['asset'], '--background', s['background'], '--out', str(out), '--budget', '0']

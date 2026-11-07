@@ -19,10 +19,7 @@ for obj in tuple(bpy.data.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
 scene.world.node_tree.nodes.get('Background').inputs['Color'].default_value = (1, 1, 1, 1)
 scene.world.node_tree.nodes.get('Background').inputs['Strength'].default_value = 1.0
-bpy.ops.import_scene.gltf(filepath=request['mesh'])
-objects = [obj for obj in bpy.context.selected_objects if obj.type == 'MESH']
-if not objects:
-    raise ValueError('模型中没有网格')
+objects = [worker.load_mesh(request['mesh'])]
 points = [p for obj in objects for p in worker.world_vertices(obj)]
 low = Vector([min(p[i] for p in points) for i in range(3)])
 high = Vector([max(p[i] for p in points) for i in range(3)])

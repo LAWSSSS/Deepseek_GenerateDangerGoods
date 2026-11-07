@@ -50,6 +50,18 @@ def ambient_match(frame, support, foreground, obj, x, y):
         hsv[:,:,1] = np.clip(hsv[:,:,1]*(1+saturation/100),0,1)
         rgb = cv2.cvtColor(hsv,cv2.COLOR_HSV2RGB)*255
 
+    # A neutral-lit reconstruction can be much brighter than a CCTV scene.
+    # The initial bounded curve alone cannot close a large exposure gap, so
+    # apply a second bounded global gain while retaining relative material form.
+    core=original_alpha>=190
+    exposure_gain=1.0
+    if core.sum()>=60:
+        luminance=cv2.cvtColor(np.clip(rgb,0,255).astype('uint8'),cv2.COLOR_RGB2GRAY)
+        current=float(np.median(luminance[core]))
+        target=float(photo['scene']['luma_p20_p50_p80'][1])
+        exposure_gain=float(np.clip(target/max(current,1),.65,1.2))
+        rgb*=exposure_gain
+
     # Fit only when support samples span both horizontal and vertical sides.
     # The residual-based cutoff rejects weak gradients; their physical cause
     # could equally be paint, shading, or shadows, so the estimate is bounded.
@@ -71,12 +83,29 @@ def ambient_match(frame, support, foreground, obj, x, y):
             field = np.clip(gx*(x+ox-cx)/side + gy*(y+oy-cy)/side,-6,6)
             rgb += field[:,:,None]
             gradient = [round(float(gx),3), round(float(gy),3)]
+    # Match CCTV detail at the final pixel size. Filter premultiplied RGB and
+    # divide by the filtered coverage so transparent holes and edges never
+    # introduce dark fringes; preserve the original alpha exactly.
+    source_detail=photo['object_before'].get('detail')
+    scene_detail=photo['scene'].get('detail')
+    blur=0.0
+    if source_detail is not None and scene_detail is not None:
+        ratio=source_detail/(scene_detail+1)
+        blur=float(np.clip((ratio-1)*.5,0,.8))
+    if blur>=.15:
+        coverage=original_alpha.astype(np.float32)/255
+        weight=cv2.GaussianBlur(coverage,(0,0),blur)
+        premultiplied=cv2.GaussianBlur(rgb.astype(np.float32)*coverage[:,:,None],(0,0),blur)
+        softened=premultiplied/np.maximum(weight[:,:,None],1e-5)
+        rgb=np.where((weight>1e-5)[:,:,None],softened,rgb)
     arr[:,:,:3] = np.rint(np.clip(rgb,0,255)).astype(np.uint8)
     arr[:,:,3] = original_alpha
     output = Image.fromarray(arr)
     measured = statistics(np.ascontiguousarray(arr[:,:,:3]),original_alpha>=190)
     photo.update({'method':'bounded_local_ambient_and_color', 'support_samples':int(mask.sum()),
                   'screen_gradient_rgb_per_object_width':gradient,
+                  'exposure_gain':round(exposure_gain,4),
+                  'detail_blur_sigma_px':round(blur,3) if blur>=.15 else 0,
                   'light_direction':'unknown', 'support_verification':'user_selected_pending',
                   'object_after': measured[0] if measured else None})
     return output, photo

@@ -42,8 +42,9 @@ class PlacementChecks(unittest.TestCase):
 
     def test_library_and_rejected_foreign_origin(self):
         response = self.client.get('/api/assets')
-        self.assertEqual(len(response.json()),39)
-        self.assertEqual(sum(not r['passed'] for r in response.json()),15)
+        original=[r for r in response.json() if not r['manual_only']]
+        self.assertEqual(len(original),39)
+        self.assertEqual(sum(not r['passed'] for r in original),15)
         self.assertEqual(self.client.get('/api/assets',headers={'origin':'https://evil.example'}).status_code,403)
         self.assertEqual(self.client.get('/api/assets',headers={'host':'evil.example'}).status_code,403)
 
@@ -86,6 +87,20 @@ class PlacementChecks(unittest.TestCase):
         self.assertEqual(self.client.post(self.url+'/support',json={'revision':rev,'support':1}).status_code,200)
         self.assertEqual(self.client.post(self.url+'/selection',json={'revision':rev,'selected':[1]}).status_code,400)
 
+    def test_fallback_color_is_explicitly_unverified(self):
+        obj=Image.new('RGBA',(40,40),(160,140,120,255))
+        matched,info=server.match_local_photo(self.live,obj,44,40)
+        self.assertEqual(info['status'],'measured')
+        self.assertEqual(info['support_verification'],'surrounding_scene_unverified')
+        self.assertTrue(np.array_equal(np.asarray(matched.getchannel('A')),np.asarray(obj.getchannel('A'))))
+
+    def test_candidate_cannot_enter_auto_pipeline(self):
+        candidate=next((key for key,row in server.ROWS.items() if row.get('manual_only')),None)
+        if not candidate:self.skipTest('candidate not installed')
+        self.client.post(self.url+'/state',json={**self.state,'asset':candidate})
+        response=self.client.post(self.url+'/automatic')
+        self.assertEqual(response.status_code,400)
+
     def test_validate_bad_pose_and_model(self):
         for bad in ({'size':float('nan')},{'asset':'../../bad'},{'elevation':90}):
             response=self.client.post(self.url+'/state',json={**self.state,**bad}) if 'size' not in bad else None
@@ -106,6 +121,9 @@ class RelightChecks(unittest.TestCase):
         self.assertEqual(info['light_direction'],'unknown')
         self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')),alpha))
         self.assertLess(info['support_samples'],np.count_nonzero(support))
+        target=info['scene']['luma_p20_p50_p80'][1]
+        self.assertLess(abs(info['object_after']['luma_p20_p50_p80'][1]-target),
+                        abs(info['object_before']['luma_p20_p50_p80'][1]-target))
         self.assertFalse(np.array_equal(np.asarray(result)[:,:,:3],np.asarray(obj)[:,:,:3]))
         self.assertTrue(np.all(np.asarray(obj)[:,:,0]==150))
 
@@ -128,6 +146,17 @@ class RelightChecks(unittest.TestCase):
         self.assertIsNotNone(info['screen_gradient_rgb_per_object_width'])
         self.assertLessEqual(max(abs(v) for v in info['screen_gradient_rgb_per_object_width']),5.4)
         self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')),np.asarray(obj.getchannel('A'))))
+
+    def test_blur_never_changes_openings_or_transparent_edges(self):
+        frame=Image.new('RGB',(240,240),(95,95,95))
+        pixels=np.zeros((80,80,4),np.uint8)
+        yy,xx=np.indices((80,80))
+        pixels[:,:,:3]=np.where(((xx+yy)%2)[:,:,None]==0,90,180)
+        pixels[10:70,10:70,3]=255; pixels[30:50,30:50,3]=0
+        obj=Image.fromarray(pixels)
+        result,info=ambient_match(frame,np.ones((240,240),bool),np.zeros((240,240),bool),obj,80,80)
+        self.assertGreater(info['detail_blur_sigma_px'],0)
+        self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')),pixels[:,:,3]))
 
 
 if __name__=='__main__':
