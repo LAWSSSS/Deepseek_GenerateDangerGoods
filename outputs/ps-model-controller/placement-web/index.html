@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>异物放置工作台</title><link rel="stylesheet" href="/static/style.css">
+<script type="importmap">{"imports":{"three":"/static/node_modules/three/build/three.module.js","three/addons/":"/static/node_modules/three/examples/jsm/"}}</script>
+</head><body>
+<header><div><strong>异物放置工作台</strong><small>本机运行 · 单件处理</small></div><span id="status">正在加载模型库…</span></header>
+<main><aside><div class="tabs"><button id="manualTab" class="active">人工放置</button><button id="autoTab">自动放置</button></div>
+<section><h2>1. 选择素材</h2><label>背景照片<input id="backgroundInput" type="file" accept="image/png,image/jpeg,image/webp"></label><button id="sceneButton" class="secondary">使用现有监控背景</button>
+<label>异物<select id="asset"><option>正在加载…</option></select></label><p id="assetStatus" class="hint"></p></section>
+<section id="manualControls"><h2>2. 摆放和视角</h2><p class="hint">拖动物体移动；拖动右上方圆点调整视角；拖动右下方方块调整大小。坐标对应原图像素。</p>
+<div class="grid"><label>水平角<input id="azimuth" type="number" min="0" max="359" value="80"></label><label>俯角<input id="elevation" type="number" min="10" max="85" value="45"></label><label>占位宽度 px<input id="size" type="number" min="16" value="300"></label></div>
+<button id="analyze">识别可能的遮挡</button><div id="regions"></div><button id="undo" class="secondary">撤销上次遮挡调整</button>
+<h2>3. 对话确认</h2><p class="hint">对话会向 DeepSeek 发送缩小的背景和候选区域；密钥仅从本机环境变量读取。</p><div id="messages"></div><textarea id="chatText" placeholder="例如：编号 2 的钢筋在物体前面"></textarea><button id="chat" class="secondary">发送给 AI</button>
+<button id="preview">生成待审预览</button><a id="download" hidden download="人工放置-待审.png">下载待审预览 PNG</a><button id="export" class="secondary">Photoshop 导出待审文件</button><div id="exports"></div></section>
+<section id="automaticControls" hidden><h2>自动放置</h2><p class="hint">先选位置，再选择物体视角并匹配光色。运行原有质量门槛，耗时较长；预算为 0，缺少缓存时会停下说明原因。</p><button id="runAuto">运行自动放置</button><p id="autoResult" class="hint"></p></section>
+<section><h2>检查状态</h2><div id="checks" class="hint">请选择背景和物品。所有占位图均为待审。</div></section></aside>
+<article><div class="toolbar"><b id="stageTitle">人工放置 · 实时三维占位</b><span id="coordinates"></span></div><div id="viewport"><div id="stage"><img id="background" alt="背景照片"><img id="mask" alt="遮挡区域" hidden><img id="result" alt="待审预览" hidden><div id="object" hidden><canvas id="modelCanvas" width="768" height="768"></canvas><span id="rotate" title="拖动调整视角">↻</span><span id="resize" title="拖动调整大小"></span></div></div><p id="empty">请选择背景照片和模型</p></div><div class="foot">实时占位用于人工摆位；落稳、接触、尺度、遮挡和最终导出仍需独立验证。</div></article></main>
+<script type="module" src="/static/app.js"></script></body></html>

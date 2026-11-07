@@ -1,0 +1,666 @@
+"""Local, review-first placement UI. Run from the project root."""
+import asyncio
+import base64
+import hashlib
+import io
+import json
+import os
+import re
+import secrets
+import sys
+import time
+from pathlib import Path
+
+import cv2
+import httpx
+import numpy as np
+from PIL import Image, ImageDraw, ImageOps
+from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import FileResponse, JSONResponse, Response
+from starlette.routing import Route, Mount
+from starlette.staticfiles import StaticFiles
+
+HERE = Path(__file__).resolve().parent
+ROOT = HERE.parents[2]
+sys.path.insert(0, str(HERE.parent))
+from scene_v2 import Perception, digest
+from photometry import fit_photo
+
+LIBRARY = ROOT / 'outputs/三维模型库-圆润复验/results.jsonl'
+SCENE = ROOT / 'outputs/固定场景-39件尺寸标注/场景配置.json'
+DATA = ROOT / 'work/placement-web'
+DATA.mkdir(parents=True, exist_ok=True)
+ROWS = {r['asset_id']: r for r in (json.loads(x) for x in LIBRARY.read_text(encoding='utf8').splitlines() if x.strip())}
+SESSIONS = {}
+ENGINE = None
+ENGINE_LOCK = asyncio.Lock()
+CHAT_ACTIVE = set()
+
+
+def err(message, status=400):
+    return JSONResponse({'error': str(message)}, status_code=status)
+
+
+def session(request):
+    sid = request.path_params['sid']
+    if not re.fullmatch(r'[0-9a-f]{32}', sid):
+        raise ValueError('会话不存在，请重新选择背景')
+    if sid not in SESSIONS:
+        path = DATA / sid / 'session.json'
+        if not path.is_file():
+            raise ValueError('会话不存在，请重新选择背景')
+        restored = json.loads(path.read_text(encoding='utf8'))
+        if restored.get('id') != sid or Path(restored.get('directory','')).resolve() != path.parent.resolve():
+            raise ValueError('会话记录无效')
+        restored['lock'] = asyncio.Lock()
+        SESSIONS[sid] = restored
+    return SESSIONS[sid]
+
+
+def save(s):
+    serial = {k: v for k, v in s.items() if k not in ('lock',)}
+    tmp = Path(s['directory']) / 'session.tmp'
+    tmp.write_text(json.dumps(serial, ensure_ascii=False, indent=2), encoding='utf8')
+    tmp.replace(Path(s['directory']) / 'session.json')
+
+
+def snapshot(s):
+    return {k: v for k, v in s.items() if k not in ('lock', 'background', 'directory', 'history')}
+
+
+async def index(request):
+    return FileResponse(HERE / 'index.html')
+
+
+async def assets(request):
+    return JSONResponse([{'id': r['asset_id'], 'number': r['number'], 'name': r['file'],
+                          'status': r.get('status'), 'reason': r.get('reason'),
+                          'available': Path(r.get('mesh', '')).is_file(),
+                          'passed': bool(r.get('reconstruction', {}).get('fidelity', {}).get('passed'))}
+                         for r in ROWS.values()])
+
+
+async def model(request):
+    row = ROWS.get(request.path_params['asset'])
+    if not row or not Path(row.get('mesh', '')).is_file():
+        return err('模型不存在', 404)
+    path = Path(row['mesh'])
+    if digest(path) != row.get('mesh_sha256'):
+        return err('模型哈希与库记录不一致', 409)
+    return FileResponse(path, media_type='model/gltf-binary')
+
+
+async def create_session(request):
+    form = await request.form()
+    sid = secrets.token_hex(16)
+    folder = DATA / sid
+    folder.mkdir()
+    upload = form.get('background')
+    try:
+        if upload and getattr(upload, 'filename', ''):
+            raw = await upload.read(30 * 1024 * 1024 + 1)
+            await form.close()
+            if len(raw) > 30 * 1024 * 1024:
+                raise ValueError('图片超过 30 MB')
+            source = io.BytesIO(raw)
+        else:
+            source = Path(json.loads(SCENE.read_text(encoding='utf8'))['background'])
+        with Image.open(source) as im:
+            im = ImageOps.exif_transpose(im)
+            if im.width * im.height > 50_000_000 or min(im.size) < 64:
+                raise ValueError('图片尺寸超出允许范围')
+            if upload and getattr(upload, 'filename', ''):
+                im.convert('RGB').save(folder / 'background.png', icc_profile=im.info.get('icc_profile'))
+            width, height = im.size
+        background_path = folder / 'background.png' if upload and getattr(upload, 'filename', '') else source
+        s = {'id': sid, 'directory': str(folder), 'background': str(background_path),
+             'background_sha256': digest(background_path), 'width': width, 'height': height,
+             'revision': 0, 'generation': 0, 'state': None, 'candidates': [], 'selected': [], 'support': None, 'history': [],
+             'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0, 'accounted_tokens': 0},
+             'preview_revision': None, 'warnings': [], 'lock': asyncio.Lock()}
+        SESSIONS[sid] = s
+        save(s)
+        return JSONResponse(snapshot(s))
+    except (OSError, ValueError) as e:
+        return err(e)
+
+
+async def background(request):
+    try:
+        return FileResponse(session(request)['background'])
+    except ValueError as e:
+        return err(e, 404)
+
+
+def validate_state(data, s):
+    if data.get('asset') not in ROWS:
+        raise ValueError('请选择模型库中的物品')
+    values = {}
+    for name, lower, upper in [('x', 0, s['width']), ('y', 0, s['height']),
+                               ('size', 16, max(s['width'], s['height'])),
+                               ('azimuth', -3600, 3600), ('elevation', 10, 85)]:
+        value = float(data[name])
+        if not np.isfinite(value) or not lower <= value <= upper:
+            raise ValueError(f'{name} 超出范围')
+        values[name] = value
+    return {'asset': data['asset'], **values}
+
+
+async def update_state(request):
+    try:
+        s = session(request)
+        data = await request.json()
+        value = validate_state(data, s)
+        async with s['lock']:
+            if value != s['state']:
+                s['state'] = value
+                s['revision'] += 1
+                s['generation'] += 1
+                s['selected'] = []
+                s['support'] = None
+                s['candidates'] = []
+                s['history'] = []
+                s['preview_revision'] = None
+                s.pop('export', None)
+                save(s)
+        return JSONResponse(snapshot(s))
+    except (ValueError, KeyError, TypeError) as e:
+        return err(e)
+
+
+def compute_candidates(s, revision, state):
+    global ENGINE
+    if ENGINE is None:
+        ENGINE = Perception(ROOT / 'work/v2-models', ROOT / 'work/v2-cache')
+    rgb, depth, masks, original = ENGINE.scene(Path(s['background']))
+    sx, sy = rgb.shape[1] / original[0], rgb.shape[0] / original[1]
+    x, y, radius = state['x'] * sx, state['y'] * sy, state['size'] * max(sx, sy) * .65
+    yy, xx = np.ogrid[:rgb.shape[0], :rgb.shape[1]]
+    roi = ((xx-x)**2 + (yy-y)**2) < radius**2
+    candidates = []
+    folder = Path(s['directory']) / f'analysis-{revision}'
+    folder.mkdir(exist_ok=True)
+    for mask in masks:
+        overlap = int((mask & roi).sum())
+        area = int(mask.sum())
+        if overlap < 20 or area > roi.size * .18 or overlap / max(1, area) < .03:
+            continue
+        if any(np.count_nonzero(mask & old) / max(1, np.count_nonzero(mask | old)) > .75 for old in [c[0] for c in candidates]):
+            continue
+        candidates.append((mask, overlap))
+    candidates.sort(key=lambda item: item[1], reverse=True)
+    results = []
+    for i, (mask, _) in enumerate(candidates[:12], 1):
+        ys, xs = np.nonzero(mask)
+        full = cv2.resize(mask.astype('uint8') * 255, original, interpolation=cv2.INTER_NEAREST)
+        Image.fromarray(full).save(folder / f'{i}.png')
+        results.append({'id': i, 'bounds': [round(xs.min()/sx), round(ys.min()/sy), round((xs.max()+1)/sx), round((ys.max()+1)/sy)],
+                        'relative_depth': round(float(np.median(depth[mask])), 3), 'order': 'unknown'})
+    return results
+
+
+async def analyze(request):
+    try:
+        s = session(request)
+        if not s['state']:
+            raise ValueError('请先选择并放置物品')
+        rev, generation, state = s['revision'], s['generation'], s['state'].copy()
+        async with ENGINE_LOCK:
+            candidates = await asyncio.to_thread(compute_candidates, s, rev, state)
+        async with s['lock']:
+            if rev != s['revision'] or generation != s['generation']:
+                return err('摆位或遮挡已变化，忽略旧分析', 409)
+            s['candidates'], s['selected'] = candidates, []
+            s['support'] = None
+            s['generation'] += 1
+            s['preview_revision'] = None
+            s.pop('export', None)
+            s['warnings'] = ['相对深度不能独立证明前后顺序，请确认前景区域。']
+            save(s)
+        return JSONResponse(snapshot(s))
+    except Exception as e:
+        return err('场景分析失败：' + str(e), 503)
+
+
+async def mask_image(request):
+    try:
+        s = session(request)
+        n = int(request.path_params['number'])
+        if n not in [x['id'] for x in s['candidates']]:
+            raise ValueError('区域不存在')
+        return FileResponse(Path(s['directory']) / f"analysis-{s['revision']}" / f'{n}.png', media_type='image/png')
+    except (ValueError, OSError) as e:
+        return err(e, 404)
+
+
+async def selection(request):
+    try:
+        s = session(request)
+        data = await request.json()
+        selected = data.get('selected')
+        if not isinstance(selected, list) or any(type(x) is not int or x not in [c['id'] for c in s['candidates']] for x in selected):
+            raise ValueError('遮挡区域无效')
+        if s.get('support') in selected:
+            raise ValueError('同一区域不能同时作为前景和承托面')
+        async with s['lock']:
+            if data.get('revision') != s['revision']:
+                return err('摆位已变化，请重新分析', 409)
+            s['history'].append(s['selected'].copy())
+            s['selected'] = sorted(set(selected))
+            s['generation'] += 1
+            s['preview_revision'] = None
+            s.pop('export', None)
+            save(s)
+        return JSONResponse(snapshot(s))
+    except (ValueError, TypeError) as e:
+        return err(e)
+
+
+async def undo(request):
+    try:
+        s = session(request)
+        async with s['lock']:
+            if s['history']:
+                s['selected'] = s['history'].pop()
+                s['generation'] += 1
+                s['preview_revision'] = None
+                s.pop('export', None)
+                save(s)
+        return JSONResponse(snapshot(s))
+    except ValueError as e:
+        return err(e)
+
+
+async def support_selection(request):
+    try:
+        s = session(request)
+        data = await request.json()
+        n = data.get('support')
+        if n is not None and (type(n) is not int or n not in [c['id'] for c in s['candidates']]):
+            raise ValueError('承托面区域无效')
+        if n in s['selected']:
+            raise ValueError('同一区域不能同时作为前景和承托面')
+        async with s['lock']:
+            if data.get('revision') != s['revision']:
+                return err('摆位已变化，请重新分析',409)
+            s['support'] = n
+            s['generation'] += 1
+            s['preview_revision'] = None
+            s.pop('export',None)
+            save(s)
+        return JSONResponse(snapshot(s))
+    except (ValueError,TypeError) as e:
+        return err(e)
+
+
+def foreground(s):
+    mask = Image.new('L', (s['width'], s['height']))
+    for n in s['selected']:
+        with Image.open(Path(s['directory']) / f"analysis-{s['revision']}" / f'{n}.png') as im:
+            mask = Image.fromarray(np.maximum(np.asarray(mask), np.asarray(im.convert('L'))))
+    return mask
+
+
+def match_local_photo(s, obj, x, y):
+    """Match only an explicitly selected support mask, excluding foreground and dark pixels."""
+    n = s.get('support')
+    if not n:
+        return obj, None, None
+    path = Path(s['directory']) / f"analysis-{s['revision']}" / f'{n}.png'
+    mask = np.asarray(Image.open(path).convert('L')) > 127
+    mask &= np.asarray(foreground(s)) < 128
+    side = obj.width
+    # Restrict sampling to a neighborhood around the rendered object.
+    yy, xx = np.ogrid[:s['height'], :s['width']]
+    cx, cy = x+side/2, y+side/2
+    distance = np.sqrt((xx-cx)**2 + (yy-cy)**2)
+    mask &= (distance > side*.55) & (distance < side*.9)
+    frame = Image.open(s['background']).convert('RGB')
+    gray = np.asarray(frame.convert('L'))
+    if mask.sum() < 100:
+        return obj, None, {'status':'insufficient_samples'}
+    mask &= gray >= np.percentile(gray[mask], 20)
+    bbox = obj.getchannel('A').getbbox()
+    if not bbox:
+        return obj,None,{'status':'insufficient_samples'}
+    tone, photo, _ = fit_photo(frame, mask, obj.crop(bbox), 0, (bbox[3]-bbox[1],bbox[2]-bbox[0]))
+    tone['blur_px'] = 0
+    if photo.get('status') != 'measured':
+        return obj,None,photo
+    # Approximation of the Photoshop curves for the review image; the PSD applies
+    # the original curve to a clipped layer and remains the definitive export.
+    arr = np.array(obj, dtype=np.uint8)
+    curve = tone.get('luma_curve')
+    if curve:
+        lut = np.interp(np.arange(256), [v[0] for v in curve], [v[1] for v in curve])
+        arr[:,:,:3] = np.clip(lut[arr[:,:,:3]],0,255).astype('uint8')
+    if tone.get('rgb_cast'):
+        arr[:,:,:3] = np.clip(arr[:,:,:3].astype('float32') + np.asarray(tone['rgb_cast']),0,255).astype('uint8')
+    return Image.fromarray(arr),tone,photo
+
+
+async def preview(request):
+    try:
+        s = session(request)
+        data = await request.json()
+        revision = data.get('revision')
+        if revision != s['revision'] or not s['state']:
+            return err('摆位已变化，请重新生成', 409)
+        encoded = data.get('image', '')
+        if not encoded.startswith('data:image/png;base64,') or len(encoded) > 12_000_000:
+            raise ValueError('三维占位图格式或大小不正确')
+        with Image.open(io.BytesIO(base64.b64decode(encoded.split(',', 1)[1], validate=True))) as im:
+            if im.width > 2048 or im.height > 2048 or im.width != im.height:
+                raise ValueError('占位图尺寸不正确')
+            obj = im.convert('RGBA')
+        if not obj.getchannel('A').getbbox():
+            raise ValueError('占位图为空')
+        generation = s['generation']
+        st = s['state'].copy()
+        row = ROWS[st['asset']]
+        mesh = Path(row['mesh'])
+        if digest(mesh) != row.get('mesh_sha256'):
+            raise ValueError('模型哈希与库记录不一致')
+        run_id = secrets.token_hex(8)
+        folder = Path(s['directory']) / ('render-' + run_id)
+        folder.mkdir()
+        output = folder / 'object.png'
+        req = {'mesh':str(mesh), 'azimuth':st['azimuth'], 'elevation':st['elevation'], 'output':str(output)}
+        (folder/'request.json').write_text(json.dumps(req), encoding='utf8')
+        blender = ROOT/'work/blender45/blender-4.5.3-windows-x64/blender.exe'
+        if not blender.is_file():
+            raise ValueError('找不到 Blender，无法生成实际渲染')
+        with (folder/'blender.log').open('wb') as log:
+            process = await asyncio.create_subprocess_exec(str(blender), '--background', '--factory-startup',
+                '--python-exit-code', '1', '--python', str(HERE/'render_preview.py'), '--', str(folder/'request.json'),
+                cwd=str(ROOT), stdout=log, stderr=log)
+            try:
+                code = await asyncio.wait_for(process.wait(), timeout=180)
+            except asyncio.TimeoutError:
+                process.kill(); await process.wait()
+                raise ValueError('Blender 渲染超时')
+        if code or not output.is_file():
+            raise ValueError('Blender 渲染失败，请查看会话目录中的日志')
+        with Image.open(output) as image:
+            blender_image = image.convert('RGBA')
+        one = np.asarray(obj.getchannel('A').resize((512,512), Image.Resampling.LANCZOS)) >= 128
+        two = np.asarray(blender_image.getchannel('A').resize((512,512), Image.Resampling.LANCZOS)) >= 128
+        union = np.count_nonzero(one | two)
+        iou = float(np.count_nonzero(one & two) / union) if union else 0
+        if iou < .95:
+            raise ValueError(f'网页与 Blender 的投影不一致（IoU {iou:.3f}），停止生成')
+        obj = blender_image
+        side = round(st['size'])
+        obj = obj.resize((side, side), Image.Resampling.LANCZOS)
+        x, y = round(st['x']-side/2), round(st['y']-side/2)
+        matched, tone, photo = await asyncio.to_thread(match_local_photo,s,obj,x,y)
+        base = Image.open(s['background']).convert('RGBA')
+        result = base.copy()
+        result.alpha_composite(matched, (x, y))
+        result.paste(base, (0, 0), foreground(s))
+        async with s['lock']:
+            if revision != s['revision'] or generation != s['generation']:
+                return err('摆位已变化，忽略旧预览', 409)
+            obj.save(Path(s['directory']) / 'object.png')
+            result.convert('RGB').save(Path(s['directory']) / 'preview.png')
+            s['preview_revision'] = revision
+            s['preview_generation'] = generation
+            s['projection_iou'] = round(iou, 4)
+            bounds = obj.getchannel('A').getbbox()
+            s['rendered_bounds_px'] = [x+bounds[0], y+bounds[1], x+bounds[2], y+bounds[3]]
+            s['rendered_major_px'] = max(bounds[2]-bounds[0], bounds[3]-bounds[1])
+            s['tone'] = tone
+            s['photometry'] = photo
+            s['warnings'] = ['Blender 视角渲染，未验证刚体、接触、尺度和遮挡；不是 Photoshop 最终结果。',
+                             '已按人工选择的区域估算调色；承托面及保护区仍待确认。' if tone else '未选择可用的承托面，尚未自动调色。',
+                             '没有经过验证的接触点，尚未生成接触阴影。']
+            save(s)
+        return JSONResponse(snapshot(s))
+    except (ValueError, OSError, TypeError) as e:
+        return err(e)
+
+
+async def preview_image(request):
+    try:
+        s = session(request)
+        if s['preview_revision'] != s['revision'] or s.get('preview_generation') != s['generation']:
+            raise ValueError('预览已过期')
+        return FileResponse(Path(s['directory']) / 'preview.png', media_type='image/png')
+    except ValueError as e:
+        return err(e, 404)
+
+
+async def photoshop_export(request):
+    """Export a clearly provisional layer stack; never claim physical acceptance."""
+    try:
+        from mcp import ClientSession, StdioServerParameters
+        from mcp.client.stdio import stdio_client
+        from batch_v2 import Budget, Runner, save_mask
+        from run import Config, load
+        s = session(request)
+        rev, generation = s['revision'], s['generation']
+        if s['preview_revision'] != rev or s.get('preview_generation') != generation:
+            raise ValueError('请先生成当前版本的预览')
+        folder = Path(s['directory']) / ('export-' + secrets.token_hex(8))
+        folder.mkdir()
+        st = s['state'].copy()
+        with Image.open(Path(s['directory'])/'object.png') as im:
+            asset = im.convert('RGBA')
+        bbox = asset.getchannel('A').getbbox()
+        if not bbox:
+            raise ValueError('物体透明度为空')
+        ox, oy = round(st['x']-st['size']/2), round(st['y']-st['size']/2)
+        l,t,r,b = (ox+bbox[0],oy+bbox[1],ox+bbox[2],oy+bbox[3])
+        if l < 0 or t < 0 or r > s['width'] or b > s['height']:
+            raise ValueError('物体超出背景边界，不能导出')
+        asset.crop(bbox).save(folder/'asset.png')
+        mask = np.asarray(foreground(s))
+        entry = save_mask(mask, folder/'foreground.png', [0,0,s['width'],s['height']], (255,255,255))
+        spec = {'id':'manual','asset':str(folder/'asset.png'),'center':[(l+r)/2,(t+b)/2],
+                'width':r-l,'angle':0,'canvas':[s['width'],s['height']], 'crop':[0,0,s['width'],s['height']],
+                'tone':s.get('tone') or {'brightness':0,'warmth':0,'saturation':0,'blur_px':0},'shade':None,'occlusion':entry,
+                'png':str(folder/'manual.png'),'psd':str(folder/'manual.psd')}
+        mcp = ROOT/'work/photoshop-mcp-env/Scripts/photoshop-mcp-server.exe'
+        if not mcp.is_file():
+            raise ValueError('未找到 Photoshop MCP')
+        async with httpx.AsyncClient(trust_env=False) as http:
+            runner = Runner(None,http,load(Config,HERE.parent/'batch-config.example.json'),None,
+                            ROOT/'work/v2-cache',Budget(folder/'usage.json',0))
+            with (folder/'photoshop.log').open('w',encoding='utf8') as log:
+                async with stdio_client(StdioServerParameters(command=str(mcp)),errlog=log) as (reader,writer):
+                    async with ClientSession(reader,writer) as client:
+                        await asyncio.wait_for(client.initialize(),timeout=30)
+                        runner.session = client
+                        await runner.ps({'mode':'reference','source':s['background'],'png':str(folder/'reference.png')})
+                        outcome = (await runner.ps({'mode':'compose','source':s['background'],'candidates':[spec]}))[0]
+        if outcome.get('error') or not (folder/'manual.png').is_file() or not (folder/'manual.psd').is_file():
+            raise ValueError('Photoshop 导出失败：'+str(outcome.get('error','输出文件缺失')))
+        with Image.open(folder/'reference.png') as bg, Image.open(folder/'manual.png') as result:
+            if result.size != bg.size:
+                raise ValueError('Photoshop 导出尺寸变化')
+            before = np.asarray(bg.convert('RGB')); after = np.asarray(result.convert('RGB'))
+            changed = np.any(before != after,axis=2)
+            changed[t:b,l:r] = False
+            outside = int(changed.sum())
+        if outside:
+            raise ValueError(f'编辑范围外有 {outside} 像素变化，导出未通过验证')
+        async with s['lock']:
+            if rev != s['revision'] or generation != s['generation']:
+                return err('摆位或遮挡已变化，导出结果已过期',409)
+            s['export'] = {'directory':str(folder),'status':'review','outside_changed_pixels':outside,
+                           'projection_iou':s.get('projection_iou'),
+                           'limitations':['落稳、支撑、尺度、保护区、同层调色、阴影及前后顺序待确认']}
+            save(s)
+        return JSONResponse(s['export'])
+    except Exception as e:
+        return err('Photoshop 导出未完成：'+str(e)[:300],503)
+
+
+async def export_file(request):
+    try:
+        s = session(request)
+        name = request.path_params['name']
+        if name not in ('manual.png','manual.psd') or not s.get('export'):
+            raise ValueError('导出文件不存在')
+        return FileResponse(Path(s['export']['directory'])/name,filename=name)
+    except ValueError as e:
+        return err(e,404)
+
+
+async def chat(request):
+    try:
+        s = session(request)
+    except ValueError as e:
+        return err(e,404)
+    if s['id'] in CHAT_ACTIVE:
+        return err('已有对话正在处理，请稍候',409)
+    CHAT_ACTIVE.add(s['id'])
+    try:
+        return await chat_once(request)
+    finally:
+        CHAT_ACTIVE.discard(s['id'])
+
+
+async def chat_once(request):
+    try:
+        s = session(request)
+        data = await request.json()
+        prompt = str(data.get('text', '')).strip()[:1000]
+        if not prompt or data.get('revision') != s['revision']:
+            raise ValueError('请输入说明并确保摆位未变化')
+        api_key = os.environ.get('PS_DEEPSEEK_KEY')
+        if not api_key:
+            return err('未配置 PS_DEEPSEEK_KEY，AI 对话不可用；可手动选择区域。', 503)
+        if s['usage'].get('accounted_tokens',s['usage']['total_tokens']) + 4096 > 30000:
+            return err('本会话模型预算已达上限', 429)
+        rev, generation = s['revision'], s['generation']
+        img = Image.open(s['background']).convert('RGB')
+        img.thumbnail((512, 512))
+        draw = ImageDraw.Draw(img)
+        state = s['state']
+        scale_x, scale_y = img.width/s['width'], img.height/s['height']
+        half = state['size']/2
+        draw.rectangle(((state['x']-half)*scale_x,(state['y']-half)*scale_y,
+                        (state['x']+half)*scale_x,(state['y']+half)*scale_y),outline='cyan',width=2)
+        for c in s['candidates']:
+            l,t,r,b = c['bounds']
+            sx, sy = img.width/s['width'], img.height/s['height']
+            draw.rectangle((l*sx,t*sy,r*sx,b*sy), outline='yellow', width=2)
+            draw.text((l*sx,t*sy), str(c['id']), fill='yellow', stroke_width=1, stroke_fill='black')
+        buf = io.BytesIO(); img.save(buf, format='JPEG', quality=75)
+        image_url = 'data:image/jpeg;base64,'+base64.b64encode(buf.getvalue()).decode('ascii')
+        instruction = ('青色框是物体占位范围，黄色框是候选区域。仅根据用户的明确指示，从候选编号中判断哪些是前景。不要猜测不明确的遮挡。'
+                       '只返回 JSON：{"reply":"简短回答或追问","selected":[整数编号]}。'
+                       '若不明确，selected 保持当前值。不能调整物品位置、大小或视角。'
+                       f'当前前景编号：{s["selected"]}；有效编号：{[c["id"] for c in s["candidates"]]}。')
+        # Reserve before sending; ambiguous failures retain the reservation.
+        s['usage']['accounted_tokens'] = s['usage'].get('accounted_tokens',s['usage']['total_tokens']) + 4096
+        save(s)
+        async with httpx.AsyncClient(timeout=60, trust_env=False) as client:
+            response = await client.post('https://api.deepseek.com/chat/completions', headers={'Authorization': 'Bearer '+api_key},
+                json={'model':'deepseek-flash','max_tokens':256,'response_format':{'type':'json_object'},
+                      'messages':[{'role':'system','content':instruction},{'role':'user','content':[
+                          {'type':'text','text':prompt},{'type':'image_url','image_url':{'url':image_url}}]}]})
+            response.raise_for_status(); answer = response.json()
+        usage = answer.get('usage', {})
+        async with s['lock']:
+            for key in ('prompt_tokens','completion_tokens','total_tokens'):
+                s['usage'][key] += int(usage.get(key, 0) or 0)
+            if isinstance(usage.get('total_tokens'),int):
+                s['usage']['accounted_tokens'] += usage['total_tokens'] - 4096
+            save(s)
+            if rev != s['revision'] or generation != s['generation']:
+                return err('摆位或遮挡已变化，忽略旧对话结果', 409)
+            content = json.loads(answer['choices'][0]['message']['content'])
+            chosen = content.get('selected')
+            allowed = [c['id'] for c in s['candidates']]
+            if not isinstance(chosen, list) or any(type(n) is not int or n not in allowed for n in chosen):
+                raise ValueError('AI 返回了无效区域，未应用修改')
+            s['history'].append(s['selected'].copy())
+            s['selected'] = sorted(set(chosen)); s['generation'] += 1; s['preview_revision'] = None
+            s.pop('export', None); save(s)
+        return JSONResponse({'reply':str(content.get('reply','请确认前景区域。'))[:500], 'session':snapshot(s)})
+    except Exception as e:
+        return err('对话未完成：'+str(e)[:200], 503)
+
+
+async def automatic(request):
+    try:
+        s = session(request)
+        if not s['state']:
+            raise ValueError('请先选择物品')
+        out = DATA / f"auto-{s['id']}-{int(time.time())}"
+        command = [sys.executable, '-X', 'utf8', '-B', str(HERE.parent / 'mesh_location_first.py'),
+                   '--asset', s['state']['asset'], '--background', s['background'], '--out', str(out), '--budget', '0']
+        with (Path(s['directory'])/'automatic.log').open('ab') as log:
+            process = await asyncio.create_subprocess_exec(*command, cwd=str(ROOT), stdout=log, stderr=log)
+        s['automatic'] = {'pid': process.pid, 'output': str(out), 'status': 'running'}; save(s)
+        async def wait():
+            code = await process.wait()
+            s['automatic']['status'] = 'finished' if code == 0 else 'review'
+            s['automatic']['exit_code'] = code
+            save(s)
+        asyncio.create_task(wait())
+        return JSONResponse(s['automatic'])
+    except (ValueError, OSError) as e:
+        return err(e)
+
+
+async def automatic_file(request):
+    try:
+        s = session(request)
+        name = request.path_params['name']
+        if name not in ('result.json','场景合成.png','场景合成.psd','位置优先-对照.jpg') or not s.get('automatic'):
+            raise ValueError('自动放置文件不存在')
+        path = Path(s['automatic']['output'])/name
+        if not path.is_file():
+            raise ValueError('自动放置尚未生成该文件')
+        return FileResponse(path,filename=name)
+    except ValueError as e:
+        return err(e,404)
+
+
+async def status(request):
+    try:
+        return JSONResponse(snapshot(session(request)))
+    except ValueError as e:
+        return err(e, 404)
+
+
+routes = [Route('/', index), Route('/api/assets', assets), Route('/api/model/{asset}', model),
+          Route('/api/sessions', create_session, methods=['POST']),
+          Route('/api/sessions/{sid}', status), Route('/api/sessions/{sid}/background', background),
+          Route('/api/sessions/{sid}/state', update_state, methods=['POST']),
+          Route('/api/sessions/{sid}/analyze', analyze, methods=['POST']),
+          Route('/api/sessions/{sid}/mask/{number}', mask_image),
+          Route('/api/sessions/{sid}/selection', selection, methods=['POST']),
+          Route('/api/sessions/{sid}/support', support_selection, methods=['POST']),
+          Route('/api/sessions/{sid}/undo', undo, methods=['POST']),
+          Route('/api/sessions/{sid}/preview', preview, methods=['POST']),
+          Route('/api/sessions/{sid}/preview.png', preview_image),
+          Route('/api/sessions/{sid}/export', photoshop_export, methods=['POST']),
+          Route('/api/sessions/{sid}/export/{name}', export_file),
+          Route('/api/sessions/{sid}/chat', chat, methods=['POST']),
+          Route('/api/sessions/{sid}/automatic', automatic, methods=['POST']),
+          Route('/api/sessions/{sid}/automatic/{name}', automatic_file),
+          Mount('/static', StaticFiles(directory=str(HERE)), name='static')]
+async def local_only(request, call_next):
+    if request.client and request.client.host not in ('127.0.0.1', '::1', 'testclient'):
+        return err('仅允许本机访问', 403)
+    host = request.headers.get('host', '').split(':')[0]
+    if host not in ('localhost', '127.0.0.1', 'testserver'):
+        return err('无效的本机地址', 403)
+    origin = request.headers.get('origin')
+    if origin and origin not in (f'http://{request.headers.get("host")}', f'https://{request.headers.get("host")}'):
+        return err('拒绝跨站请求', 403)
+    return await call_next(request)
+
+
+app = Starlette(routes=routes, middleware=[Middleware(BaseHTTPMiddleware, dispatch=local_only)])
+
+
+if __name__ == '__main__':
+    import uvicorn
+    uvicorn.run(app, host='127.0.0.1', port=8765)

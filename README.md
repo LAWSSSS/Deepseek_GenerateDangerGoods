@@ -4,6 +4,30 @@
 
 39 件素材可建立可续跑的三维模型库，并按场景选择单件视角。原有正式合成试产仍使用 **03 轴承座、10 千斤顶、27 减震器、30 液压缸**；模型库中的待审模型不代表已通过正式合成验收。三维结构、承托、净空、源图可见面和视觉验收的门槛独立生效。
 
+## 本机人工放置网页（待审版本）
+
+从项目根目录安装本地网页依赖并启动：
+
+```powershell
+Push-Location outputs/ps-model-controller/placement-web
+npm ci
+Pop-Location
+& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/placement-web/server.py
+```
+
+在本机浏览器打开 `http://127.0.0.1:8765`。选择监控底图或上传图片，再选择一件模型。物体可拖动；右上圆点旋转视角，右下方块缩放。选择“识别可能的遮挡”后，悬停查看分割区域，勾选位于前景的区域，并可用圆点选择局部调色的承托面。生成预览后可以调用 Photoshop 导出 PNG 和分层 PSD。页面上的“自动放置”入口启动原有位置优先流程，默认模型预算为 0。
+
+网页只监听本机。对话需在启动网页的进程中配置 `PS_DEEPSEEK_KEY`，并会将缩小的背景及区域标识发送给 DeepSeek；不要把密钥粘贴到聊天或提交到 Git。单次运行采用 30000 token 预算及调用前预留；网络异常且用量未知时保留预留额度。没有密钥时仍可手动选择遮挡区域。
+
+这是一版**人工检查工具**：网页与 Blender 的轮廓会交叉核对，未通过时停止；但当前网页尚未接入已验证的落稳姿态、接触点、现场尺度、保护区以及接触阴影的完整验收。前后关系需要人工或对话确认；相对深度不是可证明的遮挡顺序。承托面颜色采样由人工选区引导，尚未验证为同一物理承托面。输出均标为待审，不能当作正式验收结果。39 个模型都可浏览，其中 15 件源视图结构待审。
+
+离线回归（不调用模型）：
+
+```powershell
+& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/placement-web/checks_web.py
+& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/checks_mesh.py
+```
+
 ## 三维模型库与场景选角
 
 在项目根目录运行（第一次重建会耗时，重复命令从逐件记录续跑）：
