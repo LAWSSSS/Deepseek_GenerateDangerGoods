@@ -196,6 +196,28 @@ class GeometryChecks(unittest.TestCase):
         with self.assertRaises(NeedsReview):
             mounting_ratio(alpha)
 
+    def test_higher_texture_resolution_preserves_projection_and_geometry(self):
+        import trimesh
+        from mesh_detail import project_texture
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/"asset.png"
+            rgba=np.zeros((120,160,4),np.uint8)
+            rgba[10:110,10:150]=[90,110,130,255]
+            cv2.circle(rgba,(80,60),18,(0,0,0,0),-1)
+            # The source-derived normal map should react to material detail.
+            rgba[25:95:4,25:135:4,:3]=160
+            Image.fromarray(rgba).save(path)
+            mesh=trimesh.creation.box()
+            camera={"eye":[1.9,0,0],"target":[0,0,0],"fov_deg":40}
+            small=project_texture(mesh,path,camera,texture_size=1024)
+            large=project_texture(mesh,path,camera,texture_size=2048)
+            np.testing.assert_array_equal(large.vertices,mesh.vertices)
+            np.testing.assert_array_equal(large.faces,mesh.faces)
+            np.testing.assert_allclose(small.visual.uv,large.visual.uv)
+            self.assertEqual(large.visual.material.baseColorTexture.size,(2048,2048))
+            normal=np.asarray(large.visual.material.normalTexture)
+            self.assertGreater(np.count_nonzero(normal[:,:,0]!=128),0)
+
     def test_surface_coverage_uses_new_visible_pixels(self):
         source = np.array([[0,1,1],[0,2,2]], dtype=np.int32)
         new = np.array([[0,1,3],[0,2,3]], dtype=np.int32)

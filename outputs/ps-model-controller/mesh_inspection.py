@@ -86,12 +86,31 @@ async def inspect(args):
         raise ValueError("unverified source silhouette or pixel target")
     view = args.pose.resolve()
     pose = json.loads((view/"blender-result.json").read_text(encoding="utf8"))
+    baseline_dir=(args.baseline.parent if args.baseline else Path("outputs/固定场景-轴承座三维检查图"))
+    baseline_record=json.loads((args.baseline if args.baseline else baseline_dir/"result.json").read_text(encoding="utf8"))
+    if args.baseline:
+        if (baseline_record.get("status")!="human_inspection" or baseline_record.get("number")!=3 or
+                baseline_record.get("approved_target_px")!=target or
+                not isinstance(baseline_record.get("support_anchor_px"),list) or
+                len(baseline_record["support_anchor_px"])!=2 or
+                not all(isinstance(v,(float,int)) and math.isfinite(v) for v in baseline_record["support_anchor_px"]) or
+                baseline_record.get("pose",{}).get("elevation_deg")!=pose["camera"]["elevation_deg"] or
+                baseline_record.get("pose",{}).get("azimuth_deg")!=pose["camera"]["azimuth_deg"]):
+            raise NeedsReview("上一版检查图的尺寸或姿态与本次不一致")
+    fixed_anchor=baseline_record.get("support_anchor_px") if args.baseline else None
     source_alpha = Path(row["source_view"]).parent/"source-alpha.png"
     source_view = args.source_view.resolve()
     pose_request=json.loads((view/"request.json").read_text(encoding="utf8"))
     source_request=json.loads((source_view.parent/"request.json").read_text(encoding="utf8"))
     if digest(Path(pose_request["mesh"]))!=digest(Path(source_request["mesh"])):
         raise NeedsReview("源视图和落稳姿态的网格不一致")
+    material=None
+    material_result=source_view.parent/"result.json"
+    if material_result.exists():
+        data=json.loads(material_result.read_text(encoding="utf8"))
+        if data.get("mesh_sha256")!=digest(Path(pose_request["mesh"])) or data.get("source_asset_sha256")!=digest(Path(row["rust"])):
+            raise NeedsReview("纹理来源或网格记录不匹配")
+        material={key:data[key] for key in ("texture_size","detail_strength","detail_gain","normal_detail") if key in data}
     if source_request.get("camera")!=row["reconstruction"]["source_camera"]:
         raise NeedsReview("源视图相机与已标定相机不一致")
     with Image.open(source_view) as source, Image.open(source_alpha) as ref:
@@ -146,6 +165,10 @@ async def inspect(args):
                 def prefilter(candidate):
                     if not valid_zone(candidate, scene):
                         return False
+                    if fixed_anchor is not None:
+                        if math.dist(candidate["support_anchor_px"],fixed_anchor)>.15*target:
+                            return False
+                        candidate={**candidate,"support_anchor_px":fixed_anchor}
                     try:
                         candidate_scale(row, candidate, pixels[0][:,:,3], scene, allow_size_adjustment=True,
                                         projection=projection)
@@ -158,9 +181,11 @@ async def inspect(args):
                 for candidate in candidates:
                     candidate = {**candidate, "scene_scale_status":"unknown"}
                     try:
-                        proposal = candidate_scale(row,candidate,pixels[0][:,:,3],scene,
+                        scale_candidate=({**candidate,"support_anchor_px":fixed_anchor}
+                                         if fixed_anchor is not None else candidate)
+                        proposal = candidate_scale(row,scale_candidate,pixels[0][:,:,3],scene,
                                                    allow_size_adjustment=True,projection=projection)
-                        actual_target = proposal["selected_target_px"]
+                        actual_target = baseline_record["target_px"] if fixed_anchor is not None else proposal["selected_target_px"]
                     except NeedsReview as issue:
                         if not allow_missing or getattr(issue,"code",None)!="insufficient_local_references":
                             continue
@@ -180,7 +205,7 @@ async def inspect(args):
                         fit = open_fit(candidate,proposals,atlas,frame,candidate_pixels,
                                        source_visible_fraction=visibility["source_visible_fraction"],
                                        physics_stable=pose["physics_stable"],pixel_size_review=allow_missing,
-                                       scale_at=scale_at)
+                                       scale_at=scale_at,fixed_anchor=fixed_anchor)
                         with Image.open(view/"object.png") as main_image:
                             main_major=silhouette_axes(np.asarray(main_image.getchannel("A")))[0]
                         checks=[]
@@ -239,6 +264,8 @@ async def inspect(args):
                                     actual = measured["rendered_major_px"]
                                     if not .95*target <= actual <= 1.05*target:
                                         raise NeedsReview("actual pixel size exceeds approved range")
+                                    if fixed_anchor is not None and abs(actual-baseline_record["projection"]["rendered_major_px"])>1.5:
+                                        raise NeedsReview("物品尺寸与上一版相差超过 1.5 px")
                                     if fit["scale"]["status"] != "unknown":
                                         low,high = fit["scale"]["projected_major_px_range"]
                                         if not low <= actual <= high:
@@ -264,9 +291,8 @@ async def inspect(args):
                                 raise NeedsReview("Photoshop checks rejected the inspection candidates")
                 shutil.copy2(spec["png"], output/"03-轴承座-检查全图.png")
                 shutil.copy2(spec["psd"], output/"03-轴承座-检查分层.psd")
-            baseline_dir=Path("outputs/固定场景-轴承座三维检查图")
             baseline=read_image(baseline_dir/"03-轴承座-检查全图.png")
-            prior=json.loads((baseline_dir/"result.json").read_text(encoding="utf8"))
+            prior=baseline_record
             l,t,r,b = measured["bounds_px"]
             old=prior["projection"]["bounds_px"]
             crop=(max(0,min(l,old[0])-56),max(0,min(t,old[1])-56),
@@ -322,9 +348,11 @@ async def inspect(args):
             result = {"status":"human_inspection","number":row["number"],
                       "target_px":fit["candidate"]["target_px"],"approved_target_px":target,
                       "mesh":{"sha256":digest(Path(pose_request["mesh"])),"source_fidelity":fidelity,
-                              "proportions":proportion,"unobserved_surface":"source-projected texture is inferred"},
+                              "proportions":proportion,"unobserved_surface":"source-projected texture is inferred",
+                              "material":material},
                       "projection":measured,"geometry":fit["evidence"],"visibility":visibility,
                       "support_anchor_px":fit["support_anchor_px"],"camera_endpoint_checks":fit["camera_endpoint_checks"],
+                      "baseline_record":str(args.baseline) if args.baseline else None,
                       "pose":pose["camera"],"scene_scale":fit["scale"],"photography":photo,
                       "review":{"structure_v2":"pending","visual_model":"pending",
                                 "camera_interval":interval_status,
@@ -339,6 +367,7 @@ def main():
     parser.add_argument("--out",type=Path,required=True)
     parser.add_argument("--pose",type=Path,required=True)
     parser.add_argument("--source-view",type=Path,required=True)
+    parser.add_argument("--baseline",type=Path,help="固定上一版检查图的接触位置和尺寸")
     parser.add_argument("--scene",type=Path,required=True)
     parser.add_argument("--weights",type=Path,required=True)
     parser.add_argument("--cache",type=Path,required=True)

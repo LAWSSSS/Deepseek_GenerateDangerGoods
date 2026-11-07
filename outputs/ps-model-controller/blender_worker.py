@@ -55,7 +55,7 @@ def setup_scene(render_device="CPU", resolution=512):
     scene.cycles.use_denoising = False
     scene.render.threads_mode = "FIXED"
     scene.render.threads = 4
-    if resolution not in (512,1024):
+    if resolution not in (512,1024,2048):
         raise ValueError("Unsupported render resolution")
     scene.render.resolution_x = resolution
     scene.render.resolution_y = resolution

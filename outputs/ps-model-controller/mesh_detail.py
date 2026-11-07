@@ -42,12 +42,18 @@ def smooth(mesh, alpha, camera, resolution):
                    "displacement_limit":limit,"protected_vertices":int((~movable).sum())}
 
 
-def project_texture(mesh,asset,camera):
+def project_texture(mesh,asset,camera,*,texture_size=2048,detail_strength=.12,detail_gain=.65):
     image=Image.open(asset).convert("RGBA")
     image=image.crop(image.getchannel("A").getbbox())
-    image.thumbnail((870,870),Image.Resampling.LANCZOS)
-    canvas=Image.new("RGBA",(1024,1024),(0,0,0,0))
-    canvas.alpha_composite(image,((1024-image.width)//2,(1024-image.height)//2))
+    if texture_size not in (1024,2048) or not 0<=detail_strength<=.2 or not 0<=detail_gain<=1:
+        raise ValueError("不支持的纹理分辨率或细节强度")
+    # Match the 435/512 framing used for the reconstruction even when the
+    # source must be upsampled, so the calibrated camera still maps to it.
+    extent=texture_size*435/512
+    factor=extent/max(image.size)
+    image=image.resize((max(1,round(image.width*factor)),max(1,round(image.height*factor))),Image.Resampling.LANCZOS)
+    canvas=Image.new("RGBA",(texture_size,texture_size),(0,0,0,0))
+    canvas.alpha_composite(image,((texture_size-image.width)//2,(texture_size-image.height)//2))
     rgba=np.asarray(canvas)
     valid=rgba[:,:,3]>=128
     _,nearest=ndimage.distance_transform_edt(~valid,return_indices=True)
@@ -65,8 +71,31 @@ def project_texture(mesh,asset,camera):
     roughness=np.rint(230-90*ring).astype("uint8")
     metal=np.rint(50*ring).astype("uint8")
     channels=np.stack((np.full_like(roughness,255),roughness,metal),axis=2)
-    material=trimesh.visual.material.PBRMaterial(baseColorTexture=Image.fromarray(rgb),
-               metallicRoughnessTexture=Image.fromarray(channels),metallicFactor=1.,roughnessFactor=1.)
+    # Derive only a small, band-limited normal perturbation from observed
+    # source luminance. Fade it out around silhouettes and openings.
+    luminance=cv2.cvtColor(rgb,cv2.COLOR_RGB2GRAY).astype(np.float32)/255
+    scale=texture_size/1024
+    detail=cv2.GaussianBlur(luminance,(0,0),2*scale)-cv2.GaussianBlur(luminance,(0,0),9*scale)
+    dx=cv2.Sobel(detail,cv2.CV_32F,1,0,ksize=3)/8
+    dy=cv2.Sobel(detail,cv2.CV_32F,0,1,ksize=3)/8
+    magnitude=np.hypot(dx,dy)
+    level=max(float(np.percentile(magnitude[valid],95)),1e-6)
+    edge=cv2.distanceTransform(valid.astype("uint8"),cv2.DIST_L2,5)
+    interior=np.clip((edge-2*scale)/(4*scale),0,1)
+    weight=interior*detail_strength
+    nx=-np.clip(dx/level,-1,1)*weight
+    ny=np.clip(dy/level,-1,1)*weight
+    nz=np.sqrt(np.maximum(0,1-nx*nx-ny*ny))
+    normal=np.rint(np.clip(np.stack((nx,ny,nz),axis=2)*.5+.5,0,1)*255).astype("uint8")
+    # Restore a bounded amount of the source's medium-frequency detail.  A
+    # luminance-only adjustment preserves its hue and avoids creating texture
+    # at transparent edges or on unobserved background pixels.
+    band=cv2.GaussianBlur(luminance,(0,0),4*scale)-cv2.GaussianBlur(luminance,(0,0),16*scale)
+    delta=np.clip(band*detail_gain,-6/255,6/255)*interior
+    enhanced=np.rint(np.clip(rgb.astype(np.float32)/255+delta[:,:,None],0,1)*255).astype("uint8")
+    material=trimesh.visual.material.PBRMaterial(baseColorTexture=Image.fromarray(enhanced),
+               metallicRoughnessTexture=Image.fromarray(channels),normalTexture=Image.fromarray(normal),
+               metallicFactor=1.,roughnessFactor=1.)
     result=mesh.copy()
     result.visual=trimesh.visual.TextureVisuals(uv=uv,material=material)
     return result
@@ -92,6 +121,7 @@ def main():
     for name in ("mesh","alpha","camera","asset","out","blender"):
         parser.add_argument("--"+name,type=Path,required=True)
     parser.add_argument("--voxel-resolution",type=int,default=384)
+    parser.add_argument("--texture-size",type=int,choices=(1024,2048),default=2048)
     parser.add_argument("--render-device",choices=("CPU","CUDA","OPTIX"),default="CPU")
     args=parser.parse_args()
     for name,value in vars(args).items():
@@ -129,7 +159,7 @@ def main():
     # GLB stores coordinates as float32.  Compare the textured file against
     # the actual exported geometry that the physics worker will load.
     refined=trimesh.load(folder/"mesh.glb",force="mesh",process=False)
-    textured=project_texture(refined,args.asset,camera)
+    textured=project_texture(refined,args.asset,camera,texture_size=args.texture_size)
     folder=args.out/"mesh-texture"
     render_source(textured,folder,camera,args.blender,args.render_device)
     saved=trimesh.load(folder/"mesh.glb",force="mesh",process=False)
@@ -140,7 +170,7 @@ def main():
     if not fidelity["passed"]:
         raise ValueError("材质网格未通过源图检查")
     result={"candidates":results,"smoothing":details,"fidelity":fidelity,"mesh":str(folder/"mesh.glb"),
-            "source_view":str(folder/"source-view.png"),"texture_size":1024,
+            "source_view":str(folder/"source-view.png"),"texture_size":args.texture_size,
             "unobserved_surface":"projected texture is inferred"}
     (args.out/"detail-result.json").write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding="utf8")
     print(json.dumps(result,ensure_ascii=False),flush=True)

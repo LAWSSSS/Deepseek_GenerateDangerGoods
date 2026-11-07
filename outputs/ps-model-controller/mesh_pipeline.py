@@ -441,6 +441,7 @@ def main():
     cli.add_argument("--inspection-item",choices=("03",),help="生成单件人工检查图")
     cli.add_argument("--inspection-pose",type=Path,help="已验证的中点俯角姿态目录")
     cli.add_argument("--inspection-source-view",type=Path,help="同一网格的源视图渲染")
+    cli.add_argument("--inspection-baseline",type=Path,help="固定接触位置的上一版检查记录")
     cli.add_argument("--inspection-history",type=Path,default=Path("outputs/固定场景-v2最终几何复测"))
     cli.add_argument("--retry",action="store_true",help="重试待审项（如已补齐 API 配置）")
     args=cli.parse_args()
@@ -455,7 +456,8 @@ def main():
         from mesh_inspection import inspect
         request=SimpleNamespace(out=args.out,pose=args.inspection_pose,source_view=args.inspection_source_view,
                                 scene=args.scene,weights=args.weights,cache=args.cache,mcp=args.mcp,
-                                history=args.inspection_history,config=args.config,approved_from=args.approved_from)
+                                history=args.inspection_history,config=args.config,approved_from=args.approved_from,
+                                baseline=args.inspection_baseline)
         asyncio.run(inspect(request))
         return
     args.out.mkdir(parents=True,exist_ok=True)
