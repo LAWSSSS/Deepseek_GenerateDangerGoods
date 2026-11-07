@@ -206,4 +206,11 @@ def main():
             raise SystemExit(2)
 
 
-if __name__=="__main__": main()
+if __name__=="__main__":
+    import sys
+    if "--view-only" in sys.argv:
+        sys.argv.remove("--view-only")
+        main()
+    else:
+        from mesh_location_first import main as location_first_main
+        location_first_main()

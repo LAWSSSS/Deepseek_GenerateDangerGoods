@@ -196,7 +196,7 @@ def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics
     return best
 
 
-def compose_spec(fit,frame,scratch,label):
+def compose_spec(fit,frame,scratch,label,*,protected=()):
     candidate=fit["candidate"]
     x,y=fit["origin"]
     pixels=fit["pixels"]
@@ -228,6 +228,11 @@ def compose_spec(fit,frame,scratch,label):
     shadow_mask=np.zeros(support.shape,bool)
     shadow_mask[ly:ly+h,lx:lx+w]=fit["shadow"]>.035
     nearby &= ~shadow_mask
+    for pl,pt,pr,pb in protected:
+        x1,y1=max(0,pl-l),max(0,pt-t)
+        x2,y2=min(r-l,pr-l),min(b-t,pb-t)
+        if x1<x2 and y1<y2:
+            nearby[y1:y2,x1:x2]=False
     tone,photography,grain=fit_photo(patch,nearby,asset,0,(box[3]-box[1],box[2]-box[0]))
     # Retain 3-D shading and the approved color: avoid global blur and aggressive curves.
     tone["blur_px"]=0

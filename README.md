@@ -10,14 +10,28 @@
 
 ```powershell
 & work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/mesh_library.py --retry
-& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/mesh_select_view.py --asset 3 --background '现场底图.jpg' --out 'outputs/选角结果' --target-px 224.6
+& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/mesh_select_view.py --view-only --asset 3 --background '现场底图.jpg' --out 'outputs/选角结果' --target-px 224.6
 ```
 
 模型库按来源哈希复用已有模型，逐件记录原视角轮廓、孔洞和细结构；做锈素材中的孔洞仅在原貌素材的透明区域提供对应依据时尝试一次受限修复，失败时保留原始网格和拒绝原因。单张图片中不可见的表面及孔深属于推断，关键结构仍需复核。
 
-选角读取该场景的深度、承托区、保护区和俯角，比较落稳且源图可见面不少于 80% 的姿态，结合真实轮廓的净空、接触与可用尺度选取一个视角，并在俯角区间端点复核。`selected-view.png` 是独立视角而非已验收合成；`result.json` 记录依据及待审项。未提供 `--target-px` 时使用画面比例产生候选尺寸，该值不代表现场实测。缺少所需证据或没有合格候选时停止并记录原因。
+`--view-only` 保留原先只输出视角的诊断流程；它读取场景的深度、承托区、保护区和俯角，比较落稳且源图可见面不少于 80% 的姿态，并复核俯角区间端点。`selected-view.png` 是独立视角而非已验收合成；`result.json` 记录依据及待审项。未提供 `--target-px` 时使用画面比例产生候选尺寸，该值不代表现场实测。缺少所需证据或没有合格候选时停止并记录原因。
 
 场景分析复用按背景和配置签名的缓存；新场景没有缓存时需要配置视觉模型和本机密钥，并传入 `--budget`（最高 30000）。默认预算为 0，不会调用外部模型。
+
+## 先选位置、再选视角和调色
+
+`mesh_select_view.py` 默认使用位置优先流程，也可直接运行 `mesh_location_first.py`。程序先根据场景承托区、净空、保护区及局部参照排序接触位置，再在每个固定位置检查真实三维视角。候选还需通过落稳、源图可见面、各接触斑、实际轮廓和俯角端点检查；不合格时自动尝试下一个位置。确定位置和视角后才从同一承托面取样调色，排除前景、阴影和保护区，并验证 Photoshop 实际导出。
+
+```powershell
+$scene = Get-Content 'outputs/固定场景-39件尺寸标注/场景配置.json' -Raw | ConvertFrom-Json
+& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/mesh_location_first.py `
+  --asset 03 --background $scene.background --target-px 224.6 `
+  --settled-view 'work/03-smooth-poses/pose-45' `
+  --previous 'outputs/轴承座-圆润后场景检查-v4' --out 'outputs/位置优先-新运行' --budget 0
+```
+
+`--settled-view` 可选；仅在网格完全一致且单部件落稳通过时复用物理结果，程序会重新投影接触点。省略时会从当前模型重新模拟。`--previous` 可选，只用于输出对照图，并检查其物品与背景。每次使用新输出目录。结果包括分层 PSD、全图 PNG、对照图、位置与视角诊断；估算尺度和缺少的结构、视觉复核仍会标为待审。
 
 ## 六视图参考与圆润处理
 

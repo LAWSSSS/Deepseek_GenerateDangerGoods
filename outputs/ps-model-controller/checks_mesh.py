@@ -12,7 +12,7 @@ import unittest
 import cv2
 import httpx
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from mesh_checks import face_id_raster, placement_gate, source_fidelity, visible_source_fraction
 from mesh_camera import fit_source_camera
@@ -30,6 +30,88 @@ from scene_v2 import NeedsReview
 
 
 class GeometryChecks(unittest.TestCase):
+    def test_local_color_comparison_uses_actual_export_statistics(self):
+        from mesh_location_first import compare_photometry
+        photo={"scene":{"luma_p20_p50_p80":[70,90,110],"contrast_p80_p20":40,"lab_ab":[1,2]},
+               "object_before":{"luma_p20_p50_p80":[90,120,150],"contrast_p80_p20":60,"lab_ab":[5,5]},
+               "object_after":{"luma_p20_p50_p80":[74,93,116],"contrast_p80_p20":42,"lab_ab":[2,2]}}
+        measured=compare_photometry(photo)
+        self.assertEqual(measured["before"],{"luma":30,"contrast":20,"lab_chroma":5.0})
+        self.assertEqual(measured["after"],{"luma":3,"contrast":2,"lab_chroma":1.0})
+
+    def test_previous_comparison_requires_matching_background(self):
+        from mesh_location_first import verify_previous
+        frame=Image.new("RGB",(512,512),(50,60,70))
+        with tempfile.TemporaryDirectory() as root:
+            folder=Path(root);record={"number":3,"projection":{"bounds_px":[230,230,280,280]}}
+            (folder/"result.json").write_text(json.dumps(record),encoding="utf8")
+            frame.save(folder/"场景合成.png")
+            verify_previous(folder,{"number":3},frame)
+            altered=frame.copy();ImageDraw.Draw(altered).rectangle((0,0,120,120),fill=(255,255,255))
+            altered.save(folder/"场景合成.png")
+            with self.assertRaises(NeedsReview):verify_previous(folder,{"number":3},frame)
+
+    def test_site_candidate_keeps_fixed_anchor_and_native_json_numbers(self):
+        from mesh_site_selection import site_candidate
+        surface=SimpleNamespace(piece=1,mask=np.ones((100,100),bool))
+        atlas=SimpleNamespace(size=(400,400),surfaces=[surface])
+        pixels=np.zeros((40,60,4),np.uint8);pixels[5:30,8:55,3]=255
+        band=np.zeros((40,60),bool);band[29,15:45]=True
+        site={"id":"S001","support_id":"S1","support_anchor_px":[200.,220.],"target_px":80.}
+        with tempfile.TemporaryDirectory() as root:
+            first=site_candidate(site,(pixels,np.zeros((40,60),np.float32),[band]),atlas,Path(root))
+            second=site_candidate(site,(pixels,np.ones((40,60),np.float32),[band]),atlas,Path(root))
+            self.assertEqual(first["support_anchor_px"],second["support_anchor_px"])
+            self.assertEqual(first["crop_px"],second["crop_px"])
+            json.dumps(first)
+            self.assertTrue(all(type(value) is int for value in first["crop_px"]))
+
+    def test_scene_positions_exclude_protected_regions_without_object_pose(self):
+        from unittest.mock import patch
+        from mesh_site_selection import select_sites
+        shape=(80,100)
+        mask=np.ones(shape,bool)
+        surface=SimpleNamespace(piece=1,mask=mask,distance=np.full(shape,12,np.float32),error=.01)
+        atlas=SimpleNamespace(size=(400,320),factor=np.array([4.,4.]),surfaces=[surface],
+                              context_maps=lambda target:(np.ones(shape,np.float32)*.5,
+                                                          np.ones(shape,np.float32)*.3,
+                                                          np.zeros(shape,np.float32)),
+                              open_clearance=lambda s:np.full(shape,20,np.float32))
+        answer=SimpleNamespace(zones=["Z1"])
+        scene={"size":atlas.size,"answer":answer,"zones":{"Z1":{"anchors":[[500,500]]}},
+               "protected":[[180,130,230,190]],"references":{}}
+        with patch("mesh_site_selection.reference_evidence",return_value={"available":True,"accepted":[],"rejected":[]}):
+            sites,_=select_sites(atlas,scene,100,limit=20)
+        self.assertTrue(sites)
+        self.assertTrue(all(not(180<=x["support_anchor_px"][0]<230 and 130<=x["support_anchor_px"][1]<190) for x in sites))
+        self.assertTrue(all("camera" not in x and "rotation" not in x for x in sites))
+
+    def test_location_reference_precheck_rejects_conflicting_directions(self):
+        from metric_scale import SceneAnchor
+        from mesh_site_selection import reference_evidence
+        refs={"R1":SceneAnchor(id="R1",label="horizontal",span_mm=(100,150),points=((400,500),(600,500))),
+              "R2":SceneAnchor(id="R2",label="vertical",span_mm=(100,150),points=((500,400),(500,600)))}
+        scene={"size":(800,600),"depth":np.full((150,200),.5,np.float32),
+               "camera_elevation_deg":45,"references":refs}
+        result=reference_evidence(scene,[400,300])
+        self.assertFalse(result["available"])
+        self.assertEqual(result["reason"],"reference_direction_conflict")
+
+    def test_color_sampling_excludes_protected_area(self):
+        from unittest.mock import patch
+        captured={}
+        def fake_photo(frame,sample,asset,angle,shape):
+            captured["sample"]=sample.copy()
+            return {"brightness":0,"warmth":0,"saturation":0,"blur_px":0},{"status":"measured"},None
+        pixels=np.full((40,40,4),255,np.uint8)
+        fit={"candidate":{"crop_px":[0,0,200,200],"target_px":80},"origin":[80,80],
+             "pixels":pixels,"shadow":np.full((40,40),.2,np.float32),
+             "scene_support":np.ones((200,200),bool),"scene_foreground":np.zeros((200,200),bool)}
+        with tempfile.TemporaryDirectory() as root,patch("mesh_placement.fit_photo",side_effect=fake_photo):
+            compose_spec(fit,Image.new("RGB",(200,200)),Path(root),"A",protected=[[90,125,110,135]])
+        self.assertTrue(captured["sample"].any())
+        self.assertFalse(captured["sample"][125:135,90:110].any())
+
     def test_bounded_smoothing_preserves_topology_and_source_boundary(self):
         import trimesh
         from skimage.measure import marching_cubes
