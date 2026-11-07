@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import time
+from types import SimpleNamespace
 import unittest
 
 import cv2
@@ -28,6 +30,63 @@ from scene_v2 import NeedsReview
 
 
 class GeometryChecks(unittest.TestCase):
+    def test_seeded_pose_endpoint_verification_obeys_shared_deadline(self):
+        from mesh_pipeline import prepare_views
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp)
+            Image.fromarray(np.ones((8,8,4),np.uint8)*255).save(folder/"source-view.png")
+            Image.fromarray(np.ones((8,8),np.uint8)*255).save(folder/"source-alpha.png")
+            row={"source_view":str(folder/"source-view.png"),"reconstruction":{"source_camera":{}}}
+            pose={"rotation_deg":[0,0,0],"camera":{"azimuth_deg":0}}
+            scene={"camera_elevation_deg":45,"camera_elevation_interval":[35,55],
+                   "seed_view":(folder,pose,{}),"deadline":time.monotonic()-1}
+            self.assertEqual(prepare_views(row,folder,SimpleNamespace(),scene),[])
+            self.assertTrue(all("600 秒" in item["reason"] for item in row["pose_attempts"]))
+
+    def test_orbit_endpoint_uses_same_camera_distance_and_azimuth(self):
+        from unittest.mock import patch
+        from mesh_visibility import orbit_interval_estimates
+        eyes=[]
+        def fake_fragments(posed,camera,resolution):
+            eyes.append(np.asarray(camera["eye"]))
+            return np.array([[0]]),None,None
+        with tempfile.TemporaryDirectory() as temp:
+            path=Path(temp)/"triangles.npz"
+            np.savez(path,source=np.zeros((1,3,3)),source_ids=[0],posed=np.zeros((1,3,3)),posed_ids=[0])
+            camera={"eye":[0,-4,4],"target":[0,0,0]}
+            with patch("mesh_visibility.SourceProjection"),patch("mesh_visibility.fragments",side_effect=fake_fragments),patch("mesh_visibility._fraction",return_value=.9):
+                values=orbit_interval_estimates(path,{},camera,np.ones((1,1)),np.ones((1,1)),85,[35,55])
+            self.assertEqual(values,[.9,.9])
+            for eye in eyes:
+                self.assertAlmostEqual(np.linalg.norm(eye),np.sqrt(32))
+                self.assertAlmostEqual(np.degrees(np.arctan2(eye[1],eye[0])), -5)
+            self.assertAlmostEqual(np.degrees(np.arctan2(eyes[0][2],np.linalg.norm(eyes[0][:2]))),35)
+            self.assertAlmostEqual(np.degrees(np.arctan2(eyes[1][2],np.linalg.norm(eyes[1][:2]))),55)
+
+    def test_view_opening_score_uses_visible_background(self):
+        from mesh_visibility import opening_area
+        labels=np.full((80,80),-1,np.int32)
+        labels[10:70,10:70]=2
+        self.assertEqual(opening_area(labels),0)
+        labels[30:45,30:45]=-1
+        self.assertGreater(opening_area(labels),0)
+
+    def test_hole_repair_requires_clean_source_corroboration(self):
+        from mesh_library import holes_corroborated
+        rust=np.zeros((80,80),np.uint8)
+        rust[5:75,5:75]=255
+        cv2.circle(rust,(30,40),8,0,-1)
+        clean=rust.copy()
+        self.assertTrue(holes_corroborated(rust,clean)["corroborated"])
+        cv2.circle(clean,(30,40),8,255,-1)
+        self.assertFalse(holes_corroborated(rust,clean)["corroborated"])
+
+    def test_scene_view_selection_excludes_protected_area(self):
+        from mesh_select_view import overlaps_protected
+        fit={"origin":[100,200],"pixels":np.zeros((40,60,4),np.uint8)}
+        self.assertTrue(overlaps_protected(fit,[[150,220,180,260]]))
+        self.assertFalse(overlaps_protected(fit,[[160,200,180,240],[0,0,20,20]]))
+
     def test_subpixel_occluder_is_counted_at_exact_source_position(self):
         from mesh_visibility import SourceProjection
         camera={'eye':[0,0,0],'target':[0,0,1],'up':[0,1,0],'orthographic_scale':2}

@@ -20,11 +20,12 @@ from mcp.client.stdio import stdio_client
 from auto_v3 import save_preview
 from batch_v2 import Budget, BudgetReached, Runner, lock_directory
 from mesh_ai import check_render, check_structure
+from mesh_carve import interior_holes
 from mesh_build import report
 from mesh_placement import compose_spec, mesh_open_candidates, mesh_view, open_fit
 from mesh_runtime import run_bounded, safe_tail
 from mesh_scene import MeshSceneAnswer, analyze_scene, candidate_scale
-from mesh_visibility import VERSION as VISIBILITY_VERSION, coverage, orbit_estimates
+from mesh_visibility import VERSION as VISIBILITY_VERSION, coverage, orbit_estimates, orbit_interval_estimates
 from pose_retest import OPEN_PILOT, comparison, validate
 from run import Config, load
 from scene_pose import PoseAtlas
@@ -71,7 +72,8 @@ def valid_zone(candidate,scene):
 def prepare_views(row,folder,args,scene):
     views=[]
     orbit=[]
-    deadline=time.monotonic()+600
+    deadline=scene.get("deadline",time.monotonic()+600)
+    orbit_reserve=180 if "deadline" in scene else 90
     row["pose_attempts"]=[]
     reference_alpha=Path(row["source_view"]).parent/"source-alpha.png"
     with Image.open(row["source_view"]) as source,Image.open(reference_alpha) as original:
@@ -127,6 +129,9 @@ def prepare_views(row,folder,args,scene):
         with Image.open(dest/"object.png") as posed:
             visibility=coverage(dest/"triangles.npz",source_camera,result["camera"],source_mask,
                                 np.asarray(posed.getchannel("A")),reference_mask)
+        if time.monotonic()>=deadline:
+            attempt["reason"]="单件姿态诊断达到 600 秒限制"
+            return
         attempt["visibility"]=visibility
         if not visibility["known"] or visibility["source_visible_fraction"]<.80:
             attempt["reason"]=("可见面证据不确定："+visibility.get("reason","") if not visibility["known"]
@@ -139,21 +144,65 @@ def prepare_views(row,folder,args,scene):
             views.append(found)
         return found
 
-    for index,rotation in enumerate(ROTATIONS):
-        check(index,rotation)
-    if not views and orbit:
+    seed=scene.get("seed_view")
+    if seed is not None:
+        views.append(seed)
+    else:
+        for index,rotation in enumerate(ROTATIONS):
+            check(index,rotation)
+    prioritize=bool(scene.get("prefer_openings") and interior_holes(reference_mask)[1])
+    if seed is None and prioritize and views:
+        def has_opening(dest):
+            with Image.open(dest/"object.png") as image:
+                return interior_holes(np.asarray(image.getchannel("A")))[1]>0
+        if all(not has_opening(dest) for dest,_,_ in views):
+            orbit.extend((dest,result,result["rotation_deg"]) for dest,result,_ in views)
+        else:
+            prioritize=False
+    if seed is None and orbit and (not views or prioritize):
         guesses=[]
+        early=None
         for dest,result,rotation in orbit:
-            for degrees,fraction in orbit_estimates(dest/"triangles.npz",source_camera,result["camera"],source_mask,reference_mask):
-                if time.monotonic()>=deadline:
+            if time.monotonic()>=deadline-orbit_reserve:
+                break
+            estimates=orbit_estimates(dest/"triangles.npz",source_camera,result["camera"],source_mask,reference_mask,
+                                      opening_priority=prioritize)
+            for estimate in estimates:
+                if time.monotonic()>=deadline-orbit_reserve:
                     break
-                guesses.append((fraction,degrees,rotation))
+                degrees,fraction=estimate[:2]
+                opening=estimate[2] if prioritize else 0
+                if fraction>=.80:
+                    guesses.append((opening,fraction,degrees,rotation,dest,result))
+                    interval=scene.get("orbit_elevation_interval")
+                    # A substantial opening with both endpoints supported is
+                    # a useful early candidate; preserve time for real renders.
+                    if prioritize and opening>=4 and interval and time.monotonic()<deadline-150:
+                        values=orbit_interval_estimates(dest/"triangles.npz",source_camera,result["camera"],
+                                                        source_mask,reference_mask,degrees,interval)
+                        if all(value is not None and value>=.80 for value in values):
+                            early=(opening,fraction,degrees,rotation,dest,result,values)
+                            break
+            if early:
+                break
         if guesses:
-            fraction,degrees,rotation=max(guesses,key=lambda guess:guess[0])
-            row["orbit_estimate"]={"visible_fraction":round(fraction,4),
-                                   "camera_azimuth_deg":degrees,"rotation_deg":rotation}
-            if fraction>=.80:
-                check(len(ROTATIONS),rotation,degrees)
+            ordered=([early[:6]] if early else sorted(guesses,key=lambda g:(g[0],g[1]),reverse=True))
+            for opening,fraction,degrees,rotation,dest,result in ordered:
+                interval=scene.get("orbit_elevation_interval")
+                endpoint_values=early[6] if early else None
+                if interval and not early:
+                    if time.monotonic()>=deadline-(150 if "deadline" in scene else 60):
+                        break
+                    endpoint_values=orbit_interval_estimates(dest/"triangles.npz",source_camera,result["camera"],
+                                                              source_mask,reference_mask,degrees,interval)
+                    if any(value is None or value<.80 for value in endpoint_values):
+                        continue
+                row["orbit_estimate"]={"visible_fraction":round(fraction,4),
+                                       "camera_azimuth_deg":degrees,"rotation_deg":rotation,
+                                       "estimated_opening_area_px":opening,"endpoint_fractions":endpoint_values}
+                if not views or opening>0:
+                    check(len(ROTATIONS),rotation,degrees)
+                break
     interval=scene.get("camera_elevation_interval")
     if views and interval:
         # Limit to one midpoint candidate so the three base poses, optional

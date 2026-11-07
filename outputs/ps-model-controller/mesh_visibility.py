@@ -200,7 +200,36 @@ def coverage(path, source_camera, posed_camera, source_alpha, posed_alpha, refer
     return {**evidence, 'known':True, 'source_visible_fraction':min(fractions)}
 
 
-def orbit_estimates(path, source_camera, posed_camera, source_alpha, reference_alpha):
+def opening_area(labels):
+    contours,hierarchy=cv2.findContours((labels>=0).astype("uint8"),cv2.RETR_CCOMP,cv2.CHAIN_APPROX_SIMPLE)
+    if hierarchy is None:
+        return 0.0
+    return max((cv2.contourArea(c) for i,c in enumerate(contours) if hierarchy[0,i,3]>=0),default=0.0)
+
+
+def orbit_interval_estimates(path, source_camera, posed_camera, source_alpha, reference_alpha, degrees, elevations):
+    target=np.asarray(posed_camera["target"],dtype=float)
+    delta=np.asarray(posed_camera["eye"],dtype=float)-target
+    radius=float(np.linalg.norm(delta))
+    a=np.deg2rad(degrees)
+    horizontal=np.array([np.cos(a)*delta[0]-np.sin(a)*delta[1],
+                         np.sin(a)*delta[0]+np.cos(a)*delta[1]])
+    horizontal/=np.linalg.norm(horizontal)
+    with np.load(path) as data:
+        source,source_ids=data["source"],data["source_ids"]
+        posed,posed_ids=data["posed"],data["posed_ids"]
+    projection=SourceProjection(source,source_camera,source_alpha,reference_alpha)
+    values=[]
+    for elevation in elevations:
+        tilt=np.deg2rad(elevation)
+        eye=target+np.array([*(radius*np.cos(tilt)*horizontal),radius*np.sin(tilt)])
+        camera={**posed_camera,"eye":eye.tolist()}
+        labels,_,bary=fragments(posed,camera,128)
+        values.append(_fraction(source,source_ids,posed,posed_ids,projection,camera,labels,bary))
+    return values
+
+
+def orbit_estimates(path, source_camera, posed_camera, source_alpha, reference_alpha, *, opening_priority=False):
     """Rank azimuths using a low-resolution projection of the settled geometry."""
     target = np.asarray(posed_camera['target'])
     delta = np.asarray(posed_camera['eye']) - target
@@ -208,11 +237,15 @@ def orbit_estimates(path, source_camera, posed_camera, source_alpha, reference_a
         source, source_ids = data['source'], data['source_ids']
         posed, posed_ids = data['posed'], data['posed_ids']
     projection = SourceProjection(source, source_camera, source_alpha, reference_alpha)
-    for degrees in range(30, 360, 30):
+    angles=sorted(set(range(30,360,30)) | ({75,80,85,95,100,105} if opening_priority else set()))
+    for degrees in angles:
         cosine, sine = np.cos(np.deg2rad(degrees)), np.sin(np.deg2rad(degrees))
         eye = target + np.array([cosine*delta[0]-sine*delta[1], sine*delta[0]+cosine*delta[1], delta[2]])
         camera = {**posed_camera, 'eye':eye.tolist()}
         dst, _, bary = fragments(posed, camera, 128)
         value = _fraction(source, source_ids, posed, posed_ids, projection, camera, dst, bary)
         if value is not None:
-            yield degrees, value
+            if opening_priority:
+                yield degrees, value, opening_area(dst)
+            else:
+                yield degrees, value
