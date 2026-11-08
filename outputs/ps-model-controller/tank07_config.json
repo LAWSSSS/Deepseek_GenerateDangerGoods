@@ -1,0 +1,287 @@
+{
+  "version": "tank07-parametric-v1",
+  "radial_segments": 128,
+  "radius": 0.249,
+  "shell_top_z": 0.338,
+  "head_depth": 0.045,
+  "shell_bottom_z": -0.203,
+  "shell_mid_seam_z": 0.053,
+  "cone_flange_radius": 0.04,
+  "cone_flange_top_z": -0.252,
+  "cone_flange_bottom_z": -0.269,
+  "cone_flange_outer": 0.05,
+  "cone_flange_inner": 0.032,
+  "cone_flange_bolts": 20,
+  "cone_flange_bolt_radius": 0.041,
+  "cone_flange_bolt_head_radius": 0.0035,
+  "cone_clamp_azimuths_deg": [
+    -90.0,
+    90.0
+  ],
+  "lower_cone_top_z": -0.268,
+  "lower_cone_tip_z": -0.4,
+  "lower_cone_top_radius": 0.034,
+  "drain_z_top": -0.392,
+  "drain_z_bottom": -0.42,
+  "drain_outer": 0.013,
+  "drain_bore": 0.008,
+  "floor_z": -0.5,
+  "leg_azimuths_deg": [
+    -60.0,
+    60.0,
+    180.0
+  ],
+  "leg_top_z": -0.199,
+  "leg_bottom_z": -0.462,
+  "leg_top_half_width": 0.118,
+  "leg_bottom_half_width": 0.02,
+  "leg_fold": 0.009,
+  "leg_thickness": 0.005,
+  "leg_top_base_radius": 0.24,
+  "leg_bottom_base_radius": 0.255,
+  "foot_stem_radius": 0.009,
+  "foot_stem_top_z": -0.462,
+  "foot_stem_bottom_z": -0.488,
+  "foot_pad_radius": 0.024,
+  "foot_pad_top_z": -0.488,
+  "foot_pad_bottom_z": -0.5,
+  "foot_collar_radius": 0.013,
+  "foot_collar_top_z": -0.485,
+  "foot_collar_bottom_z": -0.477,
+  "top_port": {
+    "y": -0.202,
+    "neck_outer": 0.03,
+    "neck_bore": 0.023,
+    "neck_z0": 0.359,
+    "neck_z1": 0.406,
+    "flange_outer": 0.054,
+    "flange_z0": 0.401,
+    "flange_z1": 0.413,
+    "gasket_z0": 0.413,
+    "gasket_z1": 0.417,
+    "gasket_outer": 0.052,
+    "gasket_inner": 0.026,
+    "lid_z0": 0.417,
+    "lid_z1": 0.473,
+    "lid_radius": 0.048,
+    "swing_bolt_count": 4,
+    "swing_bolt_azimuths_deg": [
+      45.0,
+      135.0,
+      225.0,
+      315.0
+    ],
+    "swing_bolt_radius": 0.0575,
+    "swing_bolt_radius_rod": 0.004,
+    "swing_bolt_z0": 0.388,
+    "swing_bolt_z1": 0.416,
+    "nut_z0": 0.382,
+    "nut_z1": 0.39
+  },
+  "lift_lug": {
+    "x": 0.0,
+    "y": 0.005,
+    "base_z0": 0.381,
+    "base_z1": 0.387,
+    "bar_half_gap": 0.017,
+    "bar_thickness_x": 0.006,
+    "bar_width_y": 0.008,
+    "bar_z0": 0.387,
+    "bar_z1": 0.416,
+    "eye_z": 0.411,
+    "eye_major": 0.016,
+    "eye_minor": 0.005,
+    "web_top": 0.399
+  },
+  "top_pipe": {
+    "stub_x": 0.055,
+    "stub_y": -0.025,
+    "stub_z0": 0.378,
+    "stub_z1": 0.417,
+    "stub_outer": 0.013,
+    "stub_bore": 0.009,
+    "flange_z0": 0.409,
+    "flange_z1": 0.417,
+    "flange_outer": 0.025,
+    "outer": 0.011,
+    "bore": 0.0075,
+    "path": [
+      [
+        0.055,
+        -0.025,
+        0.37
+      ],
+      [
+        0.055,
+        -0.025,
+        0.438
+      ],
+      [
+        0.148,
+        -0.15,
+        0.438
+      ],
+      [
+        0.181,
+        -0.201,
+        0.415
+      ],
+      [
+        0.181,
+        -0.201,
+        -0.115
+      ],
+      [
+        0.166,
+        -0.185,
+        -0.155
+      ]
+    ],
+    "corner_radius": 0.024,
+    "corner_segments": 8,
+    "wall_azimuth_deg": -48.0,
+    "wall_flange_z": -0.148,
+    "wall_flange_outer": 0.032,
+    "wall_flange_inner": 0.014,
+    "wall_flange_thickness": 0.012,
+    "wall_bolt_count": 4,
+    "wall_bolt_radius": 0.027,
+    "valve_radius": 0.016,
+    "valve_length": 0.052,
+    "valve_flange_outer": 0.026,
+    "valve_flange_thickness": 0.008,
+    "valve_stem_length": 0.052,
+    "valve_stem_radius": 0.005,
+    "valve_handle_length": 0.046,
+    "valve_handle_radius": 0.0045
+  },
+  "sight_glass": {
+    "z_center": -0.175,
+    "z_top": -0.128,
+    "z_bottom": -0.232,
+    "half_width": 0.034,
+    "pad_depth": 0.014,
+    "bezel_major": 0.023,
+    "bezel_minor": 0.0045,
+    "lens_radius": 0.0205,
+    "plug_z": -0.213,
+    "plug_radius": 0.008
+  },
+  "skid": {
+    "rail_x": 0.058,
+    "rail_cross": 0.018,
+    "frame_z": 0.398,
+    "y_min": 0.08,
+    "y_max": 0.258,
+    "post_x": 0.03,
+    "post_y": 0.242,
+    "post_section": 0.018,
+    "column_xy": [
+      [
+        0.03,
+        0.135
+      ],
+      [
+        -0.03,
+        0.17
+      ]
+    ],
+    "column_radius": 0.012,
+    "column_flange_radius": 0.023,
+    "column_flange_thickness": 0.006,
+    "base_plate_x": 0.052,
+    "base_plate_y0": 0.088,
+    "base_plate_y1": 0.252,
+    "base_plate_thickness": 0.008
+  },
+  "motor": {
+    "axis_z": 0.452,
+    "center_y": 0.176,
+    "body_radius": 0.04,
+    "body_y0": 0.146,
+    "body_y1": 0.238,
+    "fin_count": 12,
+    "fin_length": 0.088,
+    "fin_thickness": 0.004,
+    "fin_height": 0.008,
+    "gearbox_y0": 0.092,
+    "gearbox_y1": 0.146,
+    "gearbox_half_x": 0.04,
+    "gearbox_half_z": 0.045,
+    "gearbox_rib_count": 6,
+    "fan_y0": 0.238,
+    "fan_y1": 0.272,
+    "fan_radius": 0.044,
+    "fan_rim_major": 0.044,
+    "fan_rim_minor": 0.004,
+    "grille_radius": 0.035,
+    "grille_bars": 8,
+    "terminal_y": 0.176,
+    "terminal_z0": 0.491,
+    "terminal_z1": 0.505,
+    "terminal_half_x": 0.024,
+    "terminal_half_y": 0.026,
+    "foot_half_x": 0.044,
+    "foot_y": [
+      0.112,
+      0.222
+    ],
+    "foot_z0": 0.404,
+    "foot_z1": 0.414,
+    "drive_shaft_x": 0.03,
+    "drive_shaft_y": 0.12,
+    "drive_shaft_radius": 0.01,
+    "drive_shaft_z0": 0.36,
+    "drive_shaft_z1": 0.42,
+    "drive_coupling_radius": 0.018,
+    "drive_coupling_z0": 0.396,
+    "drive_coupling_z1": 0.414,
+    "head_flange_radius": 0.026
+  },
+  "material_profile": {
+    "bright_stainless": {
+      "roughness": 0.24,
+      "metallic": 0.97,
+      "rust_amount": 0.04
+    },
+    "brushed_stainless": {
+      "roughness": 0.36,
+      "metallic": 0.93,
+      "rust_amount": 0.08
+    },
+    "weathered_stainless": {
+      "roughness": 0.55,
+      "metallic": 0.76,
+      "rust_amount": 0.2
+    },
+    "stained_steel": {
+      "roughness": 0.8,
+      "metallic": 0.44,
+      "rust_amount": 0.42
+    }
+  },
+  "proportion_source": {
+    "note": "The working size follows the original photograph's pixel proportions (diameter about 710 px, total height about 1425 px, so diameter/height about 0.50) and the model-library visual scale (about 1.0 m total height). These are not measured dimensions. The six-view collage is an uncalibrated category reference of a similar vertical stainless tank whose top stirring parts are different.",
+    "source_photo": "outputs/物品高清输入-39件/原貌HD/07-储罐2.png",
+    "six_view_reference": "C:/Users/zhaoc/Desktop/六视图/不锈钢立式储罐六视图 каталогу.png",
+    "six_view_reference_sha256": "40de210e08b406a107fe3e34a88458a6e7cb0e7c02428fce19d8653fb80b7ef6",
+    "observed": [
+      "vertical cylindrical shell with a shallow dished top head and a shallow upper cone",
+      "three broad folded-plate legs at 120 degrees with leveling feet",
+      "bolted small lower cone and bottom drain nozzle",
+      "large flanged top port with a domed blind cover and hanging swing bolts",
+      "blue electric gear motor on a stainless skid frame over the +Y top head",
+      "long recirculation pipe from a top flange down the front-left side into a low side nozzle with a small valve",
+      "capsule sight glass with a blue lens and a hex plug on the lower front shell",
+      "three circumferential weld bands (top tangent, mid shell, bottom tangent)"
+    ],
+    "inferred": [
+      "exact leg cross-section, fold angle, top attachment and leveling-foot construction",
+      "skid frame topology behind/below the motor, post count and hidden frame members",
+      "sight-glass pad profile, lens colour and plug thread",
+      "pipe wall-flange azimuth, valve stem direction and internal bore connections",
+      "all hidden/back-side details, bore depths, bolt counts and assembly relationships"
+    ],
+    "public_reference_note": "Vertical sanitary mixing tanks of this class commonly use 120-degree folded-plate legs, a dished top head, a clamped or bolted top port and a bolted conical bottom. No public model is claimed to be this exact unit. The category reference sheet is not a measurement."
+  }
+}
