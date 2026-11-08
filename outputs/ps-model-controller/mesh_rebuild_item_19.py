@@ -732,8 +732,9 @@ def body_gap(worker, out=None):
 # Report and hashes
 # ---------------------------------------------------------------------------
 def write_report(out, result):
+    variant = out.name.rsplit('-', 1)[-1]
     lines = [
-        '# 19 气瓶组 · 六视图重建 v1（manual_only，待审）',
+        f'# 19 气瓶组 · 六视图重建 {variant}（manual_only，待审）',
         '',
         '## 结论',
         '',
@@ -744,7 +745,8 @@ def write_report(out, result):
         '## 为什么重建而不是保守修复',
         '',
         f"- 旧网格有 {result['old_audit']['components']} 个连通分量；主块深度 "
-        f"{result['old_audit']['old_main_depth_m']:.3f} m，远大于单瓶直径，背视/侧视出现原图没有的浮块。",
+        f"{result['old_audit']['old_main_depth_m']:.3f} m，约为最大单瓶直径 0.155 m 的 1.3 倍，"
+        '背视/侧视还有原图没有的游离碎片。',
         f"- 旧网格桶排宽/高比 {result['old_audit']['old_main_width_over_height']}，"
         f"原照测量 {result['old_audit']['photo_row_width_over_height']}；旧体量被压窄并带出背墙。",
         f"- 原视角审计记录：{result['audit']['warnings'][0] if result['audit'].get('warnings') else '无'}；"
@@ -772,11 +774,12 @@ def write_report(out, result):
         '分布为程序化近似，不是逐点实测。',
         '- 黄铜/镀铬/表圈：金属度 1，粗糙度约 0.18–0.34；`金属反射-变光对照.jpg` 显示高光随光位移动。',
         '- 漆面不上金属反射不是缺陷：真实构造是金属筒体外的非金属漆层。',
-        f"- 图集检查通过：{result['textures']['passed']}；详见 `result.json` 的 tile 数值。",
+        f"- 图集数值检查：{'通过' if result['textures']['passed'] else '未通过'}；"
+        '详见 `result.json` 的 tile 数值。',
         '',
         '## 检查结果（实际执行）',
         '',
-        f"- Blender {result['versions']['blender']}，Cycles CPU，六视图 {result['render']['six_view_samples']} 采样；"
+        f"- {result['versions']['blender']}，Cycles CPU，六视图 {result['render']['six_view_samples']} 采样；"
         f"GLB/Blend/贴图/对照图均由本工作树内 Blender/Python 生成。",
         f"- 严格原相机轮廓：IoU {result['diagnostics']['strict']['iou']}，"
         f"填孔 {result['diagnostics']['strict']['filled_holes']}，细结构召回 "
@@ -790,7 +793,8 @@ def write_report(out, result):
         (f"- 瓶间最小网格间隙：{result['body_gap'].get('minimum_m')} m（只测顶点距离）。"
          if result['body_gap'] else '- 瓶间最小网格间隙：草稿模式未执行。'),
         (f"- 金属变光：差分 {result['metal'].get('mean_abs_difference')}/255，"
-         f"高光质心位移 {result['metal'].get('highlight_shift_px')} px。"
+         f"最亮 1% 高光质心位移 {result['metal'].get('highlight_shift_px')} px"
+         f"（高阈值位移 {result['metal'].get('high_threshold_shift_px')} px）。"
          if result['metal'] else '- 金属变光：草稿模式未执行。'),
         f"- 浏览器交互：未执行（本工作树缺少本地 three.js/node_modules；未安装依赖，也未声称通过）。",
         '',
@@ -816,7 +820,7 @@ def write_report(out, result):
         '',
         '```powershell',
         '& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/mesh_rebuild_item_19.py '
-        '--out "outputs/19气瓶组-六视图重建-v1"',
+        f'--out "outputs/{out.name}-repro"',
         '& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/checks_rebuild_19.py',
         '```',
         '',
