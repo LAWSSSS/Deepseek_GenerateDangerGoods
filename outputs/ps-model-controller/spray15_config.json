@@ -1,0 +1,61 @@
+{
+  "version": "spray15-parametric-v1",
+  "radial_segments": 128,
+  "shape_basis": "source_photo_with_uncalibrated_six_view_reference",
+  "reference_role": "visual_match_unverified",
+  "scale_note": "Working scale follows the source-photo pixel ratio and a plausible 600 ml aerosol-can size. It is not a measured dimension of the physical item.",
+  "proportion_source": {
+    "photo": "outputs/物品高清输入-39件/原貌HD/15-杀虫剂罐1.png",
+    "rust": "outputs/物品高清输入-39件/生锈HD/15-杀虫剂罐1.png",
+    "reference": "references/parallel-six-view/ChatGPT 图像 2026年10月14日 10_08_40-2.png",
+    "reference_note": "The six-view sheet is an uncalibrated visual match for the same Raid-type 600 ml aerosol can. Its panels are not a calibrated turntable: the top view is oval, the cap shape is simplified and the side-panel label ends do not join seamlessly. Front/back/side panels are used for the hidden-half label wrap and the top/bottom topology; the original photo decides proportions and the visible front design.",
+    "visible_structure": "Cylindrical printed tinplate aerosol can with a rolled bottom rim and concave brushed-metal base; black glossy plastic overcap with two raised side horns, a saddle top and a two-lobed front/top window exposing the spray actuator; two small nozzle orifices; purple-to-pink Raid label with a white back information panel, barcode and insect icons.",
+    "pixel_ratios": "Source silhouette is about 374 px wide and 1467 px tall (diameter/height about 0.255); the label body is about 374 px wide and 1138 px tall. The candidate uses 0.0664 m diameter and 0.262 m overall height, not measured dimensions.",
+    "status": "uncalibrated_visual_reference"
+  },
+  "dimensions": {
+    "total_height": 0.262,
+    "body_radius": 0.0332,
+    "label_z0": 0.0075,
+    "label_z1": 0.2015,
+    "cap_z0": 0.1985,
+    "cap_top_nominal_z": 0.252,
+    "cap_horn_peak_z": 0.2585,
+    "bottom_dish_center_z": 0.0115,
+    "bottom_rim_outer_z": 0.003,
+    "note": "Dimensions are derived from the source-photo silhouette; the hidden can interior, wall thickness, valve cup and exact cap fit are inferred."
+  },
+  "reference_panels": {
+    "front": {"origin": [0, 0], "rect": [201, 105, 317, 436], "angle_deg": 0},
+    "left": {"origin": [1024, 0], "rect": [193, 105, 307, 436], "angle_deg": 90},
+    "back": {"origin": [512, 0], "rect": [197, 105, 316, 436], "angle_deg": 180},
+    "right": {"origin": [0, 512], "rect": [200, 120, 314, 436], "angle_deg": 270}
+  },
+  "hd_label_rect": [326, 350, 700, 1488],
+  "source_camera": {"eye": [1.9, 0, 0], "target": [0, 0, 0], "fov_deg": 34.206864, "shift_x": -0.000199, "shift_y": -0.007938},
+  "material_profile": {
+    "label": {"base_roughness": 0.315, "grime_roughness": 0.68, "grime_rgb": [104, 77, 55], "normal_strength": 0.030},
+    "cap": {"base_rgb": [13, 13, 15], "base_roughness": 0.185, "dust_roughness": 0.42, "normal_strength": 0.055},
+    "metal": {"base_rgb": [196, 199, 201], "roughness": 0.285, "normal_strength": 0.070},
+    "rust": {"base_rgb": [115, 63, 32], "roughness": 0.79, "normal_strength": 0.24},
+    "nozzle": {"base_rgb": [8, 8, 9], "roughness": 0.24},
+    "inner": {"base_rgb": [10, 10, 11], "roughness": 0.52}
+  },
+  "window": {
+    "center": [0.0330, 0.0, 0.2370],
+    "tilt_deg": 90.0,
+    "half_width_y": 0.0150,
+    "half_height_slope": 0.0080,
+    "peanut_lobe": 0.30,
+    "note": "The two-lobed front window is inferred from the original photo and is a real hole through the solidified plastic shell. The cap is built as a surface with the window faces removed, then solidified, so the opening has a real wall rim; the exact outline and internal linkage are not measured. The uncalibrated top reference simplifies the cap and is not used as the window outline."
+  },
+  "nozzle": {
+    "head_center": [0.0160, 0.0, 0.2385],
+    "head_half": [0.0022, 0.0085, 0.0035],
+    "bore_radius": 0.00085,
+    "bore_y": [-0.0042, 0.0042],
+    "bore_z": 0.2390,
+    "note": "Two real through-bores in the actuator face; the internal valve and trigger linkage are simplified and inferred."
+  },
+  "checks_note": "All checks are diagnostics. The six-view reference is uncalibrated; a candidate result is manual_only and cannot enter automatic placement or final compositing."
+}
