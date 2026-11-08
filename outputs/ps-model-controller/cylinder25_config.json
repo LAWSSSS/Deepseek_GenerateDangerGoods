@@ -1,0 +1,465 @@
+{
+  "version": "cylinder25-parametric-v1",
+  "number": 25,
+  "description": "25 号油缸（蓝色焊接式双耳环液压缸）分部件重建。以原照与做锈图可见结构为主，六视图仅作未标定的外观和背侧拓扑参考。",
+  "units": "meters",
+  "shape_basis": "source_photo_visible_structure+uncalibrated_six_view_layout",
+  "orientation": {
+    "axis": "Y",
+    "base_end": "-Y",
+    "rod_end": "+Y",
+    "up": "+Z",
+    "front_camera": "+X",
+    "note": "沿用模型库 Z 向上约定：缸体轴线沿 Y，底端（大耳环）在 -Y，活塞杆端在 +Y。+X 相机看到底端在画面左侧、杆端在右侧，与原照一致。"
+  },
+  "scale_note": "按原照与六视图的像素比例设置工作尺度：缸筒外径约 170 mm、活塞杆直径约 52 mm、总长约 1.0 m。这些都是合理比例的工作尺度，不是对实物的测量。",
+  "dimensions": {
+    "base_clevis": {
+      "eye_center_y": -0.43,
+      "eye_outer_radius": 0.09,
+      "eye_bore_radius": 0.043,
+      "plate_half_height": 0.09,
+      "plate_x0": -0.045,
+      "plate_x1": 0.045,
+      "neck_end_y": -0.345,
+      "boss_outer_radius": 0.062,
+      "boss_depth": 0.008,
+      "bushing_outer_radius": 0.043,
+      "bushing_inner_radius": 0.036,
+      "bushing_half_x": 0.052,
+      "grease_center": [
+        0.0,
+        -0.405,
+        0.09
+      ],
+      "note": "大耳环为整体厚板，轴线沿 X；中心为真实贯穿孔，孔内为钢衬套，两侧面有凸起圆环。顶部小油嘴按原照可见位置近似。"
+    },
+    "rod_clevis": {
+      "eye_center_y": 0.395,
+      "eye_outer_radius": 0.078,
+      "eye_bore_radius": 0.037,
+      "plate_half_height": 0.078,
+      "plate_x0": -0.043,
+      "plate_x1": 0.043,
+      "neck_end_y": 0.325,
+      "boss_outer_radius": 0.056,
+      "boss_depth": 0.008,
+      "bushing_outer_radius": 0.037,
+      "bushing_inner_radius": 0.031,
+      "bushing_half_x": 0.05,
+      "grease_center": [
+        0.0,
+        0.38,
+        0.08
+      ],
+      "note": "杆端耳环为整体厚板，轴线沿 X；中心贯穿孔内有钢衬套，两侧面凸起圆环，顶部小油嘴。"
+    },
+    "rear_cap": {
+      "y0": -0.37,
+      "y1": -0.335,
+      "radius": 0.09,
+      "note": "后端盖环与缸筒焊接；照片可见两道接缝，内部结构未建模。"
+    },
+    "barrel": {
+      "y0": -0.35,
+      "y1": 0.108,
+      "radius": 0.085,
+      "seam_y0": -0.343,
+      "seam_y1": 0.101,
+      "note": "缸筒为封闭圆柱；两端接缝以细环表现焊接/装配阴影。"
+    },
+    "flange": {
+      "y0": 0.095,
+      "y1": 0.155,
+      "r_in": 0.033,
+      "r_out": 0.104,
+      "bolt_count": 16,
+      "bolt_circle_radius": 0.09,
+      "bolt_head_radius": 0.012,
+      "bolt_head_y0": 0.155,
+      "bolt_head_y1": 0.172,
+      "socket_radius": 0.007,
+      "bolt_phase_deg": 11.25,
+      "note": "杆端法兰为环形厚板，16 颗圆柱头内六角螺栓按原照均布于杆侧端面；螺栓数量按可见约 11 颗和对称推断为 16。"
+    },
+    "gland_ring": {
+      "y0": 0.155,
+      "y1": 0.162,
+      "r_in": 0.041,
+      "r_out": 0.06,
+      "note": "法兰杆侧端面的青铜色耐磨环；颜色和材质按原照/做锈图近似，未做成分检测。"
+    },
+    "wiper": {
+      "y0": 0.155,
+      "y1": 0.166,
+      "r_in": 0.03,
+      "r_out": 0.04,
+      "teeth": 12,
+      "tooth_y1": 0.176,
+      "note": "杆侧端面的深色齿状防尘/锁紧环；齿数与截面为近似，功能未确认。"
+    },
+    "rod": {
+      "radius": 0.026,
+      "y0": 0.09,
+      "y1": 0.33,
+      "note": "镀铬活塞杆；杆径与杆端螺纹/连接方式未实测。"
+    },
+    "rod_collar": {
+      "y0": 0.285,
+      "y1": 0.325,
+      "radius": 0.043,
+      "seal_y": 0.29,
+      "note": "杆端耳环前的圆形连接套/锁紧套；内部连接方式不可见。"
+    },
+    "valve_block": {
+      "center": [
+        0.0,
+        -0.145,
+        0.124
+      ],
+      "size": [
+        0.11,
+        0.15,
+        0.06
+      ],
+      "pad_size": [
+        0.106,
+        0.13,
+        0.014
+      ],
+      "pad_center_z": 0.0905,
+      "top_bolt_xy": [
+        [
+          -0.034,
+          -0.197
+        ],
+        [
+          0.034,
+          -0.197
+        ],
+        [
+          -0.034,
+          -0.093
+        ],
+        [
+          0.034,
+          -0.093
+        ]
+      ],
+      "top_bolt_radius": 0.013,
+      "top_bolt_height": 0.016,
+      "top_socket_radius": 0.0072,
+      "center_plug_radius": 0.02,
+      "center_plug_height": 0.014,
+      "front_plugs": [
+        [
+          -0.18,
+          0.112
+        ],
+        [
+          -0.11,
+          0.112
+        ]
+      ],
+      "front_plug_rim_radius": 0.01,
+      "front_plug_socket_radius": 0.0065,
+      "left_fitting_y": -0.22,
+      "right_fitting_y": -0.07,
+      "fitting_hex_radius": 0.02,
+      "fitting_length": 0.024,
+      "note": "顶部阀块按原照保留 4 颗大螺栓、中央六角堵、前面两个内六角小堵、左右两侧大管接头。内部阀路不可见，未建模。"
+    },
+    "pipes": {
+      "radius": 0.0095,
+      "left_path": [
+        [
+          0.03,
+          -0.3,
+          0.06
+        ],
+        [
+          0.03,
+          -0.3,
+          0.165
+        ],
+        [
+          0.03,
+          -0.25,
+          0.165
+        ],
+        [
+          0.03,
+          -0.225,
+          0.14
+        ],
+        [
+          0.03,
+          -0.205,
+          0.12
+        ]
+      ],
+      "right_path": [
+        [
+          0.03,
+          -0.075,
+          0.12
+        ],
+        [
+          0.03,
+          -0.025,
+          0.12
+        ],
+        [
+          0.03,
+          0.03,
+          0.15
+        ],
+        [
+          0.03,
+          0.085,
+          0.15
+        ],
+        [
+          0.03,
+          0.085,
+          0.06
+        ]
+      ],
+      "corner_radius": 0.018,
+      "barrel_entry_y": [
+        -0.3,
+        0.085
+      ],
+      "note": "两根蓝色硬管：左侧形成跨过阀块的弯管，右侧沿缸筒顶部延伸后在杆端法兰前弯入缸筒。路径按原照可见走向近似，内部通道未建模。"
+    },
+    "barrel_plug": {
+      "center": [
+        0.028,
+        -0.325,
+        0.086
+      ],
+      "hex_radius": 0.012,
+      "height": 0.014,
+      "note": "缸筒顶部靠底端的钢色六角螺塞/油嘴，原照可见；功能未知。"
+    }
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "blue": 0,
+      "blue_dark": 1,
+      "chrome": 2,
+      "steel": 3,
+      "brass": 4,
+      "dark_steel": 5,
+      "rubber": 6,
+      "weld": 7,
+      "rust": 8,
+      "blue_pipe": 9,
+      "spare10": 10,
+      "spare11": 11,
+      "spare12": 12,
+      "spare13": 13,
+      "spare14": 14,
+      "spare15": 15
+    },
+    "note": "4x4 图集，每格 512 px。R 通道保留 255；G=粗糙度；B=金属度。底色为 sRGB；不烘焙固定光照或阴影。"
+  },
+  "material_profile": {
+    "blue": {
+      "base_rgb": [
+        26,
+        56,
+        100
+      ],
+      "roughness": 0.34,
+      "metallic": 0.0,
+      "rust_amount": 0.06,
+      "note": "深蓝醇酸/聚氨酯漆面，非金属；保留清漆高光与局部磨损，金属反射检查不适用于漆面本身。"
+    },
+    "blue_dark": {
+      "base_rgb": [
+        17,
+        38,
+        70
+      ],
+      "roughness": 0.42,
+      "metallic": 0.0,
+      "rust_amount": 0.02,
+      "note": "接缝、凹槽和暗部漆面；非金属。"
+    },
+    "chrome": {
+      "base_rgb": [
+        198,
+        203,
+        210
+      ],
+      "roughness": 0.1,
+      "metallic": 1.0,
+      "rust_amount": 0.0,
+      "note": "镀铬活塞杆；原照有少量磨痕/锈点，分布为程序化近似。"
+    },
+    "steel": {
+      "base_rgb": [
+        154,
+        157,
+        162
+      ],
+      "roughness": 0.25,
+      "metallic": 1.0,
+      "rust_amount": 0.015,
+      "note": "耳环衬套、油嘴和螺栓等钢件；保留金属反射。"
+    },
+    "brass": {
+      "base_rgb": [
+        184,
+        143,
+        75
+      ],
+      "roughness": 0.28,
+      "metallic": 1.0,
+      "rust_amount": 0.0,
+      "note": "杆端法兰的青铜色耐磨环；颜色可能受光照影响，真实材质未检测。"
+    },
+    "dark_steel": {
+      "base_rgb": [
+        58,
+        63,
+        72
+      ],
+      "roughness": 0.38,
+      "metallic": 0.88,
+      "rust_amount": 0.01,
+      "note": "内六角孔、齿状防尘环和深色小件；金属度略低但保留金属反射。"
+    },
+    "rubber": {
+      "base_rgb": [
+        24,
+        24,
+        26
+      ],
+      "roughness": 0.8,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "黑色密封/防尘橡胶环；非金属，金属反射不适用。"
+    },
+    "weld": {
+      "base_rgb": [
+        24,
+        50,
+        90
+      ],
+      "roughness": 0.4,
+      "metallic": 0.0,
+      "rust_amount": 0.03,
+      "note": "焊缝/接缝漆面；非金属。"
+    },
+    "rust": {
+      "base_rgb": [
+        126,
+        83,
+        51
+      ],
+      "roughness": 0.82,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "锈蚀色参考；锈为电介质，金属反射不适用。"
+    },
+    "blue_pipe": {
+      "base_rgb": [
+        24,
+        52,
+        94
+      ],
+      "roughness": 0.32,
+      "metallic": 0.0,
+      "rust_amount": 0.05,
+      "note": "硬管漆面，略深于缸筒；非金属。"
+    },
+    "spare10": {
+      "base_rgb": [
+        120,
+        122,
+        120
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare11": {
+      "base_rgb": [
+        118,
+        120,
+        118
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare12": {
+      "base_rgb": [
+        116,
+        118,
+        116
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare13": {
+      "base_rgb": [
+        114,
+        116,
+        114
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare14": {
+      "base_rgb": [
+        112,
+        114,
+        112
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare15": {
+      "base_rgb": [
+        110,
+        112,
+        110
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    }
+  },
+  "reference": {
+    "file": "蓝色液压缸六视图技术图解.png",
+    "role": "visual_match_unverified",
+    "sha256": "2fba6e91eb2d3e0683d83f853632aadb719744952028edcb771b04c551df4d12",
+    "note": "按外观匹配的蓝色液压缸六视图；图片未提供相机标定，结构不能视为实测。阀块、耳环和管路的背侧方位以原照为准，参考仅用于拓扑与外观。"
+  },
+  "render": {
+    "six_view_resolution": 640,
+    "six_view_samples": 16,
+    "detail_resolution": 640,
+    "detail_samples": 16,
+    "turntable_resolution": 320,
+    "turntable_samples": 6
+  },
+  "limitations": [
+    "六视图参考未标定；整体尺寸、缸径/杆径、耳环孔径、螺栓规格、孔深和装配关系未实测。",
+    "原照是 3/4 视角，不能直接作为正交测量；旧模型库相机只用于诊断。",
+    "背面、缸筒内部、活塞/密封内部、阀块内部阀路、耳环衬套配合和壁厚为推断。",
+    "螺栓数量按可见约 11 颗和对称推断为 16；齿状环齿数与功能、油嘴功能、管路内部通道未确认。",
+    "青铜色环的真实材质、锈迹分布和漆面磨损为近似，不是逐像素实测。",
+    "没有安装附件或支撑；落稳、接触、现场尺度和场景光照融合未验证。"
+  ]
+}
