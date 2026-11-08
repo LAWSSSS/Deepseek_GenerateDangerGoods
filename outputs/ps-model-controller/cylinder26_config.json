@@ -1,0 +1,302 @@
+{
+  "version": "cylinder26-parametric-v1",
+  "number": 26,
+  "description": "26 号油缸1（红色焊接式单耳环液压缸）分部件重建。以原照与做锈图可见结构为主，六视图仅作未标定的外观和背侧拓扑参考。",
+  "units": "meters",
+  "shape_basis": "source_photo_visible_structure+uncalibrated_six_view_layout",
+  "orientation": {
+    "axis": "Y",
+    "eye_end": "+Y",
+    "bottom_end": "-Y",
+    "eye_bore_axis": "X",
+    "port_axis": "+Z",
+    "up": "+Z",
+    "front_camera": "+X",
+    "note": "沿用模型库 Z 向上约定：缸体轴线沿 Y，单耳环在 +Y，底端杆头在 -Y；耳环孔轴线沿 X；两个油口位于 +Z 一侧。+X 相机看到耳环孔正对画面、标签在缸筒正面，两个油口从同一侧伸出；这与原照的可见关系一致。"
+  },
+  "scale_note": "按原照与六视图的像素比例设置工作尺度：缸筒外径约 170 mm、耳环外径约 180 mm、总长约 1.05 m。这些都是合理比例的工作尺度，不是对实物的测量。",
+  "dimensions": {
+    "eye": {
+      "center_y": 0.47,
+      "outer_radius": 0.09,
+      "bore_radius": 0.043,
+      "plate_half_x": 0.031,
+      "boss_outer_radius": 0.055,
+      "boss_depth": 0.006,
+      "bushing_outer_radius": 0.0435,
+      "bushing_inner_radius": 0.036,
+      "bushing_half_x": 0.034,
+      "neck_y0": 0.34,
+      "neck_y1": 0.425,
+      "neck_half_z": 0.045,
+      "neck_half_x": 0.029,
+      "note": "单耳环为厚板，轴线沿 X；中心为真实贯穿孔，孔内为钢衬套，两侧面有轻微凸起圆环。颈部落到缸筒上端套环。"
+    },
+    "collar": {
+      "y0": 0.295,
+      "y1": 0.355,
+      "radius": 0.093,
+      "top_ring_y": 0.345,
+      "bottom_ring_y": 0.305,
+      "groove_y": 0.325,
+      "ring_minor": 0.0035,
+      "groove_minor": 0.0018,
+      "note": "耳环颈与缸筒之间的上端套环，原照可见上下两道凸环和中间暗槽；内部结构与螺纹未建模。"
+    },
+    "barrel": {
+      "y0": -0.3,
+      "y1": 0.3,
+      "radius": 0.085,
+      "seam_top": 0.293,
+      "seam_bottom": -0.293,
+      "note": "缸筒为封闭圆柱；上下接缝以细环表现焊接/装配阴影，内部腔体未建模。"
+    },
+    "bottom_end": {
+      "band_y0": -0.307,
+      "band_y1": -0.283,
+      "band_radius": 0.092,
+      "cap_y0": -0.339,
+      "cap_y1": -0.305,
+      "cap_radius": 0.084,
+      "cone_y0": -0.339,
+      "cone_y1": -0.367,
+      "cone_r0": 0.084,
+      "cone_r1": 0.038,
+      "stub_base_y0": -0.385,
+      "stub_base_y1": -0.365,
+      "stub_base_radius": 0.036,
+      "stub_y0": -0.49,
+      "stub_y1": -0.385,
+      "stub_radius": 0.03,
+      "stub_hole_radius": 0.009,
+      "stub_hole_y0": -0.49,
+      "stub_hole_y1": -0.445,
+      "stub_liner_r_out": 0.009,
+      "stub_liner_r_in": 0.0075,
+      "stub_mouth_r_out": 0.014,
+      "stub_mouth_thickness": 0.002,
+      "note": "底端由加宽环带、端盖、锥形过渡和短杆头组成；杆头端面中心有直径约 18 mm 的盲孔，孔内为深色钢衬，孔口有窄钢环。杆头连接方式与原照不可见内部结构未确认。"
+    },
+    "ports": {
+      "base_z": 0.07,
+      "boss_radius": 0.04,
+      "boss_length": 0.085,
+      "spigot_radius": 0.028,
+      "spigot_length": 0.032,
+      "spigot_overlap": 0.004,
+      "bore_radius": 0.013,
+      "bore_liner_r_in": 0.0115,
+      "mouth_ring_r_out": 0.019,
+      "mouth_ring_thickness": 0.003,
+      "bore_depth": 0.065,
+      "thread_count": 6,
+      "thread_minor": 0.0012,
+      "thread_spacing": 0.0045,
+      "weld_minor": 0.005,
+      "weld_offset": 0.012,
+      "upper": {
+        "y": -0.03,
+        "tilt_deg": 0.0
+      },
+      "lower": {
+        "y": -0.215,
+        "tilt_deg": 15.0
+      },
+      "note": "原照显示两个油口在同一侧（+Z），但轴向位置不同：上油口在缸筒中下部，下油口靠近底端；六视图参考把两油口画成同轴对置，与本照片矛盾，候选以照片为准。油口为焊接圆柱凸台，外端有带螺纹的短接头、深色盲孔和窄钢环；螺纹规格、孔深与内部通道未实测/未建内部通道。"
+    },
+    "label": {
+      "y0": 0.16,
+      "y1": 0.29,
+      "angle_deg": 22.0,
+      "r_in": 0.0852,
+      "r_out": 0.0862,
+      "note": "缸筒 +X 正面的白色矩形标签，原照可见条形码、黑色标志块、红色警告三角和不可辨文字。候选按可见版式重绘近似图形，未复制品牌或原始文字；标签为印刷电介质，不是金属。"
+    }
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "red": 0,
+      "red_dark": 1,
+      "steel": 2,
+      "dark_steel": 3,
+      "weld": 4,
+      "rust": 5,
+      "rubber": 6,
+      "label": 7,
+      "spare8": 8,
+      "spare9": 9,
+      "spare10": 10,
+      "spare11": 11,
+      "spare12": 12,
+      "spare13": 13,
+      "spare14": 14,
+      "spare15": 15
+    },
+    "note": "4x4 图集，每格 512 px。R 通道保留 255；G=粗糙度；B=金属度。底色为 sRGB；不烘焙固定光照或阴影。标签格包含重绘的印刷版式。"
+  },
+  "material_profile": {
+    "red": {
+      "base_rgb": [
+        196,
+        28,
+        32
+      ],
+      "roughness": 0.3,
+      "metallic": 0.0,
+      "rust_amount": 0.025,
+      "note": "红色醇酸/聚氨酯漆面，非金属；保留清漆高光和局部磨损/锈斑，金属反射检查不适用于漆面本身。"
+    },
+    "red_dark": {
+      "base_rgb": [
+        158,
+        22,
+        28
+      ],
+      "roughness": 0.38,
+      "metallic": 0.0,
+      "rust_amount": 0.015,
+      "note": "接缝、凹槽和暗部红漆；非金属。"
+    },
+    "steel": {
+      "base_rgb": [
+        145,
+        148,
+        152
+      ],
+      "roughness": 0.27,
+      "metallic": 1.0,
+      "rust_amount": 0.01,
+      "note": "耳环衬套、油口孔口环和杆头孔口环等钢件；保留金属反射，真实材料未检测。"
+    },
+    "dark_steel": {
+      "base_rgb": [
+        52,
+        55,
+        60
+      ],
+      "roughness": 0.36,
+      "metallic": 0.88,
+      "rust_amount": 0.0,
+      "note": "油口和杆头盲孔内的深色钢衬/孔底；金属度略低但保留金属反射。"
+    },
+    "weld": {
+      "base_rgb": [
+        178,
+        38,
+        33
+      ],
+      "roughness": 0.42,
+      "metallic": 0.0,
+      "rust_amount": 0.06,
+      "note": "油口根部、缸筒上下接缝的焊缝漆面；非金属，局部锈多。"
+    },
+    "rust": {
+      "base_rgb": [
+        126,
+        84,
+        54
+      ],
+      "roughness": 0.84,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "锈蚀色参考；锈为电介质，金属反射不适用。"
+    },
+    "rubber": {
+      "base_rgb": [
+        22,
+        22,
+        24
+      ],
+      "roughness": 0.82,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "上端套环暗槽和油口孔口的深色密封/阴影带；非金属。"
+    },
+    "label": {
+      "base_rgb": [
+        242,
+        242,
+        239
+      ],
+      "roughness": 0.42,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "缸筒正面白色印刷标签；非金属。图形按原照可见版式近似重绘，文字不可辨且未复制品牌。"
+    },
+    "spare8": {
+      "base_rgb": [120, 122, 120],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare9": {
+      "base_rgb": [118, 120, 118],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare10": {
+      "base_rgb": [116, 118, 116],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare11": {
+      "base_rgb": [114, 116, 114],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare12": {
+      "base_rgb": [112, 114, 112],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare13": {
+      "base_rgb": [110, 112, 110],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare14": {
+      "base_rgb": [108, 110, 108],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare15": {
+      "base_rgb": [106, 108, 106],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    }
+  },
+  "reference": {
+    "file": "ChatGPT 图像 2026年10月14日 10_19_49.png",
+    "role": "visual_match_unverified",
+    "sha256": "0ae609e44cfa7d25c0a71c53dcb4518da269aeef62442b4270658423039d19c2",
+    "note": "按外观匹配的红色液压缸六视图；图片未提供相机标定，结构不能视为实测。参考各面板本身存在不一致（顶视把耳环孔画成沿缸轴可见、油口画成同轴对置），本件以原照为准，参考只用于外观和背侧拓扑。"
+  },
+  "render": {
+    "six_view_resolution": 640,
+    "six_view_samples": 12,
+    "detail_resolution": 640,
+    "detail_samples": 12,
+    "turntable_resolution": 320,
+    "turntable_samples": 4
+  },
+  "limitations": [
+    "六视图参考未标定且各面板不一致；整体尺寸、缸径、耳环孔径、油口螺纹规格、孔深、壁厚和装配关系未实测。",
+    "原照是 3/4 视角，不能直接作为正交测量；旧模型库相机只用于诊断。",
+    "背面、缸筒内部、活塞/密封内部、油口内部通道（建模为可见盲孔）、杆头连接方式和耳环衬套配合为推断。",
+    "两个油口按原照放在同一侧且轴向位置不同；六视图参考画成同轴对置，不能同时成立。",
+    "标签文字/品牌不可辨且未复制，条形码、标志块、警告三角和文字行按可见版式近似重绘。",
+    "锈迹分布、漆面磨损和焊缝形状为程序化/近似，不是逐像素实测。",
+    "没有安装附件或支撑；落稳、接触、现场尺度和场景光照融合未验证。"
+  ]
+}
