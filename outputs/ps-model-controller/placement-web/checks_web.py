@@ -133,14 +133,14 @@ class PlacementChecks(unittest.TestCase):
             self.assertEqual(len(server.ROWS),1)
 
     def test_model_review_page_and_api_contract(self):
-        for number in (1,2,3,4):
+        for number in (1,2,3,4,5):
             page=self.client.get(f'/review/{number:02d}')
             self.assertEqual(page.status_code,200)
             self.assertIn('模型待人工检查',page.text)
             self.assertEqual(self.client.get(f'/api/review/{number:02d}/unknown').status_code,404)
         rows=self.client.get('/api/assets').json()
         self.assertTrue(all('version' in r and 'shape_basis' in r and 'model_review' in r and 'scene_validation' in r for r in rows))
-        for version in ('valve02-parametric-v1','bearing03-parametric-v1','bearing04-parametric-v1'):
+        for version in ('valve02-parametric-v1','bearing03-parametric-v1','bearing04-parametric-v1','tank05-parametric-v1'):
             candidate=next((r for r in rows if r.get('version')==version),None)
             if candidate:
                 self.assertTrue(candidate['manual_only'])
