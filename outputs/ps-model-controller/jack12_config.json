@@ -1,0 +1,334 @@
+{
+  "version": "jack12-parametric-v1",
+  "radial_segments": 96,
+  "shape_basis": "source_photo_with_uncalibrated_visual_match_reference",
+  "reference_role": "visual_match_unverified",
+  "scale_note": "Working scale follows photo pixel ratios and a plausible 2-ton trolley-jack size; it is not a measured dimension of this used jack.",
+  "proportion_source": {
+    "photo": "outputs/物品高清输入-39件/原貌HD/12-千斤顶2.png",
+    "rust": "outputs/物品高清输入-39件/生锈HD/12-千斤顶2.png",
+    "reference": "C:/Users/zhaoc/Desktop/六视图/ChatGPT 图像 2026年10月14日 10_06_57.png",
+    "visible_label_text": "2 TON / HYDRAULIC TROLLEY JACK; long yellow warning strip on the lifting arm",
+    "label_note": "The 2 TON rating is legible in the photo and the reference. Small print, certification marks and the original artwork are not reproduced.",
+    "pixel_ratios": "Clean-photo alpha and the six-view panels give gross proportions only. The reference panels disagree on handle pose (upright in front/back panels, horizontal in side panels); the candidate follows the photo and side panels (horizontal operating handle) and marks the pose as inferred.",
+    "status": "uncalibrated_visual_reference"
+  },
+  "frame": {
+    "side_y": 0.108,
+    "side_thickness": 0.012,
+    "side_profile": [
+      [
+        -0.29,
+        0.048
+      ],
+      [
+        -0.29,
+        0.076
+      ],
+      [
+        -0.276,
+        0.096
+      ],
+      [
+        -0.19,
+        0.116
+      ],
+      [
+        0.02,
+        0.146
+      ],
+      [
+        0.18,
+        0.166
+      ],
+      [
+        0.3,
+        0.172
+      ],
+      [
+        0.3,
+        0.048
+      ]
+    ],
+    "floor_x0": -0.274,
+    "floor_x1": 0.302,
+    "floor_z0": 0.062,
+    "floor_z1": 0.072,
+    "floor_half_y": 0.104,
+    "rib_x0": -0.248,
+    "rib_x1": 0.2,
+    "rib_z": 0.083,
+    "rib_half_height": 0.009,
+    "rib_protrusion": 0.004,
+    "note": "Side-plate outline follows the side reference and the photo. Angled top edge, nose radius and stamped rib are approximate."
+  },
+  "wheels": {
+    "front_x": -0.25,
+    "front_y": 0.135,
+    "front_radius": 0.0575,
+    "front_width": 0.038,
+    "front_hub_radius": 0.031,
+    "front_hub_bore": 0.0086,
+    "front_hub_width": 0.04,
+    "axle_radius": 0.0075,
+    "axle_half_length": 0.166,
+    "rear_x": 0.255,
+    "rear_y": 0.12,
+    "rear_radius": 0.03,
+    "rear_width": 0.026,
+    "rear_hub_radius": 0.015,
+    "rear_hub_bore": 0.006,
+    "rear_axle_radius": 0.0055,
+    "rear_axle_half_length": 0.142,
+    "ear_center_x": 0.258,
+    "ear_center_z": 0.128,
+    "ear_half_x": 0.036,
+    "ear_half_y": 0.027,
+    "ear_half_z": 0.026,
+    "fork_gap": 0.034,
+    "fork_half_x": 0.022,
+    "fork_z0": 0.028,
+    "fork_z1": 0.09,
+    "note": "Two large front wheels on a through axle and two small rear swivel casters. Wheel diameters, tyre section and caster offset are inferred from photo/reference ratios, not measured."
+  },
+  "arm": {
+    "pivot": [
+      0.22,
+      0.0,
+      0.16
+    ],
+    "front": [
+      -0.17,
+      0.0,
+      0.33
+    ],
+    "half_width": 0.072,
+    "half_height_rear": 0.026,
+    "half_height_front": 0.041,
+    "pivot_boss_radius": 0.038,
+    "pivot_boss_half_length": 0.096,
+    "note": "The lifting arm is a tapered welded beam. The exact section and internal reinforcement are inferred."
+  },
+  "head": {
+    "center": [
+      -0.176,
+      0.0,
+      0.36
+    ],
+    "half": [
+      0.03,
+      0.057,
+      0.04
+    ],
+    "post_radius": 0.029,
+    "post_z0": 0.365,
+    "post_z1": 0.398,
+    "pin_z": 0.343,
+    "pin_radius": 0.008,
+    "pin_half_length": 0.078,
+    "link_top": [
+      -0.128,
+      0.0,
+      0.305
+    ],
+    "link_bottom": [
+      -0.02,
+      0.0,
+      0.105
+    ],
+    "link_half_width_y": 0.0085,
+    "link_half_thickness": 0.012,
+    "link_pin_radius": 0.0075,
+    "note": "Black lifting head, link plates and pivot pins are partly inferred; the photo shows the head, pin and cotter pin but not the hidden inner faces."
+  },
+  "saddle": {
+    "center_x": -0.176,
+    "center_y": 0.0,
+    "z_bottom": 0.396,
+    "z_top": 0.418,
+    "radius": 0.063,
+    "dish_depth": 0.006,
+    "rim_minor": 0.0045,
+    "note": "Knurled/scalloped saddle pad. The tooth count and dish depth are inferred."
+  },
+  "pump": {
+    "center": [
+      0.191,
+      0.0,
+      0.211
+    ],
+    "half": [
+      0.084,
+      0.092,
+      0.047
+    ],
+    "label_half_u": 0.06,
+    "label_half_v": 0.029,
+    "top_label_half_u": 0.058,
+    "top_label_half_v": 0.066,
+    "bolt_radius": 0.008,
+    "note": "Black hydraulic pump/valve cover with a recreated 2 TON label. Internal pump, release valve and relief passages are hidden and not modelled as flow passages."
+  },
+  "socket": {
+    "center": [
+      0.352,
+      0.0,
+      0.207
+    ],
+    "outer_radius": 0.03,
+    "inner_radius": 0.0175,
+    "length": 0.105,
+    "ear_half": [
+      0.028,
+      0.01,
+      0.032
+    ],
+    "ear_y": 0.049,
+    "bolt_radius": 0.0085,
+    "note": "Black cast handle socket with side ears and two plated bolts. The internal latch is hidden and inferred."
+  },
+  "handle": {
+    "start": [
+      0.33,
+      0.0,
+      0.207
+    ],
+    "end": [
+      0.862,
+      0.0,
+      0.231
+    ],
+    "radius": 0.016,
+    "grip_start": 0.742,
+    "grip_end": 0.874,
+    "grip_radius": 0.0225,
+    "note": "Red tubular handle shown in the horizontal operating position, with a black rubber grip. The reference front/back panels show the handle upright; that pose is not used. Handle length beyond the photo crop is inferred."
+  },
+  "loop": {
+    "mount_x": 0.035,
+    "mount_y": 0.124,
+    "mount_z": 0.14,
+    "top_x": 0.006,
+    "top_half_y": 0.083,
+    "top_z": 0.34,
+    "radius": 0.0105,
+    "bolt_radius": 0.012,
+    "bolt_depth": 0.02,
+    "note": "Yellow U-shaped carry handle across the frame, leaning slightly forward. Exact tube diameter, lean and mounting detail are inferred."
+  },
+  "labels": {
+    "warning_center_t": 0.64,
+    "warning_half_u": 0.098,
+    "warning_half_v": 0.021,
+    "front_label_half_u": 0.03,
+    "front_label_half_v": 0.034,
+    "note": "Labels are recreated from legible text; small print and certification marks are absent."
+  },
+  "material_profile": {
+    "red": {
+      "clean": {
+        "base_rgb": [
+          176,
+          22,
+          27
+        ],
+        "roughness": 0.365,
+        "metallic": 0.02,
+        "rust_amount": 0.0
+      },
+      "weathered": {
+        "base_rgb": [
+          160,
+          23,
+          27
+        ],
+        "roughness": 0.45,
+        "metallic": 0.02,
+        "rust_amount": 0.025
+      },
+      "worn": {
+        "base_rgb": [
+          188,
+          42,
+          44
+        ],
+        "roughness": 0.33,
+        "metallic": 0.025,
+        "rust_amount": 0.0
+      },
+      "rusted": {
+        "base_rgb": [
+          118,
+          42,
+          32
+        ],
+        "roughness": 0.64,
+        "metallic": 0.01,
+        "rust_amount": 0.55
+      }
+    },
+    "chrome": {
+      "base_rgb": [
+        196,
+        201,
+        207
+      ],
+      "roughness": 0.15,
+      "metallic": 1.0
+    },
+    "steel": {
+      "base_rgb": [
+        151,
+        157,
+        163
+      ],
+      "roughness": 0.3,
+      "metallic": 0.92
+    },
+    "gold": {
+      "base_rgb": [
+        178,
+        142,
+        72
+      ],
+      "roughness": 0.3,
+      "metallic": 0.9
+    },
+    "black": {
+      "base_rgb": [
+        34,
+        35,
+        37
+      ],
+      "roughness": 0.47,
+      "metallic": 0.3
+    },
+    "yellow": {
+      "base_rgb": [
+        234,
+        172,
+        14
+      ],
+      "roughness": 0.38,
+      "metallic": 0.0
+    },
+    "rubber": {
+      "base_rgb": [
+        18,
+        18,
+        19
+      ],
+      "roughness": 0.84,
+      "metallic": 0.0
+    },
+    "saddle": {
+      "base_rgb": [
+        56,
+        57,
+        59
+      ],
+      "roughness": 0.43,
+      "metallic": 0.6
+    }
+  }
+}
