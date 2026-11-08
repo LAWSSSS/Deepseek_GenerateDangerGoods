@@ -1,0 +1,183 @@
+{
+  "version": "shock18-parametric-v1",
+  "reference_name": "黑色山地车后避震六视图图册.png",
+  "proportion_source": {
+    "primary": "outputs/物品高清输入-39件/原貌HD/18-气压减震器1.png",
+    "secondary": "outputs/物品高清输入-39件/生锈HD/18-气压减震器1.png",
+    "method": "alpha silhouette PCA and row widths; eye-to-eye set to a plausible 0.190 m mountain-bike rear-shock size, not a measurement",
+    "photo_length_width_ratio": 4.238,
+    "reference_note": "六视图为未标定的同类产品图册，不是实测转台；图册的罐体径长比约 3.44、照片约 4.24，二者不一致，候选以照片轮廓比例为准，图册只用于核对零件拓扑和外观。图册面板之间也有矛盾：底视把下叉耳孔画成正对镜头，而正/侧视则显示孔轴水平；不可把它当作严格正交投影。前后面板型号字样在 DRIFT 与 RC-8RC 之间不一致，不能据此认定为某一精确实测型号。",
+    "model_identity": "DNM 品牌字样可见；正面 DRIFT、背面 RC-8RC 字样同时出现，具体型号待人工确认，不冒充实测",
+    "eye_to_eye_m": 0.190,
+    "note": "所有尺寸由照片与图册的像素比例推导并取合理工业量级；不是测量尺寸，也未使用外部产品页冒充实测。"
+  },
+  "geometry": {
+    "radial_segments": 128,
+    "eye_to_eye_m": 0.190,
+    "air_can": {
+      "z0": 0.0660,
+      "z1": 0.1585,
+      "r": 0.02075,
+      "bottom_neck_r": 0.0170,
+      "grooves_z": [0.0745, 0.0785, 0.0825],
+      "groove_depth": 0.00070
+    },
+    "top_cap": {
+      "z0": 0.1580,
+      "z1": 0.1740,
+      "flange_r": 0.0234,
+      "flange_z0": 0.1580,
+      "flange_z1": 0.1635,
+      "body_r": 0.0210,
+      "top_r": 0.0166
+    },
+    "top_seam_ring": {"z": 0.1589, "major": 0.0235, "minor": 0.00045},
+    "top_yoke": {
+      "center": [0.0, 0.0, 0.1740],
+      "half": [0.0050, 0.0090, 0.0080],
+      "bevel": 0.0016
+    },
+    "top_eyelet": {
+      "center_z": 0.1900,
+      "outer_r": 0.0138,
+      "hole_r": 0.0064,
+      "plate_x": 0.0068,
+      "plate_half_x": 0.0030,
+      "y_half": 0.0135,
+      "bottom_z": 0.1745,
+      "bushing_outer_r": 0.0086,
+      "bushing_inner_r": 0.0064,
+      "bushing_half_len": 0.0098
+    },
+    "bottom_yoke": {
+      "center": [0.0, 0.0, 0.0210],
+      "half": [0.0090, 0.0112, 0.0110],
+      "bevel": 0.0015
+    },
+    "bottom_eyelet": {
+      "center_z": 0.0,
+      "outer_r": 0.0120,
+      "hole_r": 0.0056,
+      "plate_x": 0.0060,
+      "plate_half_x": 0.0023,
+      "y_half": 0.0118,
+      "top_z": 0.0180,
+      "bushing_outer_r": 0.0078,
+      "bushing_inner_r": 0.0056,
+      "bushing_half_len": 0.0086
+    },
+    "shaft": {"z0": 0.0060, "z1": 0.0570, "r": 0.0133},
+    "shaft_collar": {"z0": 0.0090, "z1": 0.0160, "r": 0.0142},
+    "seal_head": {"z0": 0.0500, "z1": 0.0680, "r": 0.0160, "top_r": 0.0170},
+    "seal_ribs": [
+      {"z": 0.0560, "major": 0.0160, "minor": 0.00075},
+      {"z": 0.0620, "major": 0.0160, "minor": 0.00075}
+    ],
+    "sag_ring": {"z": 0.0503, "major": 0.0132, "minor": 0.0026},
+    "sag_screw": {"center": [0.0, -0.0158, 0.0503], "r": 0.0018, "half_len": 0.0020},
+    "red_knob": {
+      "center": [-0.0005, -0.0152],
+      "boss_r": 0.0098,
+      "boss_z0": 0.1730,
+      "boss_z1": 0.1750,
+      "r": 0.0082,
+      "z0": 0.1750,
+      "z1": 0.1812,
+      "teeth": 44,
+      "tooth_depth": 0.00042
+    },
+    "blue_lever": {
+      "center": [-0.0005, 0.0138],
+      "collar_r": 0.0092,
+      "collar_z0": 0.1725,
+      "collar_z1": 0.1770,
+      "teeth": 40,
+      "tooth_depth": 0.00034,
+      "head_r": 0.0072,
+      "head_z0": 0.1770,
+      "head_z1": 0.1798,
+      "arm_x_half": 0.0034,
+      "arm_y0": 0.0150,
+      "arm_y1": 0.0228,
+      "arm_z_top": 0.1781,
+      "arm_z_bottom": 0.1460,
+      "arm_thickness": 0.0048,
+      "mark_r": 0.0066
+    }
+  },
+  "material_profile": {
+    "can": {
+      "base_rgb": [31, 32, 35],
+      "base_roughness": 0.30,
+      "metallic": 1.0,
+      "ink_roughness": 0.46,
+      "ink_metallic": 0.04,
+      "grey_ink_rgb": [148, 150, 154],
+      "white_ink_rgb": [232, 234, 236],
+      "red_ink_rgb": [188, 28, 36],
+      "grime_rgb": [92, 69, 48]
+    },
+    "cap": {
+      "base_rgb": [26, 27, 29],
+      "base_roughness": 0.30,
+      "metallic": 1.0
+    },
+    "black": {
+      "base_rgb": [29, 30, 32],
+      "base_roughness": 0.34,
+      "metallic": 1.0
+    },
+    "steel": {
+      "base_rgb": [152, 154, 158],
+      "base_roughness": 0.27,
+      "metallic": 1.0
+    },
+    "red": {
+      "base_rgb": [181, 27, 34],
+      "base_roughness": 0.27,
+      "metallic": 1.0
+    },
+    "blue": {
+      "base_rgb": [7, 88, 190],
+      "base_roughness": 0.26,
+      "metallic": 1.0
+    },
+    "blue_rubber": {
+      "base_rgb": [8, 78, 176],
+      "base_roughness": 0.54,
+      "metallic": 0.0
+    },
+    "lever_mark": {
+      "base_rgb": [7, 88, 190],
+      "base_roughness": 0.28,
+      "metallic": 0.9,
+      "ink_rgb": [236, 239, 242],
+      "ink_roughness": 0.44,
+      "ink_metallic": 0.0
+    }
+  },
+  "texture": {
+    "can_size": [2048, 1024],
+    "cap_size": [1024, 512],
+    "generic_size": [1024, 1024],
+    "steel_size": [512, 512],
+    "lever_size": [512, 512],
+    "rust_patch_rects": {
+      "black_upper": [300, 220, 450, 360],
+      "black_lower": [650, 600, 790, 740],
+      "label": [480, 430, 620, 560],
+      "eyelet": [180, 90, 320, 230]
+    }
+  },
+  "render": {
+    "samples": 48,
+    "draft_samples": 8,
+    "six_view_resolution": 768,
+    "detail_resolution": 1024,
+    "turntable_resolution": 512,
+    "clay_resolution": 768,
+    "world_strength": 0.48,
+    "key_light_a": [2.6, -3.0, 3.6],
+    "key_light_b": [-3.4, 2.8, 4.6]
+  }
+}
