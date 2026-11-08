@@ -1,0 +1,307 @@
+{
+  "version": "cylinder23-parametric-v1",
+  "number": 23,
+  "description": "23 号气缸（ARK AIR CYLINDER KC S1BN125-145，拉杆式气动缸）分部件重建。以原照可见结构为主，六视图仅作未标定的外观与背侧拓扑参考。",
+  "units": "meters",
+  "shape_basis": "source_photo_visible_structure+uncalibrated_six_view_layout",
+  "orientation": {
+    "axis": "Y",
+    "front_rod_end": "-Y",
+    "up": "+Z",
+    "label_side": "+X",
+    "note": "与原模型库坐标约定一致：Z 向上。缸体轴线沿 Y，活塞杆端在 -Y，后端在 +Y；标签置于 +X 侧（原照可见侧）。"
+  },
+  "scale_note": "铭牌可读为 ARK AIR CYLINDER / MODEL KCS1BN125-145 / MAX.PRESS. 1.0MPa。公开检索仅确认 KCS1 系列及 125 缸径/145 行程的型号含义；以下工作尺度按原照与六视图的像素比例设置，不是实测值。端盖约 180 mm 见方、缸筒外径约 135 mm、端盖外端面间距约 285 mm、总长约 0.38 m。",
+  "dimensions": {
+    "cap": {
+      "size_x": 0.18,
+      "size_z": 0.18,
+      "thickness": 0.05,
+      "bevel": 0.003,
+      "front_y0": -0.1425,
+      "front_y1": -0.0925,
+      "rear_y0": 0.0925,
+      "rear_y1": 0.1425,
+      "corner_hole_radius": 0.0065,
+      "corner_offset_x": 0.065,
+      "corner_offset_z": 0.065,
+      "rod_hole_radius": 0.017,
+      "frame_outer": 0.09,
+      "frame_inner": 0.077,
+      "frame_depth": 0.007,
+      "frame_width": 0.012,
+      "rib_width": 0.011,
+      "rib_depth": 0.007,
+      "rib_inner_radius": 0.04,
+      "rib_outer_radius": 0.074,
+      "corner_boss_radius": 0.016,
+      "corner_boss_depth": 0.007,
+      "rear_center_hole_radius": 0.0032,
+      "rear_center_hole_depth": 0.005,
+      "note": "端盖为黑色方形金属件，外端面有方形边框、六条放射筋（上下两条 + 四条斜筋）和四角凸台；四角为贯穿拉杆孔。前盖中心有活塞杆通孔，后盖中心有圆盘凸台和小盲孔。"
+    },
+    "barrel": {
+      "radius": 0.0675,
+      "y0": -0.098,
+      "y1": 0.098,
+      "seam_radius": 0.0679,
+      "seam_minor": 0.001,
+      "seam_y": 0.0955,
+      "note": "浅色阳极氧化铝缸筒，两端被端盖遮挡；端盖接缝处加细暗环表现装配阴影。"
+    },
+    "tie_rods": {
+      "radius": 0.0055,
+      "offset_x": 0.065,
+      "offset_z": 0.065,
+      "y0": -0.169,
+      "y1": 0.169,
+      "thread_y_front": -0.169,
+      "thread_y_front_end": -0.1445,
+      "thread_y_rear": 0.1445,
+      "thread_y_rear_end": 0.169,
+      "thread_major": 0.0055,
+      "thread_tube": 0.0005,
+      "thread_pitch": 0.0018,
+      "washer_major": 0.0105,
+      "washer_minor": 0.0016,
+      "washer_y_front": -0.1506,
+      "washer_y_rear": 0.1506,
+      "nut_radius": 0.0135,
+      "nut_thickness": 0.011,
+      "nut_y_front": -0.1572,
+      "nut_y_rear": 0.1572,
+      "end_dot_radius": 0.0018,
+      "note": "四根贯穿拉杆，两端在端盖外侧依次为凸台、垫圈、六角螺母和外露螺纹端；杆端略超出螺母。螺母尺寸按 M14 量级近似。"
+    },
+    "rod": {
+      "radius": 0.016,
+      "shaft_y0": -0.1675,
+      "shaft_y1": -0.1825,
+      "thread_core_radius": 0.0142,
+      "thread_y0": -0.1825,
+      "thread_y1": -0.2125,
+      "thread_major": 0.0165,
+      "thread_tube": 0.00075,
+      "thread_pitch": 0.0022,
+      "nut_radius": 0.0265,
+      "nut_thickness": 0.017,
+      "nut_y": -0.1975,
+      "end_y": -0.2125,
+      "end_dot_radius": 0.0022,
+      "note": "镀铬活塞杆；外段为长螺纹，单只大六角螺母位于螺纹中段，螺纹端伸出螺母。原照只显示一只螺母，未照搬 22 号的双螺母。"
+    },
+    "gland": {
+      "base_radius": 0.041,
+      "base_y0": -0.1425,
+      "base_y1": -0.1475,
+      "radius": 0.036,
+      "y0": -0.1475,
+      "y1": -0.1675,
+      "bevel": 0.0015,
+      "wiper_major": 0.02,
+      "wiper_minor": 0.0012,
+      "wiper_y": -0.1669,
+      "note": "前端盖中央黑色防尘/导向凸台，分两级直径；外端黑色刮尘环。内部密封结构未建模。"
+    },
+    "rear_boss": {
+      "radius": 0.043,
+      "y0": 0.1425,
+      "y1": 0.1535,
+      "groove_major": 0.03,
+      "groove_minor": 0.0006,
+      "groove_y": 0.1536,
+      "note": "后端盖外端面中央圆盘凸台，中心小盲孔；原照与右视面板可见。"
+    },
+    "ports": {
+      "front_cap_y": -0.1175,
+      "rear_cap_y": 0.1175,
+      "x_face": 0.09,
+      "brass_z": 0.034,
+      "port_z": -0.034,
+      "brass_recess_radius": 0.014,
+      "brass_recess_depth": 0.004,
+      "brass_radius": 0.0115,
+      "brass_thickness": 0.004,
+      "brass_socket_radius": 0.0058,
+      "brass_socket_depth": 0.0016,
+      "bore_radius": 0.0125,
+      "bore_depth": 0.04,
+      "thread_major": 0.0118,
+      "thread_tube": 0.0006,
+      "thread_pitch": 0.0018,
+      "thread_start_inset": 0.002,
+      "thread_end_inset": 0.037,
+      "bottom_disc_inset": 0.0385,
+      "note": "两个端盖的 +X 与 -X 侧各有一组进气口/缓冲调节件，共 4 个侧口与 4 个黄铜螺塞：上方为黄铜内六角螺塞，下方为较大的内螺纹盲孔（G3/4 量级近似）。原照只显示 +X 侧；参考正视/背视面板均显示两侧有孔，故 -X 侧按对称推断。螺纹规格、孔深和内部气路未实测。"
+    },
+    "barrel_label": {
+      "tile": 5,
+      "y_center": -0.005,
+      "y_width": 0.075,
+      "radius": 0.06765,
+      "thickness": 0.0008,
+      "arc_center_deg": 6.0,
+      "arc_span_deg": 40.0,
+      "text": [
+        "ARK AIR CYLINDER",
+        "MODEL KCS1BN125-145",
+        "MAX.PRESS. 1.0MPa",
+        "3544"
+      ],
+      "note": "白色不干胶铭牌；蓝底白字标题、黑色型号与压力字样。铭牌文字按原照可读内容重绘，字体、字距和序列号为近似，不是原始印刷文件。"
+    }
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "aluminum": 0,
+      "cap": 1,
+      "chrome": 2,
+      "steel": 3,
+      "brass": 4,
+      "label": 5,
+      "rubber": 6,
+      "dark_steel": 7,
+      "thread": 8,
+      "port_dark": 9
+    },
+    "note": "4x4 图集，每格 512 px。R 通道保留 255；G=粗糙度；B=金属度。底色为 sRGB。"
+  },
+  "material_profile": {
+    "aluminum": {
+      "base_rgb": [
+        214,
+        214,
+        210
+      ],
+      "roughness": 0.42,
+      "metallic": 0.85,
+      "rust_amount": 0.06,
+      "note": "浅色阳极氧化铝缸筒；金属反射适用。"
+    },
+    "cap": {
+      "base_rgb": [
+        36,
+        36,
+        35
+      ],
+      "roughness": 0.52,
+      "metallic": 0.75,
+      "rust_amount": 0.1,
+      "note": "黑色阳极氧化/涂装端盖；表面哑光但仍为金属，保留低强度金属反射。"
+    },
+    "chrome": {
+      "base_rgb": [
+        206,
+        206,
+        209
+      ],
+      "roughness": 0.1,
+      "metallic": 1.0,
+      "rust_amount": 0.02,
+      "note": "镀铬活塞杆。"
+    },
+    "steel": {
+      "base_rgb": [
+        184,
+        184,
+        186
+      ],
+      "roughness": 0.24,
+      "metallic": 1.0,
+      "rust_amount": 0.12,
+      "note": "拉杆、六角螺母与垫圈的镍/锌镀层钢；原照可见局部锈迹。"
+    },
+    "brass": {
+      "base_rgb": [
+        178,
+        146,
+        72
+      ],
+      "roughness": 0.32,
+      "metallic": 1.0,
+      "rust_amount": 0.03,
+      "note": "侧口内六角螺塞的黄铜色；原照颜色偏金黄，真实材质可能为镀锌/黄铜，未实测。"
+    },
+    "label": {
+      "base_rgb": [
+        232,
+        232,
+        226
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "白色不干胶铭牌；非金属，金属反射检查不适用。"
+    },
+    "rubber": {
+      "base_rgb": [
+        22,
+        22,
+        22
+      ],
+      "roughness": 0.8,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "黑色刮尘/密封环；非金属。"
+    },
+    "dark_steel": {
+      "base_rgb": [
+        60,
+        60,
+        60
+      ],
+      "roughness": 0.4,
+      "metallic": 0.8,
+      "rust_amount": 0.06,
+      "note": "垫圈、内六角凹槽等深色金属件。"
+    },
+    "thread": {
+      "base_rgb": [
+        170,
+        170,
+        168
+      ],
+      "roughness": 0.3,
+      "metallic": 1.0,
+      "rust_amount": 0.15,
+      "note": "活塞杆/拉杆螺纹与侧口内螺纹；螺纹牙型/深度为近似。"
+    },
+    "port_dark": {
+      "base_rgb": [
+        42,
+        42,
+        42
+      ],
+      "roughness": 0.55,
+      "metallic": 0.55,
+      "rust_amount": 0.03,
+      "note": "侧口盲孔底部与内六角凹槽的暗色金属。"
+    }
+  },
+  "reference": {
+    "file": "气缸六视图工程产品图.png",
+    "role": "visual_match_unverified",
+    "sha256": "ee280e2eddf0c411d905c2581b4509f6e3f18c7b78d7d1d01f3d8b37bd6af619",
+    "note": "按外观匹配的 ARK 拉杆式气缸六视图；图片未提供相机标定，结构不能视为实测。参考背视面板重复显示铭牌，与原照只在一侧可见矛盾，模型只在 +X 侧放置铭牌。"
+  },
+  "render": {
+    "six_view_resolution": 640,
+    "six_view_samples": 16,
+    "detail_resolution": 640,
+    "detail_samples": 20,
+    "turntable_resolution": 320,
+    "turntable_samples": 6
+  },
+  "limitations": [
+    "六视图参考未标定；整体尺寸、端盖尺寸、缸径/杆径、孔径、螺纹规格、孔深和装配关系未实测。",
+    "原照是 3/4 视角，不能直接作为正交测量；旧模型库相机只用于诊断。",
+    "背面、端盖内部、活塞/密封内部、缸筒壁厚、真实气路和材料牌号为推断。",
+    "铭牌文字按可见内容重绘，字体、字距和序列号为近似；不证明原始印刷或序列号。",
+    "+X 侧螺纹口/黄铜螺塞在原照可见；-X 侧按六视图正视/背视面板对称推断。",
+    "没有安装附件或支撑；落稳、接触、现场尺度和场景光照融合未验证。"
+  ]
+}
