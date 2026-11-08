@@ -1,0 +1,370 @@
+{
+  "version": "jack10-parametric-v1",
+  "radial_segments": 128,
+  "shape_basis": "source_photo_with_uncalibrated_visual_match_reference",
+  "reference_role": "visual_match_unverified",
+  "scale_note": "Working scale follows the model-library normalised visual size (about 0.98 m tall), not the printed 200 mm minimum height. Pixel ratios from the clean photo set the proportions.",
+  "proportion_source": {
+    "photo": "outputs/物品高清输入-39件/原貌HD/10-千斤顶.png",
+    "reference": "C:/Users/zhaoc/Desktop/六视图/红色液压千斤顶六视图目录.png",
+    "visible_label_text": "立式油压千斤顶 HYDRAULIC BOTTLE JACK 10t TY10010; printed minimum height 200 mm, lift 125 mm, adjustment 60 mm",
+    "label_note": "Printed dimensions are read from the label in the photo; they are product markings, not measurements of this particular used jack. They are not used as model dimensions.",
+    "pixel_ratios": "Clean-photo alpha: main jack 659 px wide x 1196 px tall; detached handle bar 405 x 864 px. Candidate keeps the main jack at about 0.975 m working height and uses the photo ratios for the base, body, pump and loop.",
+    "status": "uncalibrated_visual_reference"
+  },
+  "base": {
+    "levels": [
+      {
+        "z": 0.012,
+        "ax": 0.185,
+        "ay": 0.205,
+        "exponent": 0.46
+      },
+      {
+        "z": 0.028,
+        "ax": 0.207,
+        "ay": 0.227,
+        "exponent": 0.4
+      },
+      {
+        "z": 0.12,
+        "ax": 0.207,
+        "ay": 0.227,
+        "exponent": 0.38
+      },
+      {
+        "z": 0.145,
+        "ax": 0.196,
+        "ay": 0.216,
+        "exponent": 0.42
+      },
+      {
+        "z": 0.17,
+        "ax": 0.165,
+        "ay": 0.185,
+        "exponent": 0.52
+      },
+      {
+        "z": 0.195,
+        "ax": 0.12,
+        "ay": 0.138,
+        "exponent": 0.62
+      },
+      {
+        "z": 0.215,
+        "ax": 0.092,
+        "ay": 0.104,
+        "exponent": 0.72
+      },
+      {
+        "z": 0.232,
+        "ax": 0.075,
+        "ay": 0.084,
+        "exponent": 0.78
+      }
+    ],
+    "corner_holes": {
+      "centers": [
+        [
+          0.145,
+          0.16
+        ],
+        [
+          -0.145,
+          0.16
+        ],
+        [
+          0.145,
+          -0.16
+        ],
+        [
+          -0.145,
+          -0.16
+        ]
+      ],
+      "radius": 0.0165,
+      "note": "Four corner openings are visible in the bottom reference panel; whether they are mounting holes or casting openings is not established."
+    },
+    "bottom": {
+      "pad_radius": 0.046,
+      "ring_major": 0.086,
+      "ring_minor": 0.009,
+      "rib_half_x": 0.128,
+      "rib_half_y": 0.148,
+      "rib_half_width": 0.009,
+      "rib_top": 0.014
+    },
+    "bosses": {
+      "centers_y": [
+        -0.115,
+        0.0,
+        0.115
+      ],
+      "z": 0.085,
+      "outer_x": 0.19,
+      "length": 0.055,
+      "radius": 0.042,
+      "bolt_radius": 0.018,
+      "note": "Three front arch bosses are visible in the six-view sheet; the photo shows two and the third is partly hidden by the pump. The back trio is inferred by symmetry."
+    },
+    "release_valve": {
+      "center": [
+        0.04,
+        0.214,
+        0.155
+      ],
+      "length": 0.036,
+      "hex_radius": 0.0145,
+      "stem_radius": 0.007
+    }
+  },
+  "body_profile": [
+    [
+      0.0,
+      0.168
+    ],
+    [
+      0.098,
+      0.17
+    ],
+    [
+      0.112,
+      0.188
+    ],
+    [
+      0.116,
+      0.215
+    ],
+    [
+      0.115,
+      0.4
+    ],
+    [
+      0.11,
+      0.68
+    ],
+    [
+      0.104,
+      0.715
+    ],
+    [
+      0.098,
+      0.735
+    ],
+    [
+      0.086,
+      0.752
+    ],
+    [
+      0.08,
+      0.768
+    ],
+    [
+      0.078,
+      0.781
+    ],
+    [
+      0.0,
+      0.781
+    ]
+  ],
+  "top": {
+    "hex_collar": {
+      "z0": 0.778,
+      "z1": 0.835,
+      "radius": 0.09,
+      "vertices": 6
+    },
+    "upper_collar": {
+      "z0": 0.835,
+      "z1": 0.852,
+      "radius": 0.079,
+      "vertices": 6
+    },
+    "ram_neck": {
+      "z0": 0.85,
+      "z1": 0.866,
+      "radius": 0.07
+    },
+    "ram": {
+      "z0": 0.863,
+      "z1": 0.938,
+      "radius": 0.058
+    },
+    "saddle_skirt": {
+      "z0": 0.932,
+      "z1": 0.945,
+      "radius": 0.073
+    },
+    "saddle": {
+      "z0": 0.938,
+      "z1": 0.982,
+      "radius": 0.07
+    },
+    "saddle_note": "Checker-knurled red saddle cap; the diamond pattern is a normal map, not a measured knurl pitch."
+  },
+  "pump": {
+    "y": 0.173,
+    "body_z0": 0.198,
+    "body_z1": 0.452,
+    "body_radius": 0.042,
+    "lower_collar": {
+      "z0": 0.205,
+      "z1": 0.25,
+      "radius": 0.052
+    },
+    "yoke_center": [
+      0.0,
+      0.173,
+      0.464
+    ],
+    "yoke_half": [
+      0.043,
+      0.041,
+      0.03
+    ],
+    "socket_center": [
+      0.0,
+      0.173,
+      0.545
+    ],
+    "socket_axis": [
+      0.5,
+      -0.4,
+      0.768
+    ],
+    "socket_length": 0.18,
+    "socket_outer_radius": 0.048,
+    "socket_inner_radius": 0.032,
+    "pivot_radius": 0.0098,
+    "pivot_length": 0.128,
+    "link_center": [
+      0.041,
+      0.173,
+      0.333
+    ],
+    "link_half": [
+      0.0075,
+      0.02,
+      0.062
+    ],
+    "link_bolt_z": [
+      0.292,
+      0.366
+    ],
+    "link_bolt_radius": 0.0095,
+    "lower_pin_z": 0.226,
+    "lower_pin_radius": 0.0105,
+    "note": "The handle socket is modelled as an open through-tube angled up/inward/front. Its far opening, exact angle and internal spring/check-valve are inferred."
+  },
+  "handle_loop": {
+    "plane_x": 0.0,
+    "center_y": -0.19,
+    "center_z": 0.4675,
+    "half_y": 0.09,
+    "half_z": 0.1325,
+    "corner_radius": 0.05,
+    "rod_radius": 0.0105,
+    "mount_z": [
+      0.35,
+      0.6
+    ],
+    "mount_radius": 0.019,
+    "note": "The loop profile follows the photo; its hidden back-side attachment and rod diameter are inferred."
+  },
+  "handle_bar": {
+    "bottom": [
+      0.105,
+      0.5,
+      0.0
+    ],
+    "top": [
+      0.055,
+      0.3,
+      0.7
+    ],
+    "outer_radius": 0.023,
+    "inner_radius": 0.016,
+    "note": "Detached handle accessory as in the photo. The photo shows it floating and leaning; the candidate keeps that leaning display pose with its lower end on the floor. Pose, contact and stability are inferred."
+  },
+  "label": {
+    "half_angle_deg": 49.0,
+    "z0": 0.268,
+    "z1": 0.626,
+    "r_in": 0.1158,
+    "r_out": 0.1178,
+    "note": "Label artwork is recreated from the legible photo text; the original graphic and small print are not reproduced."
+  },
+  "material_profile": {
+    "red": {
+      "clean": {
+        "base_rgb": [
+          182,
+          22,
+          27
+        ],
+        "roughness": 0.38,
+        "metallic": 0.03,
+        "rust_amount": 0.0
+      },
+      "weathered": {
+        "base_rgb": [
+          168,
+          20,
+          24
+        ],
+        "roughness": 0.45,
+        "metallic": 0.02,
+        "rust_amount": 0.02
+      },
+      "worn": {
+        "base_rgb": [
+          190,
+          41,
+          43
+        ],
+        "roughness": 0.335,
+        "metallic": 0.03,
+        "rust_amount": 0.0
+      },
+      "rusted": {
+        "base_rgb": [
+          122,
+          38,
+          29
+        ],
+        "roughness": 0.62,
+        "metallic": 0.01,
+        "rust_amount": 0.55
+      }
+    },
+    "chrome": {
+      "base_rgb": [
+        198,
+        203,
+        209
+      ],
+      "roughness": 0.155,
+      "metallic": 1.0
+    },
+    "steel": {
+      "base_rgb": [
+        154,
+        159,
+        164
+      ],
+      "roughness": 0.3,
+      "metallic": 0.92
+    },
+    "saddle": {
+      "base_rgb": [
+        181,
+        25,
+        29
+      ],
+      "roughness": 0.44,
+      "metallic": 0.03
+    }
+  },
+  "note": "The six-view sheet is uncalibrated and was generated for visual comparison. The photo is the primary shape evidence. All hidden faces, hole depths, threads, the pump internals and the detached-handle pose remain inferred."
+}
