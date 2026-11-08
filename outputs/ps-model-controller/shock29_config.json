@@ -1,0 +1,587 @@
+{
+  "version": "shock29-parametric-v1",
+  "number": 29,
+  "description": "29 号液压减震器（红黑弹簧减震器）分部件重建。以原照与做锈图可见结构为主，六视图仅作未标定的外观和背侧拓扑参考。",
+  "units": "meters",
+  "shape_basis": "source_photo_visible_structure+uncalibrated_six_view_layout",
+  "orientation": {
+    "axis": "Y",
+    "left": "-Y",
+    "right": "+Y",
+    "up": "+Z",
+    "front_camera": "+X",
+    "depth": "X",
+    "note": "主轴沿 Y；+X 相机看到原照的侧面，左安装耳在 -Y、右安装耳在 +Y，图像左右与 2164x727 原照一致。两个安装耳的贯穿孔轴线沿 X；弹簧轴线和筒身轴线沿 Y。"
+  },
+  "scale_note": "按原照像素比例设置工作尺度：总长约 394.5 mm、弹簧外径约 89.2 mm、钢丝直径约 13.2 mm、红调节环外径约 80 mm。按原照 alpha 外廓 2035x465 px 与 0.3945 m 长度换算约 0.1912 mm/px；均为合理比例的工作尺度，不是实物测量。",
+  "dimensions": {
+    "overall": {
+      "length_m": 0.3945,
+      "max_width_m": 0.0892,
+      "image_length_px": 2035,
+      "image_height_px": 465,
+      "metres_per_px": 0.0001912,
+      "note": "外廓长度与高度来自原照 alpha；尺度为工作假设，不是卡尺测量。"
+    },
+    "left_eye": {
+      "y": -0.174,
+      "boss_outer_radius": 0.0205,
+      "boss_inner_radius": 0.014,
+      "boss_thickness": 0.02,
+      "bushing_outer_radius": 0.014,
+      "bushing_inner_radius": 0.011,
+      "bushing_thickness": 0.023,
+      "sleeve_outer_radius": 0.011,
+      "sleeve_inner_radius": 0.0085,
+      "sleeve_thickness": 0.021,
+      "collar_outer_radius": 0.0215,
+      "collar_inner_radius": 0.014,
+      "collar_thickness": 0.006,
+      "collar_x": -0.009,
+      "note": "左安装耳：红色阳极氧化板/凸台、钢衬套外环、黄铜内套、真实贯穿孔。原照仅见一侧，背面与衬套配合为推断。"
+    },
+    "right_eye": {
+      "y": 0.177,
+      "boss_outer_radius": 0.0205,
+      "boss_inner_radius": 0.014,
+      "boss_thickness": 0.024,
+      "bushing_outer_radius": 0.014,
+      "bushing_inner_radius": 0.011,
+      "bushing_thickness": 0.026,
+      "sleeve_outer_radius": 0.011,
+      "sleeve_inner_radius": 0.0085,
+      "sleeve_thickness": 0.024,
+      "collar_outer_radius": 0.022,
+      "collar_inner_radius": 0.014,
+      "collar_thickness": 0.008,
+      "collar_x": -0.01,
+      "note": "右安装耳：红色凸台比左端略大，孔内可见钢外环和黄铜内套；贯穿孔沿 X。"
+    },
+    "left_arm": {
+      "y0": -0.1655,
+      "y1": -0.147,
+      "half_height_eye": 0.0205,
+      "half_height_body": 0.0215,
+      "thickness_x": 0.016,
+      "note": "连接左耳与大红筒体的收腰板；从耳环外缘开始，避免填塞贯穿孔。轮廓按原照近似。"
+    },
+    "left_neck": {
+      "profile": [
+        [
+          -0.1645,
+          0.02
+        ],
+        [
+          -0.154,
+          0.0225
+        ],
+        [
+          -0.146,
+          0.026
+        ],
+        [
+          -0.14,
+          0.0295
+        ]
+      ],
+      "note": "左耳板与红色筒体之间的轴肩。"
+    },
+    "left_body": {
+      "profile": [
+        [
+          -0.1435,
+          0.026
+        ],
+        [
+          -0.1425,
+          0.0325
+        ],
+        [
+          -0.141,
+          0.033
+        ],
+        [
+          -0.1386,
+          0.033
+        ],
+        [
+          -0.138,
+          0.0318
+        ],
+        [
+          -0.1373,
+          0.033
+        ],
+        [
+          -0.1202,
+          0.033
+        ],
+        [
+          -0.1196,
+          0.0318
+        ],
+        [
+          -0.1189,
+          0.033
+        ],
+        [
+          -0.1146,
+          0.033
+        ],
+        [
+          -0.1135,
+          0.0305
+        ],
+        [
+          -0.1118,
+          0.026
+        ]
+      ],
+      "note": "红色阳极氧化大筒体；两道浅机加工环槽和端部倒角按原照近似。"
+    },
+    "gold_thread": {
+      "y0": -0.112,
+      "y1": -0.0265,
+      "base_radius": 0.0252,
+      "thread_depth": 0.0011,
+      "pitch": 0.0021,
+      "note": "金色/青铜色预载螺纹筒；原照可见细密螺纹，圈距与真实螺距未实测，按可见密度近似。"
+    },
+    "adjuster_ring": {
+      "y0": -0.096,
+      "y1": -0.0745,
+      "inner_radius": 0.0256,
+      "outer_radius": 0.0325,
+      "lug_count": 10,
+      "lug_outer_radius": 0.04,
+      "lug_tangential_width": 0.0115,
+      "lug_y_length": 0.023,
+      "set_screw_angle_rad": -1.2217,
+      "set_screw_radius": 0.0055,
+      "set_screw_length": 0.012,
+      "set_screw_radius_position": 0.0365,
+      "note": "红色缺口预载调节环：10 个矩形凸耳、一个径向黑色内六角紧定螺钉。凸耳数量与螺孔方向按原照可见侧推断。"
+    },
+    "spring": {
+      "y0": -0.0745,
+      "y1": 0.1135,
+      "mean_radius": 0.038,
+      "wire_radius": 0.0066,
+      "turns": 7.25,
+      "phase_rad": 1.5708,
+      "steps_per_turn": 44,
+      "radial_segments": 14,
+      "note": "黑色漆面螺旋弹簧，约 7.25 圈；圆丝、两端切平。圈数与线径按原照可见比例近似。"
+    },
+    "gold_barrel": {
+      "profile": [
+        [
+          -0.0265,
+          0.0248
+        ],
+        [
+          -0.025,
+          0.0288
+        ],
+        [
+          -0.02,
+          0.0288
+        ],
+        [
+          0.03,
+          0.0288
+        ],
+        [
+          0.032,
+          0.0296
+        ],
+        [
+          0.034,
+          0.0288
+        ],
+        [
+          0.036,
+          0.0288
+        ],
+        [
+          0.038,
+          0.026
+        ]
+      ],
+      "note": "金色阻尼筒；可见端部轴肩和右侧倒角。内部阀片/油路未建模。"
+    },
+    "black_spacer": {
+      "profile": [
+        [
+          0.038,
+          0.0255
+        ],
+        [
+          0.0395,
+          0.025
+        ],
+        [
+          0.043,
+          0.025
+        ],
+        [
+          0.044,
+          0.0238
+        ],
+        [
+          0.0455,
+          0.025
+        ],
+        [
+          0.05,
+          0.025
+        ],
+        [
+          0.051,
+          0.0238
+        ],
+        [
+          0.0525,
+          0.025
+        ],
+        [
+          0.062,
+          0.025
+        ],
+        [
+          0.064,
+          0.021
+        ],
+        [
+          0.07,
+          0.0205
+        ],
+        [
+          0.0715,
+          0.017
+        ]
+      ],
+      "note": "深色隔套/防尘段；表面有细车削环槽。材料按深色钢近似，未做成分检测。"
+    },
+    "shaft_wiper": {
+      "y0": 0.0715,
+      "y1": 0.074,
+      "outer_radius": 0.015,
+      "inner_radius": 0.0069,
+      "note": "镀铬杆根部的黑色橡胶防尘圈；非金属。"
+    },
+    "chrome_shaft": {
+      "profile": [
+        [
+          0.07,
+          0.0064
+        ],
+        [
+          0.072,
+          0.0068
+        ],
+        [
+          0.134,
+          0.0068
+        ],
+        [
+          0.136,
+          0.0064
+        ]
+      ],
+      "note": "镀铬活塞杆，贯穿右弹簧座和右耳；内部长度与镀层未实测。"
+    },
+    "right_perch": {
+      "y0": 0.114,
+      "y1": 0.136,
+      "outer_profile": [
+        [
+          0.114,
+          0.04
+        ],
+        [
+          0.116,
+          0.04
+        ],
+        [
+          0.117,
+          0.039
+        ],
+        [
+          0.121,
+          0.028
+        ],
+        [
+          0.122,
+          0.027
+        ],
+        [
+          0.128,
+          0.0265
+        ],
+        [
+          0.136,
+          0.026
+        ]
+      ],
+      "inner_radius": 0.0098,
+      "note": "红色右弹簧座/托盘，中心孔让镀铬杆通过；背侧形状为推断。"
+    },
+    "right_hub": {
+      "profile": [
+        [
+          0.13,
+          0.0245
+        ],
+        [
+          0.132,
+          0.0245
+        ],
+        [
+          0.14,
+          0.0235
+        ],
+        [
+          0.15,
+          0.022
+        ],
+        [
+          0.155,
+          0.0215
+        ]
+      ],
+      "note": "红色右座与右耳之间的轴颈。"
+    },
+    "right_arm": {
+      "y0": 0.136,
+      "y1": 0.1685,
+      "half_height_perch": 0.0235,
+      "half_height_eye": 0.0205,
+      "thickness_x": 0.018,
+      "note": "右耳连接板；从右耳外缘开始，避免填塞贯穿孔。原照可见红色宽板收腰。"
+    }
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "red_ano": 0,
+      "spring_black": 1,
+      "gold_ano": 2,
+      "chrome": 3,
+      "steel": 4,
+      "brass": 5,
+      "black_steel": 6,
+      "rubber": 7,
+      "rust": 8,
+      "red_dark": 9,
+      "gold_thread": 10,
+      "spare11": 11,
+      "spare12": 12,
+      "spare13": 13,
+      "spare14": 14,
+      "spare15": 15
+    },
+    "note": "4x4 图集，每格 512 px。R 通道保留 255；G=粗糙度；B=金属度。底色为 sRGB；不烘焙固定光照或阴影。"
+  },
+  "material_profile": {
+    "red_ano": {
+      "base_rgb": [
+        190,
+        24,
+        38
+      ],
+      "roughness": 0.28,
+      "metallic": 0.85,
+      "rust_amount": 0.006,
+      "note": "红色阳极氧化铝；金属，保留随光位变化的彩色金属反射。深红不等于纯黑。"
+    },
+    "red_dark": {
+      "base_rgb": [
+        120,
+        12,
+        24
+      ],
+      "roughness": 0.35,
+      "metallic": 0.85,
+      "rust_amount": 0.0,
+      "note": "红色环槽/阴影面用同族深红；金属。"
+    },
+    "gold_ano": {
+      "base_rgb": [
+        200,
+        148,
+        44
+      ],
+      "roughness": 0.2,
+      "metallic": 0.95,
+      "rust_amount": 0.0,
+      "note": "金色/青铜色阻尼筒表面；金属。颜色按原照近似，未做成分检测。"
+    },
+    "gold_thread": {
+      "base_rgb": [
+        205,
+        155,
+        55
+      ],
+      "roughness": 0.26,
+      "metallic": 0.95,
+      "rust_amount": 0.0,
+      "note": "预载螺纹筒；金属，细螺纹主要由几何表达。"
+    },
+    "chrome": {
+      "base_rgb": [
+        205,
+        210,
+        215
+      ],
+      "roughness": 0.06,
+      "metallic": 1.0,
+      "rust_amount": 0.003,
+      "note": "镀铬活塞杆；金属，保留强反射与少量磨痕。"
+    },
+    "steel": {
+      "base_rgb": [
+        132,
+        135,
+        140
+      ],
+      "roughness": 0.42,
+      "metallic": 1.0,
+      "rust_amount": 0.012,
+      "note": "衬套外环；金属。"
+    },
+    "brass": {
+      "base_rgb": [
+        190,
+        145,
+        72
+      ],
+      "roughness": 0.26,
+      "metallic": 1.0,
+      "rust_amount": 0.0,
+      "note": "孔内黄铜/青铜内套；金属，颜色按原照近似。"
+    },
+    "black_steel": {
+      "base_rgb": [
+        42,
+        44,
+        48
+      ],
+      "roughness": 0.42,
+      "metallic": 0.7,
+      "rust_amount": 0.004,
+      "note": "深色隔套/紧定螺钉；偏金属。材料未确认，背侧为推断。"
+    },
+    "spring_black": {
+      "base_rgb": [
+        20,
+        20,
+        22
+      ],
+      "roughness": 0.3,
+      "metallic": 0.0,
+      "rust_amount": 0.09,
+      "note": "黑色弹簧漆面，非金属；保留漆面高光、磨损和局部锈点。金属反射检查不适用于漆面本身。"
+    },
+    "rubber": {
+      "base_rgb": [
+        24,
+        24,
+        26
+      ],
+      "roughness": 0.82,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "黑色防尘橡胶圈；非金属，金属反射不适用。"
+    },
+    "rust": {
+      "base_rgb": [
+        128,
+        84,
+        52
+      ],
+      "roughness": 0.85,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "锈蚀色参考；锈为电介质。"
+    },
+    "spare11": {
+      "base_rgb": [
+        120,
+        122,
+        120
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare12": {
+      "base_rgb": [
+        118,
+        120,
+        118
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare13": {
+      "base_rgb": [
+        116,
+        118,
+        116
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare14": {
+      "base_rgb": [
+        114,
+        116,
+        114
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare15": {
+      "base_rgb": [
+        112,
+        114,
+        112
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    }
+  },
+  "render": {
+    "six_view_resolution": 640,
+    "six_view_samples": 14,
+    "detail_resolution": 640,
+    "detail_samples": 14,
+    "turntable_resolution": 320,
+    "turntable_samples": 5,
+    "metal_resolution": 512,
+    "metal_samples": 10
+  },
+  "reference": {
+    "file": "ChatGPT 图像 2026年10月14日 10_18_26-1.png",
+    "role": "visual_match_unverified",
+    "sha256": "966ac74bde27323cc741c31cda18f6e143496eff7f0862a73d3ba05e26c6d42f",
+    "note": "按外观匹配的红黑弹簧减震器六视图；图片为生成式参考且未提供相机标定，结构不能视为实测。参考面板的红色调节环/金色筒比例与原照接近，但端部凸台、弹簧圈数和背面细节存在生成式差异；候选以原照可见结构为准，参考只用于背侧拓扑与外观。"
+  },
+  "limitations": [
+    "六视图参考未标定且为生成式图册；整体尺寸、弹簧刚度/线径、耳环孔径、螺纹规格、孔深和装配关系未实测。",
+    "原照为单张侧视产品图，不是正交测量；旧模型库相机只用于诊断。",
+    "背面、阻尼筒内部、活塞/阀片/油路、弹簧座内部、衬套配合和壁厚为推断。",
+    "红调节环的凸耳数、紧定螺钉方向、右弹簧座背面和左右耳板厚度为解释性重建。",
+    "锈迹、漆面磨损和铝件加工纹为基于做锈图的有限采样与程序化近似，不是逐像素投影。",
+    "模型为独立候选，不替换原模型，不进入自动放置或正式合成；落稳、现场尺度和环境光融合未验证。",
+    "六视图左/右面板把耳环孔画成正对镜头，与原照正视中孔轴垂直于减震轴的理解不一致；本候选以原照为准，正交端视图显示耳板侧缘。"
+  ]
+}
