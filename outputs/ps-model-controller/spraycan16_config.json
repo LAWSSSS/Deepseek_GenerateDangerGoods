@@ -1,0 +1,164 @@
+{
+  "version": "spraycan16-parametric-v1",
+  "number": 16,
+  "radial_segments": 192,
+  "shape_basis": "source_photo_with_uncalibrated_visual_reference",
+  "reference_role": "visual_match_unverified",
+  "scale_note": "Working scale follows the clean-photo pixel ratio and a plausible slim 600 ml aerosol-can envelope. It is not a measured dimension of the physical can.",
+  "proportion_source": {
+    "photo": "outputs/物品高清输入-39件/原貌HD/16-杀虫剂罐2.png",
+    "rust": "outputs/物品高清输入-39件/生锈HD/16-杀虫剂罐2.png",
+    "reference": "references/parallel-six-view/ChatGPT 图像 2026年10月14日 10_08_37-1.png",
+    "reference_note": "The user six-view sheet is an uncalibrated generated visual reference of the same red AESTARI/KHX aerosol-can design. It is used for cap/recess/bottom topology and for the inferred back-label layout only; it is not a measured turntable and its panel contours are not treated as exact geometry.",
+    "visible_structure": "One upright red slim aerosol can: red plastic over-cap with a broad rounded top, an oval recessed scoop with a raised elliptical rim and a spray actuator, a dark cap/body seam, a straight cylindrical label-wrapped body, and a silver rolled-aluminium base with a concave bottom dish. The front label carries the AESTARI / 中山凯达 and 克害威 artwork; the back label is not visible in the source photo and is reconstructed from the uncalibrated reference as an inferred layout.",
+    "pixel_ratios": "Clean photo alpha bbox x=372..656, y=59..1485 (283 px wide, 1427 px tall, height/diameter about 5.04). Cap seam is at y about 300; the visible silver base starts near y=1440. The candidate reproduces the photo ratio, not a catalogue measurement.",
+    "catalog_note": "The asset catalogue lists a similar slim aerosol envelope (215-270 mm tall, 53-65 mm diameter, basis similar_catalog) from Sarten. That catalogue figure is only a plausibility check for the chosen 298 mm x 59.2 mm working envelope; it is not a measurement of this can.",
+    "status": "uncalibrated_visual_reference"
+  },
+  "dimensions": {
+    "total_height_m": 0.298,
+    "body_radius_m": 0.0296,
+    "body_diameter_m": 0.0592,
+    "body_z0_m": 0.008,
+    "body_z1_m": 0.248,
+    "cap_z0_m": 0.2468,
+    "cap_z1_m": 0.298,
+    "cap_seam_z_m": 0.2474,
+    "base_top_z_m": 0.0094,
+    "base_outer_radius_m": 0.0298,
+    "label_z_top_m": 0.2473,
+    "label_z_bottom_m": 0.0094,
+    "note": "Dimensions are derived from the source-photo pixel ratio with the working height fixed at 298 mm. They are not measured."
+  },
+  "profiles": {
+    "body": [
+      [0.0, 0.008],
+      [0.0288, 0.008],
+      [0.0296, 0.0092],
+      [0.0296, 0.2468],
+      [0.0289, 0.248],
+      [0.0, 0.248]
+    ],
+    "cap": [
+      [0.0, 0.2468],
+      [0.0291, 0.2468],
+      [0.02935, 0.2478],
+      [0.02945, 0.2502],
+      [0.02935, 0.2552],
+      [0.02905, 0.2622],
+      [0.02855, 0.2702],
+      [0.02775, 0.2782],
+      [0.02665, 0.2852],
+      [0.02525, 0.2908],
+      [0.02335, 0.2948],
+      [0.02075, 0.2969],
+      [0.0166, 0.2980],
+      [0.0095, 0.29835],
+      [0.0, 0.29845]
+    ],
+    "base": [
+      [0.0, 0.0056],
+      [0.008, 0.0054],
+      [0.014, 0.0050],
+      [0.020, 0.0042],
+      [0.0245, 0.0030],
+      [0.0274, 0.0015],
+      [0.0288, 0.0006],
+      [0.0297, 0.0005],
+      [0.0298, 0.0014],
+      [0.0298, 0.0030],
+      [0.0297, 0.0055],
+      [0.0293, 0.0078],
+      [0.0285, 0.0092],
+      [0.0265, 0.0094],
+      [0.0, 0.0094]
+    ]
+  },
+  "features": {
+    "recess_cutter": {
+      "center": [0.0, 0.0015, 0.3038],
+      "radii": [0.0175, 0.0252, 0.0118],
+      "sphere_segments": 96,
+      "sphere_rings": 48,
+      "note": "Ellipsoid subtracted from the closed cap solid. It creates an oval scoop whose floor is part of the cap; it is not a through-hole."
+    },
+    "recess_rim": {
+      "center_z": 0.2974,
+      "major_x": 0.0172,
+      "major_y": 0.0246,
+      "minor": 0.0016,
+      "major_segments": 160,
+      "minor_segments": 12,
+      "note": "Raised elliptical lip around the scoop, visible as the bright U-shaped rim in the photo. Height/depth are inferred from the uncalibrated reference and photo highlight."
+    },
+    "actuator": {
+      "center": [0.0, 0.0032, 0.2926],
+      "radii": [0.0088, 0.0128, 0.0044],
+      "note": "Low oval spray button inside the scoop. Its exact height and mechanism are inferred; only the general actuator presence is supported by the reference."
+    },
+    "nozzle": {
+      "x0": 0.0060,
+      "x1": 0.0098,
+      "y": 0.0025,
+      "z": 0.2945,
+      "outer_radius": 0.0017,
+      "hole_radius": 0.00065,
+      "segments": 64,
+      "note": "Black plastic nozzle insert with a real axial through-hole. The hole diameter and insert length are inferred, not measured."
+    },
+    "cap_seam_ring": {
+      "z": 0.2474,
+      "major": 0.0291,
+      "minor": 0.0003,
+      "major_segments": 192,
+      "minor_segments": 8,
+      "note": "Thin dark shadow/gap line at the cap/body joint. It is inset behind the cap's widest ring so it is not visible as a separate dark halo in the top view, while a hairline remains visible from the side."
+    },
+    "cap_mould_seam_texture_u": 0.25,
+    "cap_mould_seam_note": "A faint vertical mould seam is drawn into the cap texture at the +X front centre; it is surface-only, not a structural split."
+  },
+  "material_profile": {
+    "body": {
+      "roughness_base": 0.30,
+      "roughness_range": [0.22, 0.52],
+      "metallic": 0.0,
+      "note": "Printed label is a dielectric ink layer; the aluminium can wall is not exposed on the visible body. Metalness is zero on the print, not because the can is plastic."
+    },
+    "cap": {
+      "roughness_base": 0.24,
+      "roughness_range": [0.17, 0.40],
+      "metallic": 0.0,
+      "note": "Glossy red moulded plastic over-cap. Fine orange-peel and flow lines are synthesised; no measured surface profile exists."
+    },
+    "base": {
+      "roughness_base": 0.30,
+      "roughness_range": [0.18, 0.52],
+      "metallic": 1.0,
+      "note": "Stamped/rolled aluminium base. Metalness is full and highlights must move with live lighting. Brush marks and local stains are inferred."
+    },
+    "nozzle": {
+      "base_rgb": [0.018, 0.018, 0.020],
+      "roughness": 0.42,
+      "metallic": 0.0
+    },
+    "seam": {
+      "base_rgb": [0.055, 0.012, 0.014],
+      "roughness": 0.55,
+      "metallic": 0.0
+    }
+  },
+  "texture_sampling": {
+    "clean_size": [1031, 1525],
+    "body_cx_px": 514.0,
+    "body_half_width_px": 141.5,
+    "body_top_px": 302.0,
+    "body_bottom_px": 1441.0,
+    "cap_top_px": 60.0,
+    "cap_bottom_px": 300.0,
+    "metal_top_px": 1440.0,
+    "metal_bottom_px": 1483.0,
+    "front_u_center": 0.25,
+    "back_label_u": [0.585, 0.915],
+    "note": "Front half of the cylindrical body is projected from the clean photograph; the back half is a red base plus an explicitly inferred back label. Grime is derived from the rust photograph difference, clamped so the print does not turn black."
+  }
+}
