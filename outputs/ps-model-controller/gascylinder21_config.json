@@ -1,0 +1,416 @@
+{
+  "version": "gascylinder21-parametric-v1",
+  "reference_name": "ChatGPT 图像 2026年10月14日 10_01_32-2.png",
+  "reference_sha256": "b93d0a63c3c5e9aa6f8d3cadd61f6922a142077be5724fb6f998be1f60e9c48e",
+  "proportion_source": {
+    "primary": "outputs/物品高清输入-39件/原貌HD/21-气瓶2.png",
+    "secondary": "outputs/物品高清输入-39件/生锈HD/21-气瓶2.png",
+    "method": "alpha silhouette row/column widths; nominal height set to a plausible 0.420 m small CO2/air cylinder size, not a measurement",
+    "photo_length_width_ratio": 4.812,
+    "reference_note": "六视图为未标定的同类气瓶外观图册，不是实测转台。照片整体高宽比约 4.81（含阀门），图册正视图约 4.19，二者不一致；候选以原照比例为准，图册只用于核对阀体、出气嘴、手轮、颈环和底盖的拓扑与外观。图册面板之间也有矛盾：左视和右视都把出气嘴画在同一侧，顶视也把出气嘴画向右侧，无法由同一台实物的严格转台同时成立；因此不把图册当作正交投影或尺寸依据。",
+    "model_identity": "照片与图册均无可辨品牌或型号铭文；按“气瓶2”外观重建，不冒充任何实测型号",
+    "nominal_height_m": 0.42,
+    "note": "所有尺寸由照片像素比例推导并取合理工业量级；未使用外部产品页冒充实测，也未测量实物。"
+  },
+  "geometry": {
+    "radial_segments": 128,
+    "nominal_height_m": 0.42,
+    "body": {
+      "z0": 0.0,
+      "z1": 0.3418,
+      "profile": [
+        [
+          0.0,
+          0.0008
+        ],
+        [
+          0.038,
+          0.0
+        ],
+        [
+          0.0405,
+          0.0006
+        ],
+        [
+          0.0425,
+          0.002
+        ],
+        [
+          0.0435,
+          0.004
+        ],
+        [
+          0.0435,
+          0.008
+        ],
+        [
+          0.0435,
+          0.27
+        ],
+        [
+          0.0433,
+          0.2737
+        ],
+        [
+          0.0425,
+          0.2775
+        ],
+        [
+          0.0408,
+          0.282
+        ],
+        [
+          0.0382,
+          0.287
+        ],
+        [
+          0.0348,
+          0.292
+        ],
+        [
+          0.0306,
+          0.297
+        ],
+        [
+          0.0262,
+          0.302
+        ],
+        [
+          0.0223,
+          0.3065
+        ],
+        [
+          0.019,
+          0.31
+        ],
+        [
+          0.0172,
+          0.3125
+        ],
+        [
+          0.0165,
+          0.315
+        ],
+        [
+          0.0162,
+          0.33
+        ],
+        [
+          0.0152,
+          0.341
+        ],
+        [
+          0.0,
+          0.3418
+        ]
+      ]
+    },
+    "neck_rings": [
+      {
+        "z": 0.313,
+        "major": 0.017,
+        "minor": 0.0009
+      },
+      {
+        "z": 0.3408,
+        "major": 0.0162,
+        "minor": 0.0008
+      },
+      {
+        "z": 0.3428,
+        "major": 0.0158,
+        "minor": 0.0006
+      }
+    ],
+    "valve_body": {
+      "z0": 0.3405,
+      "z1": 0.372,
+      "profile": [
+        [
+          0.0,
+          0.3405
+        ],
+        [
+          0.0148,
+          0.3405
+        ],
+        [
+          0.0152,
+          0.3412
+        ],
+        [
+          0.0152,
+          0.37
+        ],
+        [
+          0.0145,
+          0.3712
+        ],
+        [
+          0.0135,
+          0.372
+        ],
+        [
+          0.0,
+          0.372
+        ]
+      ]
+    },
+    "spout": {
+      "z": 0.356,
+      "boss_r": 0.0108,
+      "outer_r": 0.008,
+      "bore_r": 0.005,
+      "y_start": 0.0,
+      "y_tip": 0.0336,
+      "thread_start": 0.018,
+      "thread_end": 0.0315,
+      "thread_grooves": 12,
+      "thread_depth": 0.0011,
+      "blind_end": 0.006,
+      "expected_bore_depth": 0.0276
+    },
+    "safety_plug": {
+      "mount_y": -0.014,
+      "center_z": 0.3452,
+      "length": 0.0075,
+      "body_r": 0.0055,
+      "neck_r": 0.0045,
+      "socket_r": 0.0022,
+      "socket_depth": 0.0025,
+      "knurl_teeth": 28,
+      "knurl_depth": 0.00035,
+      "knurl_from": 0.002,
+      "knurl_to": 0.007,
+      "knurl_r": 0.006
+    },
+    "plaque": {
+      "center": [
+        0.0,
+        0.0,
+        0.354
+      ],
+      "x0": 0.0148,
+      "x1": 0.0163,
+      "width_y": 0.0175,
+      "height_z": 0.0155,
+      "bevel": 0.0006
+    },
+    "packing_nut": {
+      "z0": 0.371,
+      "z1": 0.375,
+      "r": 0.0122
+    },
+    "spindle": {
+      "z0": 0.375,
+      "z1": 0.3765,
+      "r": 0.0072
+    },
+    "handwheel": {
+      "z0": 0.3745,
+      "flutes": 14,
+      "flute_depth": 0.0022,
+      "rings": [
+        [
+          0.0,
+          0.019
+        ],
+        [
+          0.003,
+          0.0205
+        ],
+        [
+          0.0075,
+          0.022
+        ],
+        [
+          0.0135,
+          0.0235
+        ],
+        [
+          0.0195,
+          0.0245
+        ],
+        [
+          0.0255,
+          0.0248
+        ],
+        [
+          0.0315,
+          0.0245
+        ],
+        [
+          0.0375,
+          0.0235
+        ],
+        [
+          0.0415,
+          0.0215
+        ],
+        [
+          0.044,
+          0.018
+        ]
+      ],
+      "top_inner_r": 0.013,
+      "top_inner_drop": 0.001,
+      "top_center_drop": 0.0002
+    },
+    "cap": {
+      "r": 0.0125,
+      "z0": 0.418,
+      "z1": 0.4196
+    },
+    "screw": {
+      "r": 0.0038,
+      "z0": 0.4196,
+      "z1": 0.4203,
+      "slot_width": 0.0013,
+      "slot_depth": 0.0006
+    },
+    "bottom_plate": {
+      "r": 0.036,
+      "z0": 0.0,
+      "z1": 0.0006
+    }
+  },
+  "material_profile": {
+    "body": {
+      "base_rgb": [
+        178,
+        180,
+        184
+      ],
+      "base_roughness": 0.32,
+      "metallic": 1.0,
+      "rust_rgb": [
+        74,
+        45,
+        26
+      ],
+      "rust_roughness": 0.76,
+      "rust_metallic": 0.05,
+      "grime_rgb": [
+        96,
+        84,
+        68
+      ]
+    },
+    "steel": {
+      "base_rgb": [
+        168,
+        170,
+        175
+      ],
+      "base_roughness": 0.24,
+      "metallic": 1.0
+    },
+    "black": {
+      "base_rgb": [
+        26,
+        27,
+        29
+      ],
+      "base_roughness": 0.38,
+      "metallic": 0.0
+    },
+    "cap": {
+      "base_rgb": [
+        145,
+        147,
+        151
+      ],
+      "base_roughness": 0.68,
+      "metallic": 0.9
+    },
+    "bore": {
+      "base_rgb": [
+        40,
+        41,
+        43
+      ],
+      "base_roughness": 0.55,
+      "metallic": 0.9
+    },
+    "bottom": {
+      "base_rgb": [
+        170,
+        172,
+        176
+      ],
+      "base_roughness": 0.29,
+      "metallic": 1.0,
+      "grime_rgb": [
+        96,
+        84,
+        68
+      ],
+      "rust_rgb": [
+        74,
+        45,
+        26
+      ]
+    }
+  },
+  "texture": {
+    "body_size": [
+      2048,
+      1024
+    ],
+    "steel_size": [
+      1024,
+      1024
+    ],
+    "black_size": [
+      1024,
+      1024
+    ],
+    "cap_size": [
+      512,
+      512
+    ],
+    "rust_patch_rects": {
+      "shoulder": [
+        560,
+        330,
+        700,
+        430
+      ],
+      "bottom": [
+        540,
+        1080,
+        710,
+        1195
+      ],
+      "mid": [
+        560,
+        600,
+        700,
+        900
+      ]
+    },
+    "target_rust_fraction": [
+      0.02,
+      0.13
+    ]
+  },
+  "render": {
+    "samples": 40,
+    "draft_samples": 8,
+    "six_view_resolution": 768,
+    "detail_resolution": 1024,
+    "turntable_resolution": 512,
+    "clay_resolution": 768,
+    "world_strength": 0.48,
+    "key_light_a": [
+      2.6,
+      -3.0,
+      3.6
+    ],
+    "key_light_b": [
+      -3.4,
+      2.8,
+      4.6
+    ]
+  }
+}
