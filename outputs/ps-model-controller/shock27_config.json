@@ -1,0 +1,481 @@
+{
+  "version": "shock27-parametric-v1",
+  "number": 27,
+  "description": "27 号液压减震器（黑蓝摩托车后减震器）分部件重建。以原照与做锈图可见结构为主，六视图仅作未标定的外观和背侧拓扑参考。",
+  "units": "meters",
+  "shape_basis": "source_photo_visible_structure+uncalibrated_six_view_layout",
+  "orientation": {
+    "axis": "Z",
+    "top": "+Z",
+    "bottom": "-Z",
+    "front_camera": "+X",
+    "reservoir_side": "+Y",
+    "up": "+Z",
+    "note": "主轴沿 Z 向上；+X 相机看到标签正面，软管和副储油罐在画面右侧（+Y），与原照一致。上耳环和下 U 形夹的通孔均沿 Y，与原照底部左右两侧可见的螺栓头一致。"
+  },
+  "scale_note": "按原照和六视图的像素比例设置工作尺度：总高约 310 mm、弹簧外径约 70 mm、钢丝直径约 12.4 mm、副储油罐外径约 37 mm。均为合理比例的工作尺度，不是对实物的测量。",
+  "dimensions": {
+    "top_clevis": {
+      "eye_z": 0.147,
+      "eye_outer_radius": 0.019,
+      "bore_radius": 0.006,
+      "bushing_outer_radius": 0.006,
+      "bushing_inner_radius": 0.0049,
+      "plate_thickness": 0.01,
+      "plate_gap": 0.008,
+      "plate_x_half": 0.014,
+      "plate_bottom_z": 0.118,
+      "neck": {
+        "center": [
+          0.0,
+          0.0,
+          0.121
+        ],
+        "size": [
+          0.026,
+          0.032,
+          0.016
+        ]
+      },
+      "clamp_bolt": {
+        "center": [
+          0.0145,
+          0.0,
+          0.121
+        ],
+        "axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.0055,
+        "thickness": 0.005,
+        "washer_radius": 0.0085
+      },
+      "note": "上耳环为两片平行夹板（沿 Y 分开，外侧面约 ±14 mm）夹住车架安装点，中心为沿 Y 的真实贯穿孔并带钢衬套；上方有连接两片夹板的实心桥，颈部正面可见内六角锁紧螺钉。六视图各面板对该夹板朝向并不一致，这里按原照的可见宽块/窄槽和左/右侧圆孔解释。"
+    },
+    "top_cap": {
+      "z0": 0.06,
+      "z1": 0.118,
+      "radius": 0.029,
+      "shoulder_z0": 0.112,
+      "shoulder_z1": 0.124,
+      "shoulder_radius_top": 0.0195,
+      "groove_z": [
+        0.066,
+        0.108
+      ],
+      "note": "黑色阳极氧化顶盖；两道细沟槽按原照近似。"
+    },
+    "label": {
+      "z0": 0.073,
+      "z1": 0.101,
+      "radius": 0.0296,
+      "half_angle_rad": 0.9,
+      "note": "顶盖正面黑底青色边框的 YU-AN 标签；可见文字按原照复制，字形为近似绘制，不是原厂字体。"
+    },
+    "upper_seat": {
+      "z0": 0.046,
+      "z1": 0.062,
+      "radius": 0.036,
+      "collar_radius": 0.033,
+      "note": "上弹簧座，黑色金属；照片可见外伸凸缘。"
+    },
+    "spring": {
+      "z0": -0.048,
+      "z1": 0.055,
+      "mean_radius": 0.0285,
+      "wire_radius": 0.0062,
+      "turns": 5.5,
+      "end_flat": 0.004,
+      "note": "蓝色漆面螺旋弹簧；圈数按原照可见约 5.5 圈近似，钢丝为圆丝，两端近似磨平。"
+    },
+    "damper": {
+      "upper_body_radius": 0.0165,
+      "upper_body_z0": -0.002,
+      "upper_body_z1": 0.06,
+      "chrome_radius": 0.0085,
+      "chrome_z0": -0.05,
+      "chrome_z1": 0.002,
+      "bronze_guide_z": -0.001,
+      "bronze_guide_radius": 0.0145,
+      "rubber_wiper_z0": -0.0505,
+      "rubber_wiper_z1": -0.047,
+      "rubber_wiper_radius": 0.012,
+      "note": "弹簧内部的黑色阻尼筒、镀铬活塞杆、青铜色导向环和深色防尘环；内部阀片和油路未建模。"
+    },
+    "lower_seat": {
+      "z0": -0.06,
+      "z1": -0.052,
+      "radius": 0.0355,
+      "note": "下弹簧座；原照可见其上方为镀铬杆和青铜色小环。"
+    },
+    "lower_body": {
+      "z0": -0.102,
+      "z1": -0.058,
+      "radius": 0.0235,
+      "cone_z": -0.108,
+      "cone_radius_top": 0.0235,
+      "cone_radius_bottom": 0.0185,
+      "front_plug": {
+        "center": [
+          0.023,
+          0.0,
+          -0.074
+        ],
+        "axis": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "radius": 0.0034,
+        "thickness": 0.0035
+      },
+      "note": "下筒体与锥形过渡；前面小点为原照可见的工艺孔/堵头，功能未确认。"
+    },
+    "bottom_clevis": {
+      "eye_z": -0.132,
+      "eye_outer_radius": 0.014,
+      "bore_radius": 0.006,
+      "bushing_outer_radius": 0.006,
+      "bushing_inner_radius": 0.0049,
+      "plate_thickness": 0.01,
+      "plate_gap": 0.008,
+      "plate_y_half": 0.013,
+      "plate_top_z": -0.108,
+      "bolt_head_radius": 0.0078,
+      "bolt_head_thickness": 0.005,
+      "note": "下 U 形夹为两片平行夹板（沿 Y 分开），孔轴沿 Y；贯穿孔内有钢衬套，两侧为钢色六角螺栓头，与原照左右两侧可见的银点一致。",
+      "plate_x_half": 0.013
+    },
+    "reservoir": {
+      "origin": [
+        0.0,
+        0.076,
+        -0.078
+      ],
+      "axis": [
+        0.06,
+        0.94,
+        -0.33
+      ],
+      "body_radius": 0.0165,
+      "body_t0": 0.01,
+      "body_t1": 0.048,
+      "band_radius": 0.017,
+      "band_t0": 0.048,
+      "band_t1": 0.059,
+      "cap_radius": 0.0188,
+      "cap_t0": 0.059,
+      "cap_t1": 0.08,
+      "knurl_count": 12,
+      "knurl_radius": 0.0012,
+      "knurl_length": 0.017,
+      "end_socket_radius": 0.0055,
+      "end_socket_depth": 0.003,
+      "banjo_radius": 0.0065,
+      "banjo_length": 0.014,
+      "hex_nut_radius": 0.0095,
+      "hex_nut_t0": 0.002,
+      "hex_nut_t1": 0.011,
+      "band_label_t0": 0.0495,
+      "band_label_t1": 0.0575,
+      "band_label_half_angle_rad": 0.78,
+      "note": "副储油罐为蓝色阳极氧化筒，银色中段带和蓝色滚花端盖；近端为钢色 90 度接头/六角螺母。原照中储油罐位于减震器右下侧，外缘约在总高 2/3 处；罐体长度、俯仰角和接头内部为推断。"
+    },
+    "hose": {
+      "radius": 0.0042,
+      "path": [
+        [
+          0.008,
+          0.032,
+          0.072
+        ],
+        [
+          0.01,
+          0.05,
+          0.078
+        ],
+        [
+          0.01,
+          0.062,
+          0.055
+        ],
+        [
+          0.008,
+          0.07,
+          0.02
+        ],
+        [
+          0.006,
+          0.076,
+          -0.015
+        ],
+        [
+          0.004,
+          0.08,
+          -0.045
+        ],
+        [
+          0.002,
+          0.078,
+          -0.065
+        ],
+        [
+          0.0,
+          0.076,
+          -0.077
+        ]
+      ],
+      "corner_radius": 0.022,
+      "ferrule_radius": 0.0054,
+      "ferrule_length": 0.008,
+      "top_banjo": {
+        "center": [
+          0.007,
+          0.03,
+          0.072
+        ],
+        "axis": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "radius": 0.0062,
+        "thickness": 0.006
+      },
+      "note": "不锈钢编织软管；编织纹理只用法线/粗糙度表达，未建立逐股几何，内部油路未建模。上端按原照从顶盖右侧引出，下端接副储油罐近端 90 度接头。"
+    }
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "black_ano": 0,
+      "blue_spring": 1,
+      "blue_ano": 2,
+      "chrome": 3,
+      "steel": 4,
+      "dark_steel": 5,
+      "rubber": 6,
+      "rust": 7,
+      "bronze": 8,
+      "silver_band": 9,
+      "spare11": 11,
+      "spare12": 12,
+      "spare13": 13,
+      "spare14": 14,
+      "spare15": 15,
+      "braid": 10
+    },
+    "note": "4x4 图集，每格 512 px。R 通道保留 255；G=粗糙度；B=金属度。底色为 sRGB；不烘焙固定光照或阴影。"
+  },
+  "material_profile": {
+    "black_ano": {
+      "base_rgb": [
+        22,
+        23,
+        26
+      ],
+      "roughness": 0.35,
+      "metallic": 0.58,
+      "rust_amount": 0.025,
+      "note": "黑色阳极氧化铝/钢件；保留随光位变化的金属反射。深色不等于纯黑，避免发黑。"
+    },
+    "blue_spring": {
+      "base_rgb": [
+        40,
+        111,
+        188
+      ],
+      "roughness": 0.24,
+      "metallic": 0.0,
+      "rust_amount": 0.075,
+      "note": "蓝色弹簧漆面，非金属；保留清漆高光、磨损和局部锈点。金属反射检查不适用于漆面本身。"
+    },
+    "blue_ano": {
+      "base_rgb": [
+        26,
+        66,
+        140
+      ],
+      "roughness": 0.3,
+      "metallic": 0.86,
+      "rust_amount": 0.006,
+      "note": "蓝色阳极氧化储油罐；金属，保留金属反射。"
+    },
+    "chrome": {
+      "base_rgb": [
+        198,
+        203,
+        210
+      ],
+      "roughness": 0.075,
+      "metallic": 1.0,
+      "rust_amount": 0.004,
+      "note": "镀铬活塞杆；原照有少量磨痕，分布为程序化近似。"
+    },
+    "steel": {
+      "base_rgb": [
+        154,
+        157,
+        162
+      ],
+      "roughness": 0.24,
+      "metallic": 1.0,
+      "rust_amount": 0.02,
+      "note": "衬套、螺栓头、软管接头和编织软管；金属，保留金属反射。"
+    },
+    "dark_steel": {
+      "base_rgb": [
+        59,
+        63,
+        70
+      ],
+      "roughness": 0.36,
+      "metallic": 0.9,
+      "rust_amount": 0.008,
+      "note": "内六角孔、沟槽和深色小件；金属。"
+    },
+    "rubber": {
+      "base_rgb": [
+        23,
+        23,
+        25
+      ],
+      "roughness": 0.82,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "黑色防尘橡胶环；非金属，金属反射不适用。"
+    },
+    "rust": {
+      "base_rgb": [
+        128,
+        84,
+        52
+      ],
+      "roughness": 0.83,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "锈蚀色参考；锈为电介质，金属反射不适用。"
+    },
+    "bronze": {
+      "base_rgb": [
+        173,
+        128,
+        66
+      ],
+      "roughness": 0.29,
+      "metallic": 1.0,
+      "rust_amount": 0.004,
+      "note": "杆导向处的青铜色小环；颜色和材料按原照近似，未做成分检测。"
+    },
+    "silver_band": {
+      "base_rgb": [
+        176,
+        178,
+        180
+      ],
+      "roughness": 0.19,
+      "metallic": 1.0,
+      "rust_amount": 0.0,
+      "note": "储油罐中段银色带；金属，细拉丝方向由程序化场表达。"
+    },
+    "spare10": {
+      "base_rgb": [
+        120,
+        122,
+        120
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare11": {
+      "base_rgb": [
+        118,
+        120,
+        118
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare12": {
+      "base_rgb": [
+        116,
+        118,
+        116
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare13": {
+      "base_rgb": [
+        114,
+        116,
+        114
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare14": {
+      "base_rgb": [
+        112,
+        114,
+        112
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare15": {
+      "base_rgb": [
+        110,
+        112,
+        110
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "braid": {
+      "base_rgb": [
+        150,
+        153,
+        158
+      ],
+      "roughness": 0.27,
+      "metallic": 1.0,
+      "rust_amount": 0.008,
+      "note": "不锈钢编织软管；编织方向只用法线表达，未建立逐股几何。"
+    }
+  },
+  "reference": {
+    "file": "黑蓝摩托车后减震器六视图展示.png",
+    "role": "visual_match_unverified",
+    "sha256": "059cc68bde6adbd04c2cf95d5dea603b97a16db02c58552c8f12ee0244e3f2c7",
+    "note": "按外观匹配的黑蓝摩托车后减震器六视图；图片为生成式参考且未提供相机标定，结构不能视为实测。各面板的上耳环朝向和软管方位并不完全一致，候选以原照可见结构和物理合理性为准，参考只用于背侧拓扑与外观。"
+  },
+  "render": {
+    "six_view_resolution": 640,
+    "six_view_samples": 16,
+    "detail_resolution": 640,
+    "detail_samples": 16,
+    "turntable_resolution": 320,
+    "turntable_samples": 6
+  },
+  "limitations": [
+    "六视图参考未标定且部分面板互相矛盾；整体尺寸、弹簧刚度/线径、耳环孔径、螺纹规格、孔深和装配关系未实测。",
+    "原照是 3/4 视角，不能直接作为正交测量；旧模型库相机只用于诊断。",
+    "背面、阻尼筒内部、活塞/阀片/油路、储油罐内部、软管内部通道、衬套配合和壁厚为推断。",
+    "上耳环夹板朝向在不同参考面板间不一致；候选采用原照可见的开槽解释，待人工复核。",
+    "YU-AN 标签文字按可见内容复制，字形为近似绘制；储油罐银色带上的刻字未准确复现。",
+    "锈迹、漆面磨损和编织软管纹理为程序化近似，不是逐像素实测。",
+    "副储油罐仅由软管悬吊，落稳、承托、接触、现场尺度和场景光照融合未验证。"
+  ]
+}
