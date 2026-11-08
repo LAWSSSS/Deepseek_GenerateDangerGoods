@@ -1,0 +1,345 @@
+{
+  "version": "aerosol14-parametric-v1",
+  "radial_segments": 192,
+  "shape_basis": "source_photo_with_uncalibrated_six_view_reference",
+  "reference_role": "visual_match_unverified",
+  "scale_note": "Working scale follows the clean-photo and six-view pixel ratios and a plausible 600 mL aerosol-can size (about 68 mm diameter, 251 mm overall height); it is not a measured dimension of the photographed can.",
+  "proportion_source": {
+    "photo": "outputs/物品高清输入-39件/原貌HD/14-杀虫剂罐.png",
+    "rust": "outputs/物品高清输入-39件/生锈HD/14-杀虫剂罐.png",
+    "reference": "C:/Users/zhaoc/Desktop/六视图/蓝色榄菊杀虫喷雾六视图.png",
+    "reference_note": "The six-view sheet is an uncalibrated visual-match sheet of the same blue Lanju aerosol can. It provides the front/back/side label artwork, the blue over-cap topology and the stamped metal base. It is not a calibrated turntable and no panel is treated as measured geometry.",
+    "visible_structure": "One upright blue aerosol can: cylindrical printed body with a narrow bright metal base ring, blue plastic over-cap with a large U-shaped spray well, raised circular nozzle boss, small ribbed actuator with a real front orifice, and a concave stamped metal bottom (20240315 / A3247B).",
+    "pixel_ratios": "Front six-view silhouette is about 120 px wide and 447 px high (width/height about 0.268). The cap/body seam is at about 21% of the height from the top and the visible metal base band is about 1.5% of the height. The candidate uses diameter/height about 0.269, not a measured dimension.",
+    "status": "uncalibrated_visual_reference"
+  },
+  "layout": {
+    "center": [
+      0.0,
+      0.0
+    ],
+    "front_direction": "+X",
+    "note": "Single can upright. The source photo is a three-quarter view from +X; the candidate front label is placed at +X and the texture seam (printed label wrap join) at -X."
+  },
+  "can": {
+    "total_height": 0.252,
+    "max_radius": 0.0338,
+    "body": {
+      "z0": 0.006,
+      "z1": 0.2015,
+      "profile": [
+        [
+          0.0,
+          0.006
+        ],
+        [
+          0.0328,
+          0.006
+        ],
+        [
+          0.0334,
+          0.008
+        ],
+        [
+          0.0335,
+          0.15
+        ],
+        [
+          0.0333,
+          0.192
+        ],
+        [
+          0.0328,
+          0.197
+        ],
+        [
+          0.0312,
+          0.2
+        ],
+        [
+          0.026,
+          0.2013
+        ],
+        [
+          0.0,
+          0.2015
+        ]
+      ],
+      "note": "Closed metal body under the label sleeve. The top is hidden by the over-cap and is not claimed as visible geometry."
+    },
+    "label": {
+      "z0": 0.005,
+      "z1": 0.1983,
+      "outer_radius": 0.0338,
+      "inner_radius": 0.0334,
+      "note": "Closed thin printed label sleeve. Its artwork is inverse-projected from the four six-view side panels; the wrap seam is at -X."
+    },
+    "bottom": {
+      "profile": [
+        [
+          0.0,
+          0.004
+        ],
+        [
+          0.0278,
+          0.0032
+        ],
+        [
+          0.0294,
+          0.0038
+        ],
+        [
+          0.03,
+          0.0048
+        ],
+        [
+          0.03,
+          0.0062
+        ],
+        [
+          0.021,
+          0.0085
+        ],
+        [
+          0.0,
+          0.0098
+        ]
+      ],
+      "rim_torus": {
+        "major": 0.032,
+        "minor": 0.0022,
+        "z": 0.003
+      },
+      "step_torus": {
+        "major": 0.0284,
+        "minor": 0.00075,
+        "z": 0.0046
+      },
+      "ridge_torus": {
+        "major": 0.0205,
+        "minor": 0.00085,
+        "z": 0.0077
+      },
+      "code": "20240315 / A3247B",
+      "note": "Concave aluminium base cup with rolled outer rim, a step ring and an inner ridge. The stamped code is reproduced as a texture from the readable bottom panel; engraving depth is inferred."
+    },
+    "cap": {
+      "z0": 0.1983,
+      "z1": 0.252,
+      "profile": [
+        [
+          0.0,
+          0.1983
+        ],
+        [
+          0.0338,
+          0.1983
+        ],
+        [
+          0.0342,
+          0.1992
+        ],
+        [
+          0.0342,
+          0.203
+        ],
+        [
+          0.0338,
+          0.209
+        ],
+        [
+          0.0331,
+          0.217
+        ],
+        [
+          0.0323,
+          0.225
+        ],
+        [
+          0.0313,
+          0.232
+        ],
+        [
+          0.0304,
+          0.237
+        ],
+        [
+          0.0294,
+          0.241
+        ],
+        [
+          0.0278,
+          0.245
+        ],
+        [
+          0.0255,
+          0.248
+        ],
+        [
+          0.022,
+          0.25
+        ],
+        [
+          0.017,
+          0.2513
+        ],
+        [
+          0.01,
+          0.2519
+        ],
+        [
+          0.0,
+          0.252
+        ]
+      ],
+      "cavity": {
+        "radius": 0.031,
+        "z0": 0.185,
+        "z1": 0.2355,
+        "note": "Boolean cavity leaves a hollow skirt with a bottom opening around the can body; the top remains solid above the well floor."
+      },
+      "well": {
+        "back_center_x": 0.0,
+        "half_width": 0.0165,
+        "front_x": 0.0255,
+        "floor_z": 0.241,
+        "top_z": 0.258,
+        "bevel": 0.0018,
+        "note": "U-shaped spray pocket cut into the cap top, with a deep back floor and a lower front lip so the recess is visible from the front. Depth and wall contours follow the top/front panels approximately.",
+        "front_lip": {
+          "x0": 0.02,
+          "x1": 0.06,
+          "half_width": 0.0155,
+          "floor_z": 0.246,
+          "top_z": 0.258,
+          "bevel": 0.0015
+        }
+      },
+      "seam_ring": {
+        "major": 0.0337,
+        "minor": 0.00015,
+        "z": 0.1984
+      },
+      "boss": {
+        "center": [
+          -0.002,
+          0.0
+        ],
+        "radius": 0.009,
+        "z0": 0.2408,
+        "z1": 0.2448
+      },
+      "boss_collar": {
+        "major": 0.009,
+        "minor": 0.0007,
+        "z": 0.2448
+      },
+      "actuator": {
+        "center": [
+          -0.002,
+          0.0
+        ],
+        "half": [
+          0.006,
+          0.0042,
+          0.0027
+        ],
+        "z0": 0.2446,
+        "z1": 0.25,
+        "bore": {
+          "radius": 0.00125,
+          "z": 0.2472
+        },
+        "ribs": {
+          "x_offsets": [
+            -0.0046,
+            -0.0028,
+            -0.001,
+            0.0008
+          ],
+          "half": [
+            0.0005,
+            0.0038,
+            0.0004
+          ],
+          "z": 0.25
+        },
+        "note": "Small dark-blue ribbed actuator on the boss. A real cylindrical bore passes through its front wall into a dark cavity; the spray direction is +X."
+      },
+      "nozzle_insert": {
+        "x0": -0.01,
+        "x1": 0.0005,
+        "radius": 0.0018,
+        "note": "Dark insert behind the real bore, forming a visible dark cavity rather than a painted dot."
+      },
+      "note": "Blue plastic over-cap rebuilt from the reference top/front/side panels, with a hollow skirt, U-shaped well and separate actuator. Internal valve, spring and dip tube are not modelled."
+    }
+  },
+  "material_profile": {
+    "label": {
+      "base_roughness": 0.34,
+      "grunge": 0.11,
+      "scratch": 0.08,
+      "metallic": 0.0,
+      "note": "Printed gloss label on a metal can; the visible surface is dielectric print. Metallic body underneath is a separate hidden part."
+    },
+    "cap": {
+      "base_rgb": [
+        17,
+        56,
+        176
+      ],
+      "base_roughness": 0.22,
+      "grunge": 0.1,
+      "scratch": 0.1,
+      "metallic": 0.0,
+      "note": "Glossy blue moulded plastic with light use scratches sampled from the rust photograph."
+    },
+    "metal": {
+      "base_rgb": [
+        188,
+        187,
+        182
+      ],
+      "base_roughness": 0.3,
+      "metallic": 1.0,
+      "note": "Bright brushed aluminium base/rim; metal reflection is applicable."
+    },
+    "bottom": {
+      "base_rgb": [
+        180,
+        178,
+        173
+      ],
+      "base_roughness": 0.34,
+      "metallic": 1.0,
+      "code_rgb": [
+        66,
+        64,
+        61
+      ],
+      "note": "Concave stamped aluminium base. The code is a stamped texture, not a printed label; metallic response is applicable."
+    },
+    "dark": {
+      "base_rgb": [
+        26,
+        28,
+        32
+      ],
+      "base_roughness": 0.34,
+      "metallic": 0.0,
+      "note": "Dark moulded actuator/insert plastic."
+    }
+  },
+  "reference_crop": {
+    "y0": 110,
+    "y1": 453,
+    "note": "Label band rows shared by the four side panels of this registered six-view sheet; caps above and the metal base below are excluded from the wrap."
+  },
+  "render": {
+    "front_span": 0.305,
+    "top_span": 0.085,
+    "turntable_directions": 24,
+    "turntable_elevation": 0.12
+  }
+}
