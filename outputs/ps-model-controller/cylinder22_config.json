@@ -1,0 +1,258 @@
+{
+  "version": "cylinder22-parametric-v1",
+  "number": 22,
+  "description": "22 号气缸（ISO 15552 风格的拉杆式气动缸）分部件重建。以原照可见结构为主，六视图仅作未标定的外观与背侧拓扑参考。",
+  "units": "meters",
+  "shape_basis": "source_photo_visible_structure+uncalibrated_six_view_layout",
+  "orientation": {
+    "axis": "Y",
+    "front_rod_end": "-Y",
+    "up": "+Z",
+    "note": "与原模型库坐标约定一致：Z 向上。缸体轴线沿 Y，前端（活塞杆端）在 -Y，后端在 +Y。"
+  },
+  "scale_note": "按原照与六视图的像素比例及 ISO 15552/SC 系列 80 mm 缸径的合理比例设置工作尺度（端盖约 108 mm 见方、缸筒外径约 83 mm、总长约 0.35 m）。这些不是对实物的测量值。",
+  "dimensions": {
+    "cap": {
+      "size_x": 0.108,
+      "size_z": 0.108,
+      "thickness": 0.030,
+      "bevel": 0.004,
+      "front_y0": -0.145,
+      "front_y1": -0.115,
+      "rear_y0": 0.115,
+      "rear_y1": 0.145,
+      "corner_hole_radius": 0.0052,
+      "corner_offset_x": 0.037,
+      "corner_offset_z": 0.037,
+      "counterbore_radius": 0.0105,
+      "counterbore_depth": 0.005,
+      "rod_hole_radius": 0.0127,
+      "note": "端盖为带圆角/倒角的方形铸铝件；四角有贯穿拉杆孔和外端面沉孔；前端盖中心有活塞杆通孔。"
+    },
+    "barrel": {
+      "radius": 0.0415,
+      "y0": -0.115,
+      "y1": 0.115,
+      "seam_radius": 0.0416,
+      "seam_minor": 0.0012,
+      "seam_y": 0.1132,
+      "note": "缸筒为两端被端盖遮住的封闭圆柱；端盖接缝处加细暗环表现装配阴影。"
+    },
+    "tie_rods": {
+      "radius": 0.0045,
+      "offset_x": 0.037,
+      "offset_z": 0.037,
+      "y0": -0.1454,
+      "y1": 0.1454,
+      "collar_y": 0.1125,
+      "collar_major": 0.0062,
+      "collar_minor": 0.0017,
+      "nut_radius": 0.0092,
+      "nut_thickness": 0.005,
+      "nut_y_front": -0.1424,
+      "nut_y_rear": 0.1424,
+      "note": "四根贯穿拉杆；两端沉孔内黄铜色螺母，缸筒端部有黑色防振/密封环。"
+    },
+    "rod": {
+      "radius": 0.0125,
+      "y0": -0.146,
+      "y1": -0.170,
+      "thread_core_radius": 0.0112,
+      "thread_y0": -0.170,
+      "thread_y1": -0.2175,
+      "thread_major": 0.0112,
+      "thread_tube": 0.00070,
+      "thread_pitch": 0.002,
+      "nut1_y": -0.176,
+      "nut2_y": -0.195,
+      "nut_radius": 0.0185,
+      "nut_thickness": 0.013,
+      "washer_y": -0.162,
+      "washer_major": 0.0155,
+      "washer_minor": 0.0015,
+      "end_y": -0.218,
+      "end_dot_radius": 0.0022,
+      "note": "镀铬活塞杆；外端螺纹段直径略小于杆身，两只六角螺母；杆端中心小暗点按原照近似。螺纹螺距/牙型为推断。"
+    },
+    "gland": {
+      "radius": 0.026,
+      "y0": -0.146,
+      "y1": -0.157,
+      "bevel": 0.0018,
+      "seal_major": 0.0205,
+      "seal_minor": 0.0013,
+      "seal_y": -0.1565,
+      "note": "前端盖中央防尘/导向凸台；外缘黑色刮尘环。内部密封结构未建模。"
+    },
+    "ports": {
+      "front_y": -0.126,
+      "rear_y": 0.126,
+      "x": 0.0,
+      "bore_radius": 0.0083,
+      "bore_depth": 0.024,
+      "top_z": 0.054,
+      "ring_inner": 0.0090,
+      "ring_outer": 0.0170,
+      "ring_z": 0.05445,
+      "tab_size": [0.0050, 0.0040, 0.0006],
+      "tab_center_y_front": -0.1423,
+      "tab_center_y_rear": 0.1423,
+      "thread_major": 0.0079,
+      "thread_tube": 0.0006,
+      "thread_pitch": 0.0015,
+      "thread_top_z": 0.0525,
+      "thread_bottom_z": 0.0330,
+      "bottom_disc_z": 0.0315,
+      "note": "两个端盖顶面各有一个 G3/8 螺纹进气口。真实盲孔 + 内部螺旋螺纹；绿色圆环与短指针按原照。底面板也画出绿色环，与原始照片及正视/背视/顶视面板矛盾，因此未据此在底面重复开孔。"
+    },
+    "corner_counterbores": {
+      "note": "四角拉杆孔为真实贯穿孔；两端面各有 4 个浅沉孔，黄铜色螺母嵌在其中。"
+    },
+    "side_grub": {
+      "x_face": 0.054,
+      "y_front": -0.130,
+      "y_rear": 0.130,
+      "z": 0.0,
+      "radius": 0.0045,
+      "depth": 0.004,
+      "screw_radius": 0.0041,
+      "screw_thickness": 0.0014,
+      "note": "两侧端盖侧面各有一个小暗色螺塞（原照可见一侧，另一侧及后盖按对称推断）。功能未知。"
+    },
+    "front_ribs": {
+      "inner_radius": 0.029,
+      "outer_radius": 0.045,
+      "half_width": 0.0030,
+      "thickness": 0.0050,
+      "center_y": -0.1475,
+      "note": "前端面 4 条放射状加强筋；原照可见，具体截面为近似。"
+    },
+    "rear_boss": {
+      "radius": 0.030,
+      "y0": 0.145,
+      "y1": 0.151,
+      "groove_major": 0.020,
+      "groove_minor": 0.0007,
+      "groove_y": 0.1511,
+      "note": "后端盖外端面中央圆凸台和 4 条放射筋；背面内部结构不可见。"
+    },
+    "rear_ribs": {
+      "inner_radius": 0.029,
+      "outer_radius": 0.045,
+      "half_width": 0.0030,
+      "thickness": 0.0050,
+      "center_y": 0.1475
+    }
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "aluminum": 0,
+      "cast": 1,
+      "chrome": 2,
+      "steel": 3,
+      "brass": 4,
+      "green": 5,
+      "rubber": 6,
+      "dark_steel": 7,
+      "thread": 8,
+      "port_ring": 9
+    },
+    "note": "4x4 图集，每格 512 px。R 通道保留 255；G=粗糙度；B=金属度。底色为 sRGB。"
+  },
+  "material_profile": {
+    "aluminum": {
+      "base_rgb": [198, 198, 194],
+      "roughness": 0.34,
+      "metallic": 1.0,
+      "rust_amount": 0.16,
+      "note": "阳极氧化/拉丝铝缸筒；金属反射适用。"
+    },
+    "cast": {
+      "base_rgb": [128, 128, 126],
+      "roughness": 0.53,
+      "metallic": 0.72,
+      "rust_amount": 0.38,
+      "note": "灰色铸铝端盖；表面粗糙但仍为金属，保留低强度金属反射。"
+    },
+    "chrome": {
+      "base_rgb": [204, 204, 207],
+      "roughness": 0.12,
+      "metallic": 1.0,
+      "rust_amount": 0.03,
+      "note": "镀铬活塞杆。"
+    },
+    "steel": {
+      "base_rgb": [188, 188, 190],
+      "roughness": 0.22,
+      "metallic": 1.0,
+      "rust_amount": 0.14,
+      "note": "拉杆与六角螺母的镍/锌镀层钢；颜色略暗于镀铬杆。"
+    },
+    "brass": {
+      "base_rgb": [176, 146, 70],
+      "roughness": 0.30,
+      "metallic": 1.0,
+      "rust_amount": 0.12,
+      "note": "端盖四角沉孔内的黄铜色螺母/嵌件；原照颜色偏金黄，真实材质可能为镀锌钢，未实测。"
+    },
+    "green": {
+      "base_rgb": [17, 128, 66],
+      "roughness": 0.45,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "进气口绿色印刷标记；非金属，金属反射检查不适用于该标记。"
+    },
+    "rubber": {
+      "base_rgb": [17, 17, 18],
+      "roughness": 0.78,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "黑色密封/防振环；非金属。"
+    },
+    "dark_steel": {
+      "base_rgb": [55, 55, 55],
+      "roughness": 0.38,
+      "metallic": 0.85,
+      "rust_amount": 0.10,
+      "note": "侧面螺塞等深色金属件。"
+    },
+    "thread": {
+      "base_rgb": [172, 172, 170],
+      "roughness": 0.30,
+      "metallic": 1.0,
+      "rust_amount": 0.22,
+      "note": "活塞杆螺纹与进气口内螺纹；螺纹牙型/深度为近似。"
+    },
+    "port_ring": {
+      "base_rgb": [17, 128, 66],
+      "roughness": 0.45,
+      "metallic": 0.0,
+      "note": "绿色进气口环，带浅色 G3/8 字样；字样位置与字体为近似。"
+    }
+  },
+  "reference": {
+    "file": "气动缸六视图产品布局.png",
+    "role": "visual_match_unverified",
+    "sha256": "9dd179c9f85d118a763aab72e6fc4c45612ceb8d076405d125daccfcd6dafce2",
+    "note": "按外观匹配的拉杆式气缸六视图；图片未提供相机标定，结构不能视为实测。底面板与原始照片在绿色环位置上有矛盾，未据此重复开孔。"
+  },
+  "render": {
+    "six_view_resolution": 640,
+    "six_view_samples": 16,
+    "detail_resolution": 640,
+    "detail_samples": 20,
+    "turntable_resolution": 320,
+    "turntable_samples": 6
+  },
+  "limitations": [
+    "六视图参考未标定；整体尺寸、孔径、螺纹规格、孔深和装配关系未实测。",
+    "原照是 3/4 视角，不能直接作为正交测量；旧模型库相机只用于诊断。",
+    "背面、端盖内部、活塞/密封内部、缸筒壁厚和真实进气通道为推断。",
+    "黄铜色可能是光照/镀层颜色，不证明真实材质；绿色印刷字样位置为近似。",
+    "没有安装附件或支撑；落稳、接触、现场尺度和场景光照融合未验证。"
+  ]
+}
