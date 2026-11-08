@@ -458,6 +458,39 @@ def register_rebuilt_candidate_10(folder=None):
 
 
 register_rebuilt_candidate_10()
+
+
+def register_rebuilt_candidate_11(folder=None):
+    """Register the QL5 screw-jack candidate separately; keep it manual-only."""
+    folder = folder or ROOT/'outputs/11千斤顶1-六视图重建-v3'
+    file = folder/'result.json'
+    if not file.is_file():
+        return
+    try:
+        info=json.loads(file.read_text(encoding='utf8'))
+        original=next(r for r in ROWS.values() if r['number']==11 and not r.get('manual_only'))
+        mesh=folder/'mesh.glb'
+        reference=Path(info['reference'])
+        if (info.get('draft') or info.get('status')!='review'
+                or info.get('shape_basis')!='source_photo_with_uncalibrated_visual_match_reference'
+                or info.get('reference_role')!='visual_match_unverified'
+                or info.get('version')!='jack11-parametric-v1'
+                or info.get('number')!=11 or info.get('asset_id')!=original['asset_id']
+                or info.get('original_mesh_sha256')!=original['mesh_sha256']
+                or info.get('inputs',{}).get('rust')!=original['rust_sha256']
+                or not mesh.is_file() or digest(mesh)!=info.get('mesh_sha256')
+                or not reference.is_file() or digest(reference)!=info.get('reference_sha256')):return
+        key=original['asset_id']+'-rebuild-v1'
+        ROWS[key]={**original, 'asset_id':key, 'file':'QL5 螺旋千斤顶（分部件重建 v1）',
+                   'mesh':str(mesh), 'mesh_sha256':info['mesh_sha256'], 'status':'review',
+                   'reason':'六视图未标定且面板不一致（杠杆圆管/矩形杆、提环侧向）；齿轮座内部、拉钮、提环背面、5T 浮雕、标签重绘与隐藏面为推断；落稳与现场尺度未验证',
+                   'reconstruction':{**original['reconstruction'], 'fidelity':info['source_fidelity_diagnostic']},
+                   'manual_only':True, 'version':info['version'], 'shape_basis':info['shape_basis'],
+                   'model_review':'pending', 'scene_validation':'pending'}
+    except (OSError, ValueError, KeyError, StopIteration, TypeError):return
+
+
+register_rebuilt_candidate_11()
 SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
@@ -564,6 +597,10 @@ async def model_review_page_10(request):
     return FileResponse(HERE/'model-review-10.html')
 
 
+async def model_review_page_11(request):
+    return FileResponse(HERE/'model-review-11.html')
+
+
 REVIEW_FOLDERS = {
     1: 'outputs/01阀门-六视图重建-v7',
     2: 'outputs/02球阀-六视图重建-v1',
@@ -575,6 +612,7 @@ REVIEW_FOLDERS = {
     8: 'outputs/08分离过滤器-六视图重建-v3',
     9: 'outputs/09分离过滤器1-六视图重建-v4',
     10: 'outputs/10千斤顶-六视图重建-v2',
+    11: 'outputs/11千斤顶1-六视图重建-v3',
 }
 REVIEW_FILES = {
     1: {'board':'六视图-新旧对照.jpg', 'turntable':'转台-24方向.jpg', 'record':'result.json',
@@ -685,6 +723,22 @@ REVIEW_FILES = {
         'basebottom':'renders/detail-base-bottom.png',
         'releasevalve':'renders/detail-release-valve.png',
         'handlebar':'renders/detail-handle-bar.png',
+        'surface':'renders/detail-surface.png'},
+    11: {'board':'六视图-新旧对照.jpg', 'turntable':'转台-24方向.jpg', 'record':'result.json',
+        'browser':'浏览器核验.json', 'blend':'model.blend', 'metal':'材质-同光照对照.jpg',
+        'light':'材质-变光检查.jpg', 'metalreflect':'金属反射-变光对照.jpg',
+        'local':'局部检查.jpg', 'isolated':'结构开口-隔离检查.jpg',
+        'front':'renders/new-front.png', 'levertip':'renders/detail-lever-tip.png',
+        'leversocket':'renders/detail-lever-socket.png',
+        'knob':'renders/detail-knob.png',
+        'mechanismside':'renders/detail-mechanism-side.png',
+        'loop':'renders/detail-loop.png',
+        'loopmounts':'renders/detail-loop-mounts.png',
+        'collar':'renders/detail-collar.png', 'screw':'renders/detail-screw.png',
+        'cap':'renders/detail-cap.png', 'label':'renders/detail-label.png',
+        'emboss':'renders/detail-emboss.png',
+        'basefront':'renders/detail-base-front.png',
+        'basebottom':'renders/detail-base-bottom.png',
         'surface':'renders/detail-surface.png'},
 }
 
@@ -1338,6 +1392,7 @@ routes = [Route('/', index), Route('/review/01', model_review_page),
           Route('/review/08', model_review_page_08),
           Route('/review/09', model_review_page_09),
           Route('/review/10', model_review_page_10),
+          Route('/review/11', model_review_page_11),
           Route('/api/review/{number:int}/{name}', model_review_file),
           Route('/api/assets', assets), Route('/api/model/{asset}', model),
           Route('/api/sessions', create_session, methods=['POST']),
