@@ -1,0 +1,513 @@
+{
+  "version": "cylinders19-parametric-v1",
+  "number": 19,
+  "description": "六只独立气瓶的分部件重建；以原照轮廓比例为主，六视图仅作未标定的单只蓝色气瓶类别参考，不当作实测。",
+  "scale_m_per_px": 0.000858695652173913,
+  "baseline_y_px": 1218.0,
+  "photo_center_x_px": 663.6666666666666,
+  "row": {
+    "axis": "Y",
+    "front": "+X",
+    "up": "+Z",
+    "note": "与原模型库一致：源相机在 +X，罐排沿 Y，Z 向上。"
+  },
+  "radial_segments": 128,
+  "bevel_m": 0.0015,
+  "bottom": {
+    "height_factor": 0.85,
+    "flat_radius_factor": 0.55,
+    "note": "照片仅显示底部外轮廓；底面中心形状为推断，采用圆底加小平面。"
+  },
+  "shoulder": {
+    "control_1": 0.55,
+    "control_2": 0.45,
+    "samples": 18,
+    "note": "三次贝塞尔从筒身到瓶颈，两端切线竖直；由原照正投影宽度拟合。"
+  },
+  "cylinders": [
+    {
+      "id": "red",
+      "label": "红色高瓶",
+      "tile": 0,
+      "y": -0.367236,
+      "radius": 0.077712,
+      "height": 1.027,
+      "source_px": {
+        "center_x": 236.0,
+        "width": 181,
+        "top": 20,
+        "bottom": 1215
+      },
+      "body_top": 0.874,
+      "neck_r": 0.0275,
+      "neck_top": 0.936,
+      "top": "cap",
+      "cap": {
+        "radius": 0.032,
+        "base_z": 0.93,
+        "top_z": 1.027,
+        "waist_r": 0.0275
+      }
+    },
+    {
+      "id": "green1",
+      "label": "绿色气瓶一",
+      "tile": 1,
+      "y": -0.207518,
+      "radius": 0.071701,
+      "height": 0.978913,
+      "source_px": {
+        "center_x": 422.0,
+        "width": 167,
+        "top": 79,
+        "bottom": 1218
+      },
+      "body_top": 0.72,
+      "neck_r": 0.0391,
+      "neck_top": 0.823,
+      "top": "guard",
+      "guard": {
+        "base_z": 0.812,
+        "base_r": 0.039,
+        "body_r": 0.0435,
+        "top_z": 0.978,
+        "hole": {
+          "y": 0.0219,
+          "z": 0.926,
+          "semi_y": 0.00645,
+          "semi_z": 0.01545
+        },
+        "label": {
+          "y": 0.008,
+          "z": 0.88,
+          "width_y": 0.018,
+          "height_z": 0.026
+        }
+      }
+    },
+    {
+      "id": "green2",
+      "label": "绿色气瓶二",
+      "tile": 2,
+      "y": -0.059822,
+      "radius": 0.06569,
+      "height": 0.844957,
+      "source_px": {
+        "center_x": 594.0,
+        "width": 153,
+        "top": 234,
+        "bottom": 1217
+      },
+      "body_top": 0.657,
+      "neck_r": 0.0378,
+      "neck_top": 0.711,
+      "top": "guard",
+      "guard": {
+        "base_z": 0.704,
+        "base_r": 0.0378,
+        "body_r": 0.0455,
+        "top_z": 0.845,
+        "hole": {
+          "y": 0.0146,
+          "z": 0.7907,
+          "semi_y": 0.0073,
+          "semi_z": 0.0142
+        },
+        "label": {
+          "y": 0.004,
+          "z": 0.748,
+          "width_y": 0.016,
+          "height_z": 0.024
+        }
+      }
+    },
+    {
+      "id": "blue1",
+      "label": "蓝色气瓶一",
+      "tile": 3,
+      "y": 0.080574,
+      "radius": 0.063543,
+      "height": 0.717011,
+      "source_px": {
+        "center_x": 757.5,
+        "width": 148,
+        "top": 383,
+        "bottom": 1217
+      },
+      "body_top": 0.542,
+      "neck_r": 0.0206,
+      "neck_top": 0.617,
+      "top": "handwheel",
+      "valve": {
+        "body_r": 0.016,
+        "body_z0": 0.617,
+        "body_z1": 0.698,
+        "hex_r": 0.021,
+        "hex_z0": 0.65,
+        "hex_z1": 0.666,
+        "block": {
+          "center_x": 0.0,
+          "center_y": 0.0,
+          "center_z": 0.642,
+          "size_x": 0.03,
+          "size_y": 0.038,
+          "size_z": 0.024
+        },
+        "outlet": {
+          "axis": "-Y",
+          "z": 0.645,
+          "y0": -0.052,
+          "y1": -0.018,
+          "radius": 0.012,
+          "nut_r": 0.017,
+          "nut_y0": -0.04,
+          "nut_y1": -0.028,
+          "nipple_r": 0.006,
+          "nipple_y0": -0.06,
+          "nipple_y1": -0.052
+        },
+        "handwheel": {
+          "radius": 0.0335,
+          "z0": 0.699,
+          "z1": 0.713,
+          "lobes": 10,
+          "hub_r": 0.011
+        }
+      }
+    },
+    {
+      "id": "blue2",
+      "label": "蓝色气瓶二",
+      "tile": 4,
+      "y": 0.212384,
+      "radius": 0.061397,
+      "height": 0.574467,
+      "source_px": {
+        "center_x": 911.0,
+        "width": 143,
+        "top": 550,
+        "bottom": 1218
+      },
+      "body_top": 0.44,
+      "neck_r": 0.0176,
+      "neck_top": 0.49,
+      "top": "regulator",
+      "regulator": {
+        "center_z": 0.54,
+        "body_r": 0.0215,
+        "body_x0": -0.018,
+        "body_x1": 0.016,
+        "stem_r": 0.011,
+        "stem_z0": 0.489,
+        "stem_z1": 0.521,
+        "gauge": {
+          "radius": 0.0235,
+          "center_z": 0.55,
+          "front_x": 0.019,
+          "bezel_major": 0.024,
+          "bezel_minor": 0.0025
+        },
+        "top_knob": {
+          "radius": 0.019,
+          "center_z": 0.566,
+          "lobes": 12,
+          "thickness": 0.012,
+          "hub_r": 0.0065
+        },
+        "left_knob": {
+          "radius": 0.017,
+          "center_y": -0.03,
+          "center_z": 0.552,
+          "lobes": 12,
+          "thickness": 0.012,
+          "hub_r": 0.006
+        },
+        "outlet": {
+          "z": 0.534,
+          "y0": 0.017,
+          "y1": 0.044,
+          "radius": 0.0065,
+          "nut_r": 0.01,
+          "nut_y0": 0.017,
+          "nut_y1": 0.026
+        }
+      }
+    },
+    {
+      "id": "blue3",
+      "label": "蓝色气瓶三",
+      "tile": 5,
+      "y": 0.341618,
+      "radius": 0.05925,
+      "height": 0.44738,
+      "source_px": {
+        "center_x": 1061.5,
+        "width": 138,
+        "top": 699,
+        "bottom": 1219
+      },
+      "body_top": 0.281,
+      "neck_r": 0.0206,
+      "neck_top": 0.343,
+      "top": "regulator",
+      "regulator": {
+        "center_z": 0.4,
+        "body_r": 0.0195,
+        "body_x0": -0.016,
+        "body_x1": 0.015,
+        "stem_r": 0.01,
+        "stem_z0": 0.342,
+        "stem_z1": 0.382,
+        "gauge": {
+          "radius": 0.0205,
+          "center_z": 0.412,
+          "front_x": 0.0175,
+          "bezel_major": 0.021,
+          "bezel_minor": 0.0022
+        },
+        "top_knob": {
+          "radius": 0.0165,
+          "center_z": 0.43,
+          "lobes": 12,
+          "thickness": 0.011,
+          "hub_r": 0.0058
+        },
+        "left_knob": {
+          "radius": 0.015,
+          "center_y": -0.027,
+          "center_z": 0.407,
+          "lobes": 12,
+          "thickness": 0.011,
+          "hub_r": 0.0055
+        },
+        "outlet": {
+          "z": 0.392,
+          "y0": 0.015,
+          "y1": 0.039,
+          "radius": 0.0058,
+          "nut_r": 0.009,
+          "nut_y0": 0.015,
+          "nut_y1": 0.023
+        }
+      }
+    }
+  ],
+  "material_profile": {
+    "paint": {
+      "red": {
+        "base_rgb": [
+          200,
+          33,
+          38
+        ],
+        "roughness": 0.3,
+        "metallic": 0.0
+      },
+      "green1": {
+        "base_rgb": [
+          77,
+          115,
+          56
+        ],
+        "roughness": 0.31,
+        "metallic": 0.0
+      },
+      "green2": {
+        "base_rgb": [
+          92,
+          134,
+          104
+        ],
+        "roughness": 0.32,
+        "metallic": 0.0
+      },
+      "blue1": {
+        "base_rgb": [
+          75,
+          111,
+          160
+        ],
+        "roughness": 0.31,
+        "metallic": 0.0
+      },
+      "blue2": {
+        "base_rgb": [
+          86,
+          136,
+          183
+        ],
+        "roughness": 0.33,
+        "metallic": 0.0
+      },
+      "blue3": {
+        "base_rgb": [
+          65,
+          110,
+          163
+        ],
+        "roughness": 0.32,
+        "metallic": 0.0
+      }
+    },
+    "rust": {
+      "base_rgb": [
+        128,
+        80,
+        47
+      ],
+      "dark_rgb": [
+        102,
+        70,
+        48
+      ],
+      "roughness": 0.86,
+      "metallic": 0.0,
+      "band_v": 0.058,
+      "fade_v": 0.055
+    },
+    "brass": {
+      "base_rgb": [
+        140,
+        112,
+        70
+      ],
+      "roughness": 0.34,
+      "metallic": 1.0
+    },
+    "chrome": {
+      "base_rgb": [
+        206,
+        202,
+        194
+      ],
+      "roughness": 0.18,
+      "metallic": 1.0
+    },
+    "gauge": {
+      "base_rgb": [
+        236,
+        233,
+        224
+      ],
+      "roughness": 0.24,
+      "metallic": 0.0
+    },
+    "plastic_blue": {
+      "base_rgb": [
+        55,
+        91,
+        142
+      ],
+      "roughness": 0.43,
+      "metallic": 0.0
+    },
+    "label_white": {
+      "base_rgb": [
+        226,
+        224,
+        214
+      ],
+      "roughness": 0.68,
+      "metallic": 0.0
+    },
+    "dark": {
+      "base_rgb": [
+        78,
+        76,
+        72
+      ],
+      "roughness": 0.52,
+      "metallic": 0.22
+    }
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "red": 0,
+      "green1": 1,
+      "green2": 2,
+      "blue1": 3,
+      "blue2": 4,
+      "blue3": 5,
+      "brass": 6,
+      "chrome": 7,
+      "gauge": 8,
+      "plastic_blue": 9,
+      "label_white": 10,
+      "dark": 11
+    },
+    "samples": {
+      "red": [
+        180,
+        500,
+        300,
+        720
+      ],
+      "green1": [
+        360,
+        500,
+        480,
+        720
+      ],
+      "green2": [
+        540,
+        500,
+        650,
+        720
+      ],
+      "blue1": [
+        700,
+        700,
+        820,
+        900
+      ],
+      "blue2": [
+        850,
+        900,
+        970,
+        1050
+      ],
+      "blue3": [
+        1000,
+        1000,
+        1120,
+        1150
+      ],
+      "brass": [
+        730,
+        440,
+        780,
+        480
+      ],
+      "chrome": [
+        910,
+        585,
+        935,
+        610
+      ],
+      "plastic_blue": [
+        730,
+        390,
+        785,
+        412
+      ]
+    }
+  },
+  "render": {
+    "six_view_resolution": 768,
+    "six_view_samples": 24,
+    "detail_resolution": 768,
+    "detail_samples": 28,
+    "turntable_resolution": 384,
+    "turntable_samples": 8
+  },
+  "reference": {
+    "file": "蓝色气瓶六视图技术展示.png",
+    "role": "category_reference",
+    "sha256": "db523981aaa81e97f9dc260920408806e6cf0512320cd95d6330078a8bcec8f7",
+    "note": "参考图是一只带减压表的蓝色气瓶；原素材是六只不同颜色和尺寸的气瓶。参考只用于蓝色瓶的阀/表拓扑，不作为数量、尺寸或实测依据。"
+  }
+}
