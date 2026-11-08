@@ -524,6 +524,40 @@ def register_rebuilt_candidate_12(folder=None):
 
 
 register_rebuilt_candidate_12()
+
+
+def register_rebuilt_candidate_13(folder=None):
+    """Register the two-can sealant-canister candidate separately; keep it manual-only."""
+    folder = folder or ROOT/'outputs/13密封胶罐-六视图重建-v2'
+    file = folder/'result.json'
+    if not file.is_file():
+        return
+    try:
+        info=json.loads(file.read_text(encoding='utf8'))
+        original=next(r for r in ROWS.values() if r['number']==13 and not r.get('manual_only'))
+        mesh=folder/'mesh.glb'
+        reference=Path(info['reference'])
+        if (info.get('draft') or info.get('status')!='review'
+                or info.get('shape_basis')!='source_photo_with_uncalibrated_category_reference'
+                or info.get('reference_role')!='category_reference_unverified'
+                or info.get('version')!='sealant13-parametric-v1'
+                or info.get('number')!=13 or info.get('asset_id')!=original['asset_id']
+                or info.get('original_mesh_sha256')!=original['mesh_sha256']
+                or info.get('inputs',{}).get('rust')!=original['rust_sha256']
+                or not mesh.is_file() or digest(mesh)!=info.get('mesh_sha256')
+                or not reference.is_file() or digest(reference)!=info.get('reference_sha256')
+                or not info.get('manual_only')):return
+        key=original['asset_id']+'-rebuild-v1'
+        ROWS[key]={**original, 'asset_id':key, 'file':'13 密封胶罐（两只白色塑料罐，分部件重建 v1）',
+                   'mesh':str(mesh), 'mesh_sha256':info['mesh_sha256'], 'status':'review',
+                   'reason':'六视图为单只干净罐的未标定类别参考，原照为两只使用过的罐；罐间距/朝向、盖内配合、壁厚、卡扣机构、底脚功能、回收标志细节与隐藏面为推断；全塑料，金属反射不适用；落稳与现场尺度未验证',
+                   'reconstruction':{**original['reconstruction'], 'fidelity':info['source_fidelity_diagnostic']},
+                   'manual_only':True, 'version':info['version'], 'shape_basis':info['shape_basis'],
+                   'model_review':'pending', 'scene_validation':'pending'}
+    except (OSError, ValueError, KeyError, StopIteration, TypeError):return
+
+
+register_rebuilt_candidate_13()
 SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
@@ -638,6 +672,10 @@ async def model_review_page_12(request):
     return FileResponse(HERE/'model-review-12.html')
 
 
+async def model_review_page_13(request):
+    return FileResponse(HERE/'model-review-13.html')
+
+
 REVIEW_FOLDERS = {
     1: 'outputs/01阀门-六视图重建-v7',
     2: 'outputs/02球阀-六视图重建-v1',
@@ -651,6 +689,7 @@ REVIEW_FOLDERS = {
     10: 'outputs/10千斤顶-六视图重建-v2',
     11: 'outputs/11千斤顶1-六视图重建-v3',
     12: 'outputs/12千斤顶2-六视图重建-v3',
+    13: 'outputs/13密封胶罐-六视图重建-v2',
 }
 REVIEW_FILES = {
     1: {'board':'六视图-新旧对照.jpg', 'turntable':'转台-24方向.jpg', 'record':'result.json',
@@ -799,6 +838,18 @@ REVIEW_FILES = {
         'basebottom':'renders/detail-base-bottom.png',
         'rearframe':'renders/detail-rear-frame.png',
         'surface':'renders/detail-surface.png'},
+    13: {'board':'六视图-新旧对照.jpg', 'turntable':'转台-24方向.jpg', 'record':'result.json',
+         'browser':'浏览器核验.json', 'blend':'model.blend',
+         'metal':'材质-同光照对照.jpg', 'light':'材质-变光检查.jpg',
+         'surfacereflect':'表面反射-变光对照.jpg',
+         'local':'局部检查.jpg', 'isolated':'结构开口-隔离检查.jpg',
+         'front':'renders/new-front.png', 'singlefront':'renders/single-front.png',
+         'lidtop':'renders/detail-lid-top.png', 'lidrim':'renders/detail-lid-rim.png',
+         'seamlatch':'renders/detail-seam-latch.png',
+         'frontlatch':'renders/detail-front-latch.png',
+         'bottom':'renders/detail-bottom.png', 'bottommark':'renders/detail-bottom-mark.png',
+         'cangap':'renders/detail-can-gap.png', 'body':'renders/detail-body.png',
+         'surface':'renders/detail-surface.png'},
 }
 
 
@@ -1453,6 +1504,7 @@ routes = [Route('/', index), Route('/review/01', model_review_page),
           Route('/review/10', model_review_page_10),
           Route('/review/11', model_review_page_11),
           Route('/review/12', model_review_page_12),
+          Route('/review/13', model_review_page_13),
           Route('/api/review/{number:int}/{name}', model_review_file),
           Route('/api/assets', assets), Route('/api/model/{asset}', model),
           Route('/api/sessions', create_session, methods=['POST']),
