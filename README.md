@@ -6,6 +6,20 @@
 
 最近的小范围试跑：`outputs/固定场景-处理后模型小范围测试-20261109/`。四件单件预览的网页/Blender 投影一致性较高，但场景支撑、真实尺度、遮挡和光向仍未验证；详情见[预览总览](outputs/固定场景-处理后模型小范围测试-20261109/index.html)。这些预览没有通过正式合成验收。
 
+四件修订样片的承托候选筛查：`outputs/四件修订-承托候选-20261109/`。程序使用固定场景缓存，为 10、13、19-1、31 自动筛选承托站点并渲染三维视角；10、13、19-1 各保留 3 个待审候选，31 在 8 个站点、4 个水平视角下为 `no_candidate`。所有候选的源可见面、遮挡、现场尺度和 Photoshop 均未验证；落稳使用整件凸包单刚体近似，部件级支撑未验证。查看[筛查总览](outputs/四件修订-承托候选-20261109/index.html)和 `summary.json`。
+
+```powershell
+& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/mesh_support_scan.py `
+  --manifest 'outputs/人工反馈修订-20261109-千斤顶去杆-v1/manifest.json' `
+  --ids 10,13,19-1,31 `
+  --background 'external/异物生成/input/backgrounds/2026_08_06_53_4_zhongfei1_70_zhongfei2_20_medium_10_9.jpg' `
+  --out 'outputs/四件修订-承托候选-20261109' `
+  --target 10:296 --target 13:371 --target 19-1:243 --target 31:475 `
+  --max-sites 8 --yaws 0,90,180,270 --budget 0
+```
+
+输出目录须为新目录；`--budget` 只允许 0，场景分析缓存缺失时停止并写明原因。`--sites-only` 可先只检查承托站点和同层参照。
+
 从完整迁移包恢复的 Windows 项目。代码在 `outputs/ps-model-controller`；原图、模型、历史结果和虚拟环境保存在本机工作区，Git 只跟踪代码、配置示例和运行说明。查看 [控制器说明](outputs/ps-model-controller/README.md)。
 
 39 件素材可建立可续跑的三维模型库，并按场景选择单件视角。原有正式合成试产仍使用 **03 轴承座、10 千斤顶、27 减震器、30 液压缸**；模型库中的待审模型不代表已通过正式合成验收。三维结构、承托、净空、源图可见面和视觉验收的门槛独立生效。

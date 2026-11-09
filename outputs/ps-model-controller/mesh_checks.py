@@ -83,7 +83,8 @@ def visible_source_fraction(source_ids, new_ids):
 def placement_gate(evidence):
     """Fail closed when one of the independent geometry checks is absent."""
     issues = []
-    if evidence.get("source_visible_fraction", 0) < .80:
+    fraction = evidence.get("source_visible_fraction")
+    if not isinstance(fraction, (int, float)) or fraction < .80:
         issues.append("unseen_surface")
     if not evidence.get("physics_stable", False):
         issues.append("unstable")
@@ -96,4 +97,20 @@ def placement_gate(evidence):
         issues.append("occlusion_unknown")
     if evidence.get("scene_scale") not in ("calibrated", "consistent_estimate"):
         issues.append("scene_scale_uncertain")
+    return issues
+
+
+def support_screening_gate(evidence):
+    """Support-only gate: physics and contacts are required, other evidence stays pending.
+
+    This is deliberately narrower than placement_gate.  It is used when the
+    revision has no verified source camera, so source visibility, occlusion and
+    scale must be reported as unknown rather than silently treated as passed.
+    """
+    issues = []
+    if not evidence.get("physics_stable", False):
+        issues.append("unstable")
+    parts = evidence.get("component_support", [])
+    if not parts or min(parts) < .90:
+        issues.append("unsupported_part")
     return issues

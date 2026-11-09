@@ -1,5 +1,13 @@
 # 项目进度与交接记录
 
+## 2026-11-09 · 四件修订样片承托候选筛查
+
+- **进度**：新增 `mesh_screening.py`、`mesh_support_scan.py`、`screening_settle_worker.py` 和 `checks_support_scan.py`；在固定场景上为 10、13、19-1、31 生成承托站点和三维视角候选。10、13、19-1 各保留 3 个 `candidate_pending_review` 候选；31 在 8 个站点、4 个水平视角下为 `no_candidate`。报告位于 `outputs/四件修订-承托候选-20261109/`，未提交大文件。
+- **原因**：最近的四件预览共用临时中心点，不能证明物体落在可靠承托面上；现有 `mesh_location_first.py` 需要原视角相机/透明蒙版和 fidelity 通过，无法直接用于没有源视角证据的人工反馈修订模型。需要一条只筛查承托、落稳和实际接触的独立路径，同时不把源可见面、遮挡或尺度伪装成通过。
+- **验证/结果**：`checks_support_scan.py` 11 项通过；`checks_mesh.py --blender ...` 36 项及 Blender CPU smoke 通过；`placement-web/checks_web.py` 23 项通过。完整四件筛查用时约 78 秒，16/16 个视角落稳，`model-usage.json` 为空数组，未调用 DeepSeek 或 Photoshop。10 的三个候选为 `site_anchor`，13 有两个候选在站点附近做受限搜索（约 38/42 px），19-1 三个候选为 `site_anchor`；所有候选 `contact_min=1.0`。31 的失败集中在 `insufficient_clearance` 和 `protected_frame`。
+- **未解决项**：所有候选的源可见面、遮挡、现场尺度、Photoshop 均未验证；落稳使用整件凸包单刚体近似，不能证明多部件装配体（例如 10 的 45 个对象）之间的真实支撑和装配关系；31 的 475 px 目标尺寸仅来自探索预览，没有现场尺度依据；14–39 的本机成品缺口仍未处理。
+- **下一步要求**：请用户检查筛查总览和 `summary.json`，确认 31 的目标尺寸及是否需要先补源视角/尺度证据；在用户反馈前不把候选送入正式视角、Photoshop 或验收流程，也不手工为单件挑位置或修图。
+
 ## 2026-11-09 · DeepSeek Harness 交接
 
 - **进度**：已把现有仓库登记到 DeepSeek Harness，工作区名称 `scrap-composite`，并在 Harness 中切换到该工作区。工作区指向 `D:\CodexProjects\experiments\scrap-composite`；保持原仓库，不复制模型、素材或 Git 历史。

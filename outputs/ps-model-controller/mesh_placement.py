@@ -7,7 +7,7 @@ import numpy as np
 from PIL import Image
 
 from batch_v2 import save_mask
-from mesh_checks import placement_gate
+from mesh_checks import placement_gate, support_screening_gate
 from metric_scale import silhouette_axes
 from photometry import fit_photo
 from relief import RELIEF_PRIORITY
@@ -119,8 +119,15 @@ def mesh_open_candidates(view, target, atlas, folder, eligible, *, limit=18):
 
 
 def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics_stable,
-             pixel_size_review=False,scale_at=None,fixed_anchor=None):
-    """Search only clear openings. Unknown intersecting scrap is never accepted."""
+             pixel_size_review=False,scale_at=None,fixed_anchor=None,screening=False):
+    """Search only clear openings. Unknown intersecting scrap is never accepted.
+
+    ``screening=True`` is a support-only diagnostic path.  It requires the
+    source visibility to remain unknown, and checks only physics and contacts.
+    Occlusion, scale and source visibility are recorded as unknown.
+    """
+    if screening and source_visible_fraction is not None:
+        raise ValueError("screening mode requires source_visible_fraction=None")
     if candidate["placement_mode"]!="open":
         raise NeedsReview("堆内钢件体积与物品的深度关系暂不能可靠核验")
     pixels,shade,bands=view
@@ -143,22 +150,34 @@ def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics
         ideal=np.asarray(fixed_anchor,dtype=float)-[l,t]-contact_offset
     step=max(4,round(.05*target))
     best=None
+    rejected={}
+    def reject(reason):
+        rejected[reason]=rejected.get(reason,0)+1
     offsets=(0,) if fixed_anchor is not None else (0,-step,step,-2*step,2*step)
     for dy in offsets:
         for dx in offsets:
             x,y=np.rint(ideal+[dx,dy]).astype(int)
             if x<0 or y<0 or x+w>support.shape[1] or y+h>support.shape[0]:
+                reject("outside_crop")
                 continue
             if t+y<math.ceil(.09*frame.height) or t+y+h>math.floor(.82*frame.height):
+                reject("protected_frame")
                 continue
             area=np.s_[y:y+h,x:x+w]
             bed=support[area]
             parts=[float((part&bed).sum()/part.sum()) for part in bands]
             if foreground[area][solid].any():
+                reject("foreground_overlap")
                 continue
-            gap=float(clearance[area][solid].min()) if solid.any() else 0
-            edge=float(plane_distance[area][solid].min()) if solid.any() else 0
-            if gap<max(6,.025*target) or edge<max(4,.012*target):
+            clearance_pixels = contact if screening else solid
+            gap=float(clearance[area][clearance_pixels].min()) if clearance_pixels.any() else 0
+            edge_pixels = contact if screening else solid
+            edge=float(plane_distance[area][edge_pixels].min()) if edge_pixels.any() else 0
+            if gap<max(6,.025*target):
+                reject("insufficient_clearance")
+                continue
+            if edge<max(4,.012*target):
+                reject("near_support_edge")
                 continue
             scale = None
             scale_status = candidate.get("scene_scale_status","unknown")
@@ -167,32 +186,43 @@ def open_fit(candidate,folder,atlas,frame,view,*,source_visible_fraction,physics
                 try:
                     scale = scale_at(location)
                 except NeedsReview:
+                    reject("scale_rejected")
                     continue
                 scale_status = {"estimated":"consistent_estimate","calibrated":"calibrated"}.get(scale["status"],"unknown")
             evidence={"source_visible_fraction":source_visible_fraction,"physics_stable":physics_stable,
                       "component_support":parts,"collision":False,"occlusion_order":"clear",
                       "scene_scale":scale_status}
-            issues=placement_gate(evidence)
-            if pixel_size_review:
-                # A human inspection image can use the approved pixel size
-                # with scale still explicitly unknown in its evidence.
-                issues=[issue for issue in issues if issue!="scene_scale_uncertain"]
+            if screening:
+                # This path has no verified source view or foreground mask.
+                # Keep every such check explicitly unknown; never call it clear.
+                evidence.update({"source_visible_fraction":None,"collision":"unknown",
+                                 "occlusion_order":"unknown","screening_only":True})
+                issues=support_screening_gate(evidence)
+            else:
+                issues=placement_gate(evidence)
+                if pixel_size_review:
+                    # A human inspection image can use the approved pixel size
+                    # with scale still explicitly unknown in its evidence.
+                    issues=[issue for issue in issues if issue!="scene_scale_uncertain"]
             if issues:
+                reject("gate:"+",".join(issues))
                 continue
             context=atlas.native_position_context(candidate["support_id"],l+x,t+y,solid,target,None,
                                                   measure_relief=True)
             if context["relief"]["kind"]=="raised":
+                reject("raised_surface")
                 continue
             rank=(scale_status!="unknown",RELIEF_PRIORITY.get(context["relief"]["kind"],0),
                   -context["cost"], min(parts),min(1.,gap/(.16*target)))
             if best is None or rank>best["rank"]:
-                best={"rank":rank,"origin":[int(l+x),int(t+y)],"pixels":pixels,
+                best={"rank":rank,"origin":[int(l+x),int(y+t)],"pixels":pixels,
                       "shadow":np.where(bed,shade,0),"scene_support":support,"scene_foreground":foreground,
                       "contacts":bands,"evidence":evidence,"context":context,"candidate":candidate,
                       "clearance_px":round(gap,2),"scale":scale,
                       "support_anchor_px":[l+x+float(cx.mean()),t+y+float(cy.mean())]}
     if best is None:
-        raise NeedsReview("实际三维轮廓、部件接触点或场景尺度未通过空位检查")
+        detail=", ".join(f"{key}:{value}" for key,value in sorted(rejected.items())) or "no_offsets"
+        raise NeedsReview("实际三维轮廓、部件接触点或场景尺度未通过空位检查（"+detail+"）")
     return best
 
 
