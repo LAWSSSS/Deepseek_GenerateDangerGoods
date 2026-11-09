@@ -216,6 +216,13 @@ class PlacementChecks(unittest.TestCase):
         response=self.client.post(self.url+'/state',json={**self.state,'azimuth':360})
         self.assertEqual(response.status_code,200)
         self.assertEqual(response.json()['state']['azimuth'],360)
+        response=self.client.post(self.url+'/state',json={**self.state,'rot_x':30,'rot_y':-20,'rot_z':45})
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json()['state']['rot_x'],30)
+        self.assertEqual(response.json()['state']['rot_y'],-20)
+        self.assertEqual(response.json()['state']['rot_z'],45)
+        response=self.client.post(self.url+'/state',json={**self.state,'rot_x':181})
+        self.assertEqual(response.status_code,400)
         with self.assertRaises(ValueError):server.validate_state({**self.state,'size':float('nan')},self.live)
 
 

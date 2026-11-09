@@ -1059,8 +1059,9 @@ def validate_state(data, s):
     values = {}
     for name, lower, upper in [('x', 0, s['width']), ('y', 0, s['height']),
                                ('size', 16, max(s['width'], s['height'])),
-                               ('azimuth', -3600, 3600), ('elevation', -89, 89)]:
-        value = float(data[name])
+                               ('azimuth', -3600, 3600), ('elevation', -89, 89),
+                               ('rot_x', -180, 180), ('rot_y', -180, 180), ('rot_z', -180, 180)]:
+        value = float(data.get(name, 0) if name.startswith('rot_') else data[name])
         if not np.isfinite(value) or not lower <= value <= upper:
             raise ValueError(f'{name} 超出范围')
         values[name] = value
@@ -1405,8 +1406,9 @@ async def preview(request):
             estimate_render_environment, light_frame, support_mask & ~front_mask,
             (cx-light_rect[0], cy-light_rect[1]), side, lighting)
         environment['texture'] = str(environment_path)
-        req = {'mesh':str(mesh), 'azimuth':st['azimuth'], 'elevation':st['elevation'], 'output':str(output),
-               'lighting':lighting, 'environment':environment}
+        req = {'mesh':str(mesh), 'azimuth':st['azimuth'], 'elevation':st['elevation'],
+               'rotation_deg':[float(st.get('rot_x',0)),float(st.get('rot_y',0)),float(st.get('rot_z',0))],
+               'output':str(output), 'lighting':lighting, 'environment':environment}
         (folder/'request.json').write_text(json.dumps(req), encoding='utf8')
         blender = ROOT/'work/blender45/blender-4.5.3-windows-x64/blender.exe'
         if not blender.is_file():
@@ -1702,6 +1704,8 @@ async def automatic(request):
             raise ValueError('请先选择物品')
         if row_for(s['state']['asset']).get('superseded_by_feedback'):
             raise ValueError('此版本已按人工意见修订，请重新选择新模型')
+        if any(abs(float(s['state'].get(name, 0))) > 1e-6 for name in ('rot_x', 'rot_y', 'rot_z')):
+            raise ValueError('自动放置暂不支持物体 X/Y/Z 旋转；请先归零物体角度')
         if row_for(s['state']['asset']).get('manual_only'):
             raise ValueError('当前条目来自三维模型查看器，仅供人工放置；自动放置需原模型库中具备源视图证据的条目')
         out = DATA / f"auto-{s['id']}-{int(time.time())}"

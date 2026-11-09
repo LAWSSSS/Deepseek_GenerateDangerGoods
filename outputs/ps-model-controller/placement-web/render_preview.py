@@ -6,7 +6,7 @@ from pathlib import Path
 
 import bpy
 import numpy as np
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import blender_worker as worker
@@ -43,6 +43,24 @@ center = (low + high) / 2
 span = max(high - low)
 if span <= 0:
     raise ValueError('模型尺寸为空')
+rotation = request.get('rotation_deg') or [0, 0, 0]
+if len(rotation) != 3 or not all(math.isfinite(float(v)) for v in rotation):
+    raise ValueError('物体旋转角无效')
+if any(abs(float(v)) > 1e-6 for v in rotation):
+    obj = objects[0]
+    # The browser centres the unrotated object at the origin, then applies
+    # Euler XYZ rotation in its Y-up world. Convert that rotation into
+    # Blender's Z-up frame and rotate the mesh data around its bbox centre.
+    convert = Matrix.Rotation(-math.pi / 2, 4, 'X')
+    browser_rotation = (Matrix.Rotation(math.radians(float(rotation[2])), 4, 'Z')
+                        @ Matrix.Rotation(math.radians(float(rotation[1])), 4, 'Y')
+                        @ Matrix.Rotation(math.radians(float(rotation[0])), 4, 'X'))
+    blender_rotation = convert.inverted() @ browser_rotation @ convert
+    around_center = Matrix.Translation(center) @ blender_rotation @ Matrix.Translation(-center)
+    obj.data.transform(around_center)
+    bpy.context.view_layer.update()
+    # Keep the original center and span: the browser normalises before
+    # rotating, so camera framing must use the unrotated envelope.
 a, e = map(math.radians, (request['azimuth'], request['elevation']))
 direction = Vector((math.sin(a)*math.cos(e), -math.cos(a)*math.cos(e), math.sin(e)))
 camera=worker.make_camera(scene, center + direction * span * 2.35, center, fov=35)
