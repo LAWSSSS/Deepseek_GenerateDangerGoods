@@ -5,7 +5,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 DECISIONS = ROOT / 'outputs/人工逐件审阅-20261109/用户审阅结论.json'
-EXPECTED = {'13', '19-1', '19-2', '19-3', '19-4', '19-5', '19-6', '31'}
+EXPECTED_BY_NUMBER = {10: {'10'}, 13: {'13'}, 19: {f'19-{i}' for i in range(1, 7)}, 31: {'31'}}
+EXPECTED = set().union(*EXPECTED_BY_NUMBER.values())
 
 
 def digest(path):
@@ -32,7 +33,7 @@ def load_feedback():
         review = json.loads(DECISIONS.read_text(encoding='utf8'))
         approved = {int(x) for x in review.get('accepted_numbers', [])}
         requested = {int(x) for x in review.get('needs_revision', {})}
-        if not approved.issubset(set(range(1, 40))) or not requested.issubset({13,19,31}) or approved & requested:
+        if not approved.issubset(set(range(1, 40))) or not requested.issubset(EXPECTED_BY_NUMBER) or approved & requested:
             raise ValueError('Inconsistent review decisions')
         result.update({'approved':approved, 'requested':requested})
         if not review.get('revision_manifest'):
@@ -54,7 +55,8 @@ def load_feedback():
             if digest(mesh) != record['mesh_sha256'] or digest(blend) != record['blend_sha256']:
                 raise ValueError('Revision hash mismatch')
             revisions[key] = {**record, 'mesh':mesh, 'board':board, 'rust':rust, 'blend':blend}
-        if set(revisions) != EXPECTED:
+        expected = set().union(*(EXPECTED_BY_NUMBER[number] for number in requested))
+        if set(revisions) != expected:
             raise ValueError('Revision set is incomplete')
         result['revisions'] = revisions
     except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):

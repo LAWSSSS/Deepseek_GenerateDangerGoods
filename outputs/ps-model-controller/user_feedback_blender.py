@@ -197,7 +197,27 @@ def main():
             if any(not obj.name.startswith(item['prefix'] + ' ') for obj in selected):
                 raise RuntimeError('Unexpected mesh in single-object candidate')
             evidence.update({'single_body_count':1, 'translation':shift, 'prefix':item['prefix']})
-        else:
+        elif item['kind'] == 'jack':
+            removed = {'Detached handle bar', 'Handle bar bore liner', 'Handle bar top rim'}
+            before = {obj.name:(fingerprint(obj), tuple(tuple(row) for row in obj.matrix_world))
+                      for obj in meshes()}
+            if not removed.issubset(before):
+                raise RuntimeError('The detached handle assembly is incomplete')
+            for name in removed:
+                bpy.data.objects.remove(bpy.data.objects[name], do_unlink=True)
+            bpy.context.view_layer.update()
+            selected = meshes()
+            after = {obj.name:(fingerprint(obj), tuple(tuple(row) for row in obj.matrix_world))
+                     for obj in selected}
+            if after != {name:signature for name,signature in before.items() if name not in removed}:
+                raise RuntimeError('A retained jack component changed')
+            required = {'Jack body', 'Cast base', 'Chrome ram', 'Pump handle socket', 'Carry handle loop'}
+            if not required.issubset(after):
+                raise RuntimeError('An essential jack component is missing')
+            evidence.update({'removed_objects':sorted(removed),
+                             'retained_geometry_and_transforms_unchanged':True,
+                             'retained_object_count':len(after)})
+        elif item['kind'] == 'cylinder':
             eye_names = ('rear_clevis','rear_bushing','front_clevis','front_bushing')
             before = {name:fingerprint(bpy.data.objects[name]) for name in eye_names}
             evidence.update(full_barrel(item['barrel']))
@@ -209,6 +229,8 @@ def main():
                 obj.name == 'piston_body' or obj.name.startswith(('piston_ring_', 'gland_ring_'))
                 for obj in bpy.context.scene.objects if obj.type == 'MESH')
             selected = meshes()
+        else:
+            raise ValueError('Unexpected revision kind')
         if not selected:
             raise RuntimeError('No meshes to export')
         cam = camera_for(scene)

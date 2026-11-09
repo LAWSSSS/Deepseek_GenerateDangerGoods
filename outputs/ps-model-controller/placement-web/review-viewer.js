@@ -117,6 +117,7 @@ async function load(id) {
     : '新模型候选，供人工检查';
   $('reference-note').textContent = item.reference_missing
     ? '37 号没有可靠对应的六视图参考；隐藏部位仍需核对。'
+    : item.number === 10 && item.human_review === 'revision_pending_review' ? '做锈原图包含独立操作杆；当前模型已去掉操作杆，保留提环和插座。'
     : item.number === 19 ? '做锈原图包含六只气瓶；当前三维模型只显示所选的一只。'
     : '不同图片的观察角度可能不同；六视图参考未标定。';
   $('rust').src = `/api/rust/${item.id}`;

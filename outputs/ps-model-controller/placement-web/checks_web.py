@@ -57,7 +57,7 @@ class PlacementChecks(unittest.TestCase):
 
     def test_user_feedback_models_are_single_and_supersede_groups(self):
         rows=self.client.get('/api/assets').json()
-        for number,count in ((13,1),(19,6),(31,1)):
+        for number,count in ((10,1),(13,1),(19,6),(31,1)):
             candidates=[row for row in rows if row['number']==number]
             self.assertEqual(len(candidates),count)
             self.assertTrue(all(row['quantity']==1 and row['manual_only'] for row in candidates))
@@ -75,6 +75,11 @@ class PlacementChecks(unittest.TestCase):
         self.assertIn('单只模型检查',page.text)
         self.assertEqual(self.client.get('/api/review/13/board').status_code,200)
         self.assertEqual(self.client.get('/api/review/13/blend').status_code,200)
+        page=self.client.get('/review/10')
+        self.assertEqual(page.status_code,200)
+        self.assertIn('去操作杆模型检查',page.text)
+        self.assertEqual(self.client.get('/api/review/10/board').status_code,200)
+        self.assertEqual(self.client.get('/api/review/10/blend').status_code,200)
 
     def test_masks_union_undo_and_revision(self):
         a,b = self.masks(); rev = self.live['revision']

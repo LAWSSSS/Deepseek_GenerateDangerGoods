@@ -98,7 +98,8 @@ def run_worker(request, out, name):
     log = out / f'{name}-blender.log'
     print('Starting',name,'; log:',log,flush=True)
     with log.open('w',encoding='utf8') as stream:
-        completed = subprocess.run([str(BLENDER),'--background','--python',str(WORKER),'--',str(request_file)],
+        completed = subprocess.run([str(BLENDER),'--background','--python-exit-code','1',
+                                    '--python',str(WORKER),'--',str(request_file)],
                                    cwd=ROOT,stdout=stream,stderr=subprocess.STDOUT,timeout=1800)
     if completed.returncode:
         raise RuntimeError(f'{name} failed; see {log}')

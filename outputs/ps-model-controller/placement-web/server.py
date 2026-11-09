@@ -711,7 +711,8 @@ async def model_review_page_09(request):
 
 
 async def model_review_page_10(request):
-    return FileResponse(HERE/'model-review-10.html')
+    return FileResponse(HERE/('model-review-10-no-bar.html' if '10' in USER_FEEDBACK['revisions']
+                              else 'model-review-10.html'))
 
 
 async def model_review_page_11(request):
@@ -906,8 +907,8 @@ REVIEW_FILES = {
 
 async def model_review_file(request):
     number=request.path_params['number']
-    if number == 13 and '13' in USER_FEEDBACK['revisions']:
-        revision=USER_FEEDBACK['revisions']['13']
+    if number in (10, 13) and str(number) in USER_FEEDBACK['revisions']:
+        revision=USER_FEEDBACK['revisions'][str(number)]
         folder=revision['mesh'].parent
         allowed={'board':revision['board'], 'blend':revision['blend'],
                  'record':folder/'geometry-check.json', 'front':folder/'renders/front.png',

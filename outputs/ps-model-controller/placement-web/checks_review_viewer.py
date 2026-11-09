@@ -2,10 +2,13 @@
 import http.client
 import json
 import struct
+import tempfile
 import threading
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
+import review_feedback
 import review_viewer as viewer
 
 
@@ -43,13 +46,14 @@ class ReviewViewerTests(unittest.TestCase):
         self.assertEqual([x['id'] for x in items], expected)
         self.assertTrue(all(x['available'] for x in items))
         self.assertTrue(next(x for x in items if x['id']=='37')['reference_missing'])
-        self.assertEqual(sum(x['human_review']=='approved' for x in items), 36)
+        self.assertEqual(sum(x['human_review']=='approved' for x in items), 35)
+        self.assertEqual(next(x for x in items if x['id']=='10')['human_review'], 'revision_pending_review')
         self.assertTrue(all(x['quantity']==1 and x['human_review']=='revision_pending_review'
                             for x in items if x['id'].startswith('19-')))
         self.assertFalse(any('_mesh' in x for x in items))
 
     def test_model_headers_and_image(self):
-        for number in (1, 13, 14, '19-1', '19-2', '19-3', '19-4', '19-5', '19-6', 22, 27, 31, 33, 37, 39):
+        for number in (1, 10, 13, 14, '19-1', '19-2', '19-3', '19-4', '19-5', '19-6', 22, 27, 31, 33, 37, 39):
             with self.subTest(number=number):
                 code, headers, data = self.request(f'/api/model/{number}', 4)
                 self.assertEqual(code, 200)
@@ -62,14 +66,19 @@ class ReviewViewerTests(unittest.TestCase):
 
     def test_revised_models_contain_one_body_and_the_opaque_barrel(self):
         for key, item in self.catalog.items():
-            if key not in ('13','31') and not key.startswith('19-'):
+            if key not in ('10','13','31') and not key.startswith('19-'):
                 continue
             with item['_mesh'].open('rb') as f:
                 f.read(12)
                 size, _ = struct.unpack('<II', f.read(8))
                 doc = json.loads(f.read(size).decode('utf8'))
             names = [node.get('name','') for node in doc.get('nodes',[])]
-            if key == '13':
+            if key == '10':
+                removed = {'Detached handle bar', 'Handle bar bore liner', 'Handle bar top rim'}
+                self.assertFalse(removed.intersection(names))
+                self.assertTrue({'Jack body', 'Cast base', 'Chrome ram', 'Pump handle socket',
+                                 'Carry handle loop'}.issubset(names))
+            elif key == '13':
                 self.assertEqual(names.count('Can rear body'),1)
                 self.assertFalse(any(n.startswith('Can front ') for n in names))
             elif key.startswith('19-'):
@@ -88,11 +97,35 @@ class ReviewViewerTests(unittest.TestCase):
                     self.assertEqual(transmission.get('transmissionFactor', 0), 0)
 
     def test_missing_revision_does_not_reexpose_group_models(self):
-        with patch.object(viewer,'load_feedback',return_value={'approved':set(),'requested':{13,19,31},'revisions':{},'error':'missing'}):
+        with patch.object(viewer,'load_feedback',return_value={'approved':set(),'requested':{10,13,19,31},'revisions':{},'error':'missing'}):
             current=viewer.load_catalog()
+        self.assertFalse(current['10']['available'])
         self.assertFalse(current['13']['available'])
         self.assertFalse(current['19']['available'])
         self.assertFalse(current['31']['available'])
+
+    def test_existing_eight_model_manifest_remains_readable(self):
+        review = json.loads(review_feedback.DECISIONS.read_text(encoding='utf8'))
+        manifest = json.loads(Path(review['revision_manifest']).read_text(encoding='utf8'))
+        review['accepted_numbers'].append(10)
+        del review['needs_revision']['10']
+        manifest['items'] = [item for item in manifest['items'] if item['id'] != '10']
+        with tempfile.TemporaryDirectory() as directory:
+            old_manifest = Path(directory) / 'manifest.json'
+            old_review = Path(directory) / 'review.json'
+            old_manifest.write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf8')
+            review['revision_manifest'] = str(old_manifest)
+            old_review.write_text(json.dumps(review, ensure_ascii=False), encoding='utf8')
+            validate = review_feedback.inside_outputs
+            def allow_fixture(raw, suffixes):
+                return old_manifest if Path(raw) == old_manifest else validate(raw, suffixes)
+            with patch.object(review_feedback, 'DECISIONS', old_review), \
+                 patch.object(review_feedback, 'inside_outputs', side_effect=allow_fixture):
+                prior = review_feedback.load_feedback()
+        self.assertIsNone(prior['error'])
+        self.assertIn(10, prior['approved'])
+        self.assertEqual(prior['requested'], {13, 19, 31})
+        self.assertEqual(len(prior['revisions']), 8)
 
     def test_vendor_and_index(self):
         self.assertEqual(self.request('/')[0], 200)
