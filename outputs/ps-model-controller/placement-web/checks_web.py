@@ -44,6 +44,19 @@ class PlacementChecks(unittest.TestCase):
         Image.fromarray(a).save(folder/'1.png'); Image.fromarray(b).save(folder/'2.png')
         return a,b
 
+    def test_placement_catalog_matches_3d_viewer(self):
+        response = self.client.get('/api/assets?view=placement')
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()
+        self.assertEqual(len(rows), 44)
+        self.assertEqual([row['id'] for row in rows if row['number'] == 19],
+                         [f'19-{index}' for index in range(1, 7)])
+        self.assertTrue(all(row['available'] for row in rows))
+        self.assertEqual({row['id'] for row in rows}, set(server.PLACEMENT_ROWS))
+        self.assertEqual({row['id'] for row in rows if row['number'] == 10}, {'10'})
+        self.assertEqual({row['id'] for row in rows if row['number'] == 13}, {'13'})
+        self.assertEqual({row['id'] for row in rows if row['number'] == 31}, {'31'})
+
     def test_library_and_rejected_foreign_origin(self):
         response = self.client.get('/api/assets')
         original=[r for r in response.json() if not r['manual_only']]

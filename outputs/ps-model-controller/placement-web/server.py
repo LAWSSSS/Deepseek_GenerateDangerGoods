@@ -606,6 +606,79 @@ def register_user_feedback():
 
 
 register_user_feedback()
+
+
+def build_placement_rows():
+    """Mirror the standalone 3-D viewer's current item list.
+
+    The placement dropdown previously mixed every reconstruction draft and
+    repair candidate. The viewer catalog is the user-facing list of current
+    models, including the single-bottle revisions 19-1..19-6. Keep that list
+    separate so the review pages' /api/assets response remains unchanged.
+    """
+    try:
+        from review_viewer import load_catalog
+        catalog = load_catalog()
+    except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
+        return {}
+    by_mesh = {}
+    for row in ROWS.values():
+        raw = row.get('mesh')
+        if raw:
+            try:
+                by_mesh[str(Path(raw).resolve())] = row
+            except OSError:
+                pass
+    by_number = {}
+    for row in ROWS.values():
+        if not row.get('manual_only'):
+            by_number.setdefault(int(row['number']), row)
+    placement = {}
+    for key, item in catalog.items():
+        number = int(item['number'])
+        mesh = item.get('_mesh')
+        existing = by_mesh.get(str(Path(mesh).resolve())) if mesh else None
+        base = by_number.get(number)
+        source_row = existing or base or {}
+        row = dict(source_row)
+        if mesh:
+            row['mesh'] = str(mesh)
+            row['mesh_sha256'] = digest(mesh)
+        else:
+            row['mesh'] = ''
+            row['mesh_sha256'] = ''
+        if item.get('_rust'):
+            row['rust'] = str(item['_rust'])
+            row['rust_sha256'] = digest(item['_rust'])
+        row.update({
+            'asset_id': key,
+            'number': number,
+            'file': item.get('name') or row.get('file') or key,
+            'status': 'review',
+            'reason': item.get('reason') or row.get('reason') or '三维模型查看器条目；场景仍待验证',
+            'manual_only': bool(existing.get('manual_only', True)) if existing else True,
+            'model_review': item.get('human_review', 'pending'),
+            'scene_validation': 'pending',
+            'quantity': item.get('quantity', 1),
+            'version': source_row.get('version', 'viewer-catalog'),
+            'shape_basis': source_row.get('shape_basis', 'viewer_catalog'),
+            'superseded_by_feedback': False,
+            'reconstruction': source_row.get('reconstruction', {
+                'fidelity': {'passed': False, 'status': 'unknown',
+                             'reason': '三维模型查看器条目没有放置库的原视角检查记录'},
+            }),
+        })
+        placement[key] = row
+    return placement
+
+
+PLACEMENT_ROWS = build_placement_rows()
+
+
+def row_for(asset):
+    return PLACEMENT_ROWS.get(asset) or ROWS.get(asset)
+
+
 SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
@@ -650,6 +723,7 @@ async def index(request):
 
 
 async def assets(request):
+    rows = PLACEMENT_ROWS if request.query_params.get('view') == 'placement' and PLACEMENT_ROWS else ROWS
     return JSONResponse([{'id': r['asset_id'], 'number': r['number'], 'name': r['file'],
                           'status': r.get('status'), 'reason': r.get('reason'),
                           'manual_only': bool(r.get('manual_only')),
@@ -661,12 +735,12 @@ async def assets(request):
                           'review_url':f"/review/{int(r['number']):02d}" if 1 <= int(r['number']) <= 13 else None,
                           'quantity':r.get('quantity'),
                           'passed': bool(r.get('reconstruction', {}).get('fidelity', {}).get('passed'))}
-                         for r in sorted(ROWS.values(),key=lambda row:(row['number'],bool(row.get('manual_only'))))
+                         for r in sorted(rows.values(),key=lambda row:(row['number'],bool(row.get('manual_only'))))
                          if not r.get('superseded_by_feedback')])
 
 
 async def model(request):
-    row = ROWS.get(request.path_params['asset'])
+    row = row_for(request.path_params['asset'])
     if not row or not Path(row.get('mesh', '')).is_file():
         return err('模型不存在', 404)
     path = Path(row['mesh'])
@@ -971,9 +1045,9 @@ async def background(request):
 
 
 def validate_state(data, s):
-    if data.get('asset') not in ROWS:
+    row = row_for(data.get('asset'))
+    if row is None:
         raise ValueError('请选择模型库中的物品')
-    row = ROWS[data['asset']]
     if row.get('superseded_by_feedback'):
         raise ValueError('此版本已按人工意见修订，请重新选择新模型')
     if row.get('quantity') == 1:
@@ -1219,7 +1293,7 @@ async def preview(request):
         revision = data.get('revision')
         if revision != s['revision'] or not s['state']:
             return err('摆位已变化，请重新生成', 409)
-        if ROWS[s['state']['asset']].get('superseded_by_feedback'):
+        if row_for(s['state']['asset']).get('superseded_by_feedback'):
             raise ValueError('此版本已按人工意见修订，请重新选择新模型')
         encoded = data.get('image', '')
         if not encoded.startswith('data:image/png;base64,') or len(encoded) > 12_000_000:
@@ -1257,7 +1331,7 @@ async def preview(request):
                 save(s)
         generation = s['generation']
         st = s['state'].copy()
-        row = ROWS[st['asset']]
+        row = row_for(st['asset'])
         mesh = Path(row['mesh'])
         if digest(mesh) != row.get('mesh_sha256'):
             raise ValueError('模型哈希与库记录不一致')
@@ -1524,10 +1598,10 @@ async def automatic(request):
         s = session(request)
         if not s['state']:
             raise ValueError('请先选择物品')
-        if ROWS[s['state']['asset']].get('superseded_by_feedback'):
+        if row_for(s['state']['asset']).get('superseded_by_feedback'):
             raise ValueError('此版本已按人工意见修订，请重新选择新模型')
-        if ROWS[s['state']['asset']].get('manual_only'):
-            raise ValueError('六视图修复候选仅供人工预览，尚未通过自动放置的物理校验')
+        if row_for(s['state']['asset']).get('manual_only'):
+            raise ValueError('当前条目来自三维模型查看器，仅供人工放置；自动放置需原模型库中具备源视图证据的条目')
         out = DATA / f"auto-{s['id']}-{int(time.time())}"
         command = [sys.executable, '-X', 'utf8', '-B', str(HERE.parent / 'mesh_location_first.py'),
                    '--asset', s['state']['asset'], '--background', s['background'], '--out', str(out), '--budget', '0']
