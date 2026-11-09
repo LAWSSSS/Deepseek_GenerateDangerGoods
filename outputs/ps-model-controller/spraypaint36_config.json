@@ -1,0 +1,501 @@
+{
+  "version": "spraypaint36-parametric-v1",
+  "number": 36,
+  "radial_segments": 192,
+  "shape_basis": "source_photo_with_uncalibrated_six_view_reference",
+  "reference_role": "visual_match_unverified",
+  "scale_note": "Working scale follows the source-photo pixel ratio and a plausible 400 ml aerosol-can envelope. It is not a measured dimension of the physical can.",
+  "proportion_source": {
+    "photo": "outputs/物品高清输入-39件/原貌HD/36-自喷漆罐.png",
+    "rust": "outputs/物品高清输入-39件/生锈HD/36-自喷漆罐.png",
+    "reference": "references/parallel-six-view/保赐利喷漆六视图产品目录.png",
+    "reference_note": "The user six-view sheet is an uncalibrated generated visual reference of the same Botny (保赐利) aerosol-spray-paint design family. The front panel is used only for silhouette/cap/bottom topology comparison; the back/side panels supply the hidden back-label layout. The sheet is not a calibrated turntable, and its front text differs from the photographed can (the reference appears to state a different net weight). The original photographs decide the visible front proportions and front print.",
+    "visible_structure": "One upright cylindrical aerosol can: a grey moulded over-cap with a rounded top edge, a very shallow circular top field and a small central sprue dimple; a thin cap/body shadow joint; a printed white label wrapping the straight cylindrical body with the red BOTNY B logo, red/black Chinese copy, yellow AEROSOL PAINT artwork, a rainbow disc and a grey NO.4 GREY patch; a narrow rolled silver aluminium base rim below the label; and a concave stamped bottom dish with a raised inner ring and a printed/stamped batch and expiry code. The valve cup and stem are hidden under the cap.",
+    "pixel_ratios": "Original RGBA alpha bbox x=428..823, y=38..1229: about 396 px wide and 1192 px tall (height/diameter about 3.01). In the uncalibrated six-view front panel the cap top is near y=17, the cap/body seam near y=124, the label bottom near y=455 and the can bottom near y=464, with a can width near 144 px (height/width about 3.10). The candidate uses a 0.200 m working height and a 0.0644 m body diameter, not measured dimensions.",
+    "catalog_note": "A 400 ml aerosol can commonly falls near a 65 mm diameter and 200 mm overall height; that nominal envelope is used only as a plausibility check and is not a measurement of this item.",
+    "status": "uncalibrated_visual_reference"
+  },
+  "dimensions": {
+    "total_height_m": 0.2,
+    "body_radius_m": 0.0322,
+    "body_diameter_m": 0.0644,
+    "body_z0_m": 0.0058,
+    "body_z1_m": 0.1508,
+    "label_z0_m": 0.006,
+    "label_z1_m": 0.1508,
+    "label_height_m": 0.1448,
+    "cap_outer_radius_m": 0.033,
+    "cap_inner_radius_m": 0.0323,
+    "cap_wall_m": 0.0007,
+    "cap_z0_m": 0.1508,
+    "cap_z1_m": 0.2,
+    "cap_height_m": 0.0492,
+    "base_outer_radius_m": 0.0328,
+    "base_visible_band_top_z_m": 0.0055,
+    "base_inner_top_z_m": 0.007,
+    "base_bottom_center_z_m": 0.0045,
+    "base_ground_z_m": 0.0,
+    "valve_top_z_m": 0.1905,
+    "note": "Dimensions derive from the source-photo and six-view pixel ratios with the working height fixed at 200 mm. The body bottom is raised inside the base so the concave metal dish is the visible bottom surface. They are plausibility-guided working values, not caliper measurements."
+  },
+  "profiles": {
+    "body": [
+      [
+        0.0,
+        0.0058
+      ],
+      [
+        0.0318,
+        0.0058
+      ],
+      [
+        0.0322,
+        0.0064
+      ],
+      [
+        0.0322,
+        0.1498
+      ],
+      [
+        0.0321,
+        0.1508
+      ],
+      [
+        0.0315,
+        0.153
+      ],
+      [
+        0.0303,
+        0.1562
+      ],
+      [
+        0.028,
+        0.1598
+      ],
+      [
+        0.0245,
+        0.164
+      ],
+      [
+        0.02,
+        0.1688
+      ],
+      [
+        0.0158,
+        0.1728
+      ],
+      [
+        0.0132,
+        0.1758
+      ],
+      [
+        0.013,
+        0.1786
+      ],
+      [
+        0.0155,
+        0.179
+      ],
+      [
+        0.0158,
+        0.1802
+      ],
+      [
+        0.015,
+        0.1814
+      ],
+      [
+        0.014,
+        0.184
+      ],
+      [
+        0.0,
+        0.184
+      ]
+    ],
+    "base": [
+      [
+        0.0,
+        0.007
+      ],
+      [
+        0.03,
+        0.007
+      ],
+      [
+        0.0318,
+        0.0064
+      ],
+      [
+        0.0326,
+        0.0058
+      ],
+      [
+        0.0328,
+        0.0055
+      ],
+      [
+        0.0328,
+        0.003
+      ],
+      [
+        0.0327,
+        0.0012
+      ],
+      [
+        0.0324,
+        0.0002
+      ],
+      [
+        0.0318,
+        0.0
+      ],
+      [
+        0.0305,
+        0.0
+      ],
+      [
+        0.0295,
+        0.0008
+      ],
+      [
+        0.028,
+        0.002
+      ],
+      [
+        0.026,
+        0.0032
+      ],
+      [
+        0.0245,
+        0.0038
+      ],
+      [
+        0.0232,
+        0.0044
+      ],
+      [
+        0.0225,
+        0.0048
+      ],
+      [
+        0.0218,
+        0.0044
+      ],
+      [
+        0.0208,
+        0.004
+      ],
+      [
+        0.018,
+        0.0038
+      ],
+      [
+        0.012,
+        0.004
+      ],
+      [
+        0.006,
+        0.0042
+      ],
+      [
+        0.0,
+        0.0045
+      ]
+    ],
+    "cap": [
+      [
+        0.0,
+        0.1508
+      ],
+      [
+        0.0327,
+        0.1508
+      ],
+      [
+        0.033,
+        0.152
+      ],
+      [
+        0.033,
+        0.19
+      ],
+      [
+        0.0328,
+        0.1945
+      ],
+      [
+        0.0322,
+        0.1972
+      ],
+      [
+        0.0308,
+        0.1988
+      ],
+      [
+        0.028,
+        0.1996
+      ],
+      [
+        0.02,
+        0.1999
+      ],
+      [
+        0.0012,
+        0.1998
+      ],
+      [
+        0.0006,
+        0.1996
+      ],
+      [
+        0.0,
+        0.1994
+      ]
+    ],
+    "valve": [
+      [
+        0.0,
+        0.184
+      ],
+      [
+        0.0034,
+        0.184
+      ],
+      [
+        0.003,
+        0.1845
+      ],
+      [
+        0.003,
+        0.1898
+      ],
+      [
+        0.0022,
+        0.1905
+      ],
+      [
+        0.0,
+        0.1905
+      ]
+    ]
+  },
+  "features": {
+    "cap_cavity_cutter": {
+      "radius_m": 0.0323,
+      "z0_m": 0.14,
+      "z1_m": 0.1982,
+      "segments": 192,
+      "note": "A cylinder is subtracted from the closed cap solid. It leaves a 0.7 mm side wall and an approximately 1.7 mm top wall and creates a real downward-open cavity. The cavity depth, wall thickness and snap fit are inferred, not measured."
+    },
+    "cap_top_dimple": {
+      "center": [
+        0.0,
+        0.0,
+        0.2
+      ],
+      "depth_m": 0.0006,
+      "radius_m": 0.0012,
+      "note": "The shallow central sprue dimple is part of the revolved cap profile and also appears in the cap-top normal/roughness texture. Its exact size is inferred from the reference top panel."
+    },
+    "cap_seam": {
+      "z_m": 0.1508,
+      "radial_clearance_m": 0.0001,
+      "overhang_m": 0.0008,
+      "note": "The cap outer radius is 0.8 mm larger than the body radius. The cap bottom edge sits at the label top, producing a shadow joint. The real snap-fit lip and internal clearance are not modelled."
+    },
+    "bottom_dish": {
+      "ring_radius_m": 0.0225,
+      "ring_z_m": 0.0048,
+      "center_z_m": 0.0045,
+      "outer_rim_z_m": 0.0,
+      "note": "The stamped bottom has a ground-contact outer rim, a rising dish, a raised inner ring and a slightly lower central disc with a batch/expiry stamp. The exact stamping profile is inferred from the reference bottom panel."
+    },
+    "valve": {
+      "cup_top_z_m": 0.184,
+      "stem_top_z_m": 0.1905,
+      "stem_radius_m": 0.003,
+      "note": "The valve cup is part of the body revolve; the black valve stem is a separate hidden part. Its shape, material and internal mechanism are inferred because the cap is fitted in every supplied view."
+    },
+    "label": {
+      "seam_u_hint": 0.0,
+      "note": "A very faint vertical label-wrap line is drawn in the hidden side transition. The original photo shows the label edge/barcode near the front-left silhouette, but the exact seam position is not measured."
+    }
+  },
+  "material_profile": {
+    "label": {
+      "base_roughness": 0.42,
+      "grime_roughness": 0.62,
+      "metallic": 0.0,
+      "note": "Printed white label over tinplate. The visible print is dielectric ink/paper; metalness is zero on the print, not because the can is plastic. The front base colour is flattened from the photograph to remove baked studio shading."
+    },
+    "cap": {
+      "base_rgb_srgb": [
+        142,
+        145,
+        150
+      ],
+      "base_roughness": 0.38,
+      "metallic": 0.0,
+      "note": "Grey moulded plastic over-cap. Flow lines, faint orange peel, a mould seam and dirt are synthesised; the roughness range is inferred."
+    },
+    "base_metal": {
+      "base_rgb_srgb": [
+        176,
+        180,
+        186
+      ],
+      "base_roughness": 0.32,
+      "metallic": 1.0,
+      "note": "Rolled/stamped aluminium. Metalness is 1; highlights must respond to live lighting. The reference bottom panel is used for topology and stamp layout, not as a baked reflectance texture."
+    },
+    "base_bottom": {
+      "base_rgb_srgb": [
+        168,
+        172,
+        178
+      ],
+      "base_roughness": 0.36,
+      "metallic": 1.0,
+      "note": "Aluminium bottom dish with radial brushing, a stamped batch/expiry code and local stains. The code is copied from the uncalibrated reference and is not a claim about this exact can."
+    },
+    "valve": {
+      "base_rgb_srgb": [
+        18,
+        18,
+        20
+      ],
+      "roughness": 0.42,
+      "metallic": 0.0,
+      "note": "Hidden black plastic valve stem."
+    }
+  },
+  "texture_sampling": {
+    "reference_size": [
+      1536,
+      1024
+    ],
+    "panels": {
+      "front": {
+        "origin": [
+          0,
+          0
+        ],
+        "body_rect": [
+          188,
+          124,
+          332,
+          455
+        ],
+        "cap_rect": [
+          188,
+          17,
+          332,
+          124
+        ],
+        "center_x": 260.0,
+        "half_width": 72.0
+      },
+      "back": {
+        "origin": [
+          512,
+          0
+        ],
+        "body_rect": [
+          205,
+          124,
+          312,
+          455
+        ],
+        "cap_rect": [
+          185,
+          17,
+          330,
+          124
+        ],
+        "center_x": 258.5,
+        "half_width": 53.5
+      },
+      "left": {
+        "origin": [
+          1024,
+          0
+        ],
+        "body_rect": [
+          184,
+          124,
+          329,
+          455
+        ],
+        "cap_rect": [
+          184,
+          17,
+          329,
+          124
+        ],
+        "center_x": 256.5,
+        "half_width": 72.5
+      },
+      "right": {
+        "origin": [
+          0,
+          512
+        ],
+        "body_rect": [
+          184,
+          124,
+          330,
+          455
+        ],
+        "cap_rect": [
+          184,
+          17,
+          330,
+          124
+        ],
+        "center_x": 257.0,
+        "half_width": 73.0
+      }
+    },
+    "original_photo": {
+      "body_rect": [
+        429,
+        360,
+        821,
+        1190
+      ],
+      "body_center_x": 625.0,
+      "body_half_width_top": 196.0,
+      "body_half_width_bottom": 194.0,
+      "cap_rect": [
+        432,
+        38,
+        818,
+        357
+      ],
+      "cap_center_x": 625.0,
+      "cap_half_width_top": 185.0,
+      "cap_half_width_bottom": 196.0,
+      "note": "The original photograph is the primary front evidence. It is mapped over +/-85 degrees with a cylindrical sine coordinate; the reference back/side panels fill the hidden half."
+    },
+    "front_half_angle_deg": 85.0,
+    "back_start_deg": 120.0,
+    "blend_angle_deg": 5.0,
+    "front_u_center": 0.25,
+    "body_texture_size": 2048,
+    "cap_texture_size": 1024,
+    "base_texture_size": 1024,
+    "note": "The six-view left/right panels are not a consistent calibrated turntable; they are used only in the hidden side transitions and for comparison. Any seam in the wrapped label is an explicit inference."
+  },
+  "render": {
+    "six_resolution": 768,
+    "six_samples": 40,
+    "detail_resolution": 720,
+    "detail_samples": 36,
+    "turntable_resolution": 512,
+    "turntable_samples": 10,
+    "turntable_count": 24,
+    "reference_role": "visual_match_unverified"
+  },
+  "checks_note": "All checks are diagnostics. The six-view reference is uncalibrated; the candidate is manual_only and cannot enter automatic placement or final compositing."
+}
