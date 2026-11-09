@@ -213,6 +213,9 @@ class PlacementChecks(unittest.TestCase):
             response=self.client.post(self.url+'/state',json={**self.state,'elevation':elevation})
             self.assertEqual(response.status_code,200)
             self.assertEqual(response.json()['state']['elevation'],elevation)
+        response=self.client.post(self.url+'/state',json={**self.state,'azimuth':360})
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json()['state']['azimuth'],360)
         with self.assertRaises(ValueError):server.validate_state({**self.state,'size':float('nan')},self.live)
 
 

@@ -60,7 +60,7 @@ drag($('object'),'move');drag($('rotate'),'rotate');drag($('resize'),'resize');w
 function setInteractionMode(mode){interactionMode=mode;const moving=mode==='move';$('moveMode').classList.toggle('active',moving);$('rotateMode').classList.toggle('active',!moving);$('object').classList.toggle('rotating',!moving);if(model)showLive();say(moving?'拖动模式：左键移动物体':'拖动模式：左键水平/俯仰旋转物体')}
 $('moveMode').onclick=()=>setInteractionMode('move');$('rotateMode').onclick=()=>setInteractionMode('rotate');
 $('resetView').onclick=()=>{if(!session)return;position.azimuth=80;position.elevation=45;render();$('azimuth').value=80;$('elevation').value=45;schedule()};
-for(let k of ['azimuth','elevation','size'])$(k).onchange=()=>{position[k]=Math.max(k==='elevation'?-89:k==='size'?16:0,Math.min(k==='elevation'?89:k==='size'?Math.max(session.width,session.height):359,Number($(k).value)));showLive();layout();render();schedule()};
+for(let k of ['azimuth','elevation','size'])$(k).onchange=()=>{position[k]=Math.max(k==='elevation'?-89:k==='size'?16:0,Math.min(k==='elevation'?89:k==='size'?Math.max(session.width,session.height):360,Number($(k).value)));showLive();layout();render();schedule()};
 $('backgroundInput').onchange=e=>setup(e.target.files[0]);$('sceneButton').onclick=()=>setup();$('asset').onchange=()=>loadModel();
 $('analyze').onclick=async()=>{try{await syncPending();say('正在分析场景，首次可能需要数分钟…');session=await api(endpoint('/analyze'),{method:'POST'});candidates();showLive();say('请选择前景区域，或与 AI 讨论')}catch(e){error(e)}};
 $('undo').onclick=async()=>{try{session=await api(endpoint('/undo'),{method:'POST'});candidates();showLive();say('已撤销')}catch(e){error(e)}};
