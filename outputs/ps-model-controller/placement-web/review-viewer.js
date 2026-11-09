@@ -9,7 +9,7 @@ const viewport = $('viewport');
 const loader = new GLTFLoader();
 const clay = new THREE.MeshStandardMaterial({color:0x858d8c, roughness:.8, metalness:0});
 let renderer, scene, camera, controls, model = null;
-let items = [], current = 0, mode = 'material', loadSerial = 0;
+let items = [], current = '', mode = 'material', loadSerial = 0;
 
 function setMessage(message, show=true) {
   $('loading').textContent = message;
@@ -102,25 +102,29 @@ function applyMode() {
   if (window.reviewViewer) window.reviewViewer.mode = mode;
 }
 
-function itemFor(number) { return items.find(item => item.number === number); }
-function label(item) { return `${String(item.number).padStart(2,'0')}  ${item.name}`; }
+function itemFor(id) { return items.find(item => item.id === String(id)); }
+function label(item) { return `${item.id.includes('-') ? item.id : item.id.padStart(2,'0')}  ${item.name}`; }
 
-async function load(number) {
-  const item = itemFor(number);
+async function load(id) {
+  const item = itemFor(id);
   if (!item) return;
-  current = number;
-  $('item').value = String(number);
+  current = item.id;
+  const index = items.indexOf(item);
+  $('item').value = item.id;
   $('title').textContent = label(item);
-  $('review-status').textContent = number === 1 ? '01 号此前已确认通过，可重新检查' : '新模型候选，供人工检查';
+  $('review-status').textContent = item.human_review === 'approved' ? '模型已由你确认通过；场景仍待检查'
+    : item.human_review === 'revision_pending_review' ? '按你的意见修订，每次显示一件；待你复核'
+    : '新模型候选，供人工检查';
   $('reference-note').textContent = item.reference_missing
     ? '37 号没有可靠对应的六视图参考；隐藏部位仍需核对。'
+    : item.number === 19 ? '做锈原图包含六只气瓶；当前三维模型只显示所选的一只。'
     : '不同图片的观察角度可能不同；六视图参考未标定。';
-  $('rust').src = `/api/rust/${number}`;
-  $('board').href = `/api/board/${number}`;
-  $('previous').disabled = number <= 1;
-  $('next').disabled = number >= 39;
+  $('rust').src = `/api/rust/${item.id}`;
+  $('board').href = `/api/board/${item.id}`;
+  $('previous').disabled = index <= 0;
+  $('next').disabled = index >= items.length - 1;
   const page = new URL(window.location.href);
-  page.searchParams.set('item', String(number));
+  page.searchParams.set('item', item.id);
   history.replaceState(null, '', page);
   const serial = ++loadSerial;
   if (!item.available) {
@@ -130,7 +134,7 @@ async function load(number) {
   }
   setMessage('正在加载三维模型…');
   try {
-    const gltf = await loader.loadAsync(`/api/model/${number}`);
+    const gltf = await loader.loadAsync(`/api/model/${item.id}`);
     const next = new THREE.Group();
     gltf.scene.rotation.x = -Math.PI / 2;
     next.add(gltf.scene);
@@ -154,20 +158,20 @@ async function load(number) {
     scene.add(model);
     applyMode();
     resetView();
-    window.reviewViewer = {number, mode, meshCount, ready:true};
+    window.reviewViewer = {id:item.id, number:item.number, mode, meshCount, ready:true};
     setMessage('',false);
   } catch (error) {
     if (serial !== loadSerial) return;
     if (model) { scene.remove(model); discard(model); model = null; }
-    window.reviewViewer = {number, mode, ready:false};
+    window.reviewViewer = {id:item.id, number:item.number, mode, ready:false};
     setMessage('模型无法加载，请尝试重新打开查看器。');
     console.error('Model loading failed', error);
   }
 }
 
-$('item').addEventListener('change', event => load(Number(event.target.value)));
-$('previous').addEventListener('click', () => load(current - 1));
-$('next').addEventListener('click', () => load(current + 1));
+$('item').addEventListener('change', event => load(event.target.value));
+$('previous').addEventListener('click', () => { const i=items.findIndex(x=>x.id===current); if(i>0)load(items[i-1].id); });
+$('next').addEventListener('click', () => { const i=items.findIndex(x=>x.id===current); if(i>=0 && i<items.length-1)load(items[i+1].id); });
 $('reset').addEventListener('click', resetView);
 for (const value of ['material','clay']) $(value).addEventListener('click', () => { mode = value; applyMode(); });
 
@@ -178,12 +182,14 @@ try {
   items = await response.json();
   for (const item of items) {
     const option = document.createElement('option');
-    option.value = String(item.number);
+    option.value = item.id;
     option.textContent = label(item) + (item.available ? '' : '（文件不可用）');
     $('item').append(option);
   }
-  const requested = Number(new URLSearchParams(location.search).get('item') || 2);
-  await load(itemFor(requested) ? requested : 2);
+  let requested = new URLSearchParams(location.search).get('item') || '2';
+  if (requested === '19' && itemFor('19-1')) requested = '19-1';
+  if (/^0\d$/.test(requested)) requested = String(Number(requested));
+  await load(itemFor(requested) ? requested : '2');
 } catch (error) {
   setMessage('查看器无法启动，请确认浏览器支持三维显示并重新打开。');
   console.error('Viewer failed', error);

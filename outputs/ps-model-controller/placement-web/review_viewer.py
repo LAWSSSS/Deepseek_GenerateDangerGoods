@@ -17,6 +17,8 @@ from urllib.parse import urlsplit
 from urllib.request import urlopen
 import webbrowser
 
+from review_feedback import load_feedback
+
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 PARALLEL_ROOT = ROOT.parent / 'parallel-3d-rebuild'
@@ -59,14 +61,28 @@ def load_catalog():
     library = {entry['number']: entry for entry in (
         json.loads(line) for line in LIBRARY.read_text(encoding='utf8').splitlines() if line.strip()
     )}
+    feedback = load_feedback()
     catalog = {}
     roots = (ROOT, PARALLEL_ROOT)
     for number in range(1, 40):
         source = library.get(number, {})
-        entry = {'number': number, 'name': Path(source.get('file', f'{number:02}')).stem,
+        key = str(number)
+        entry = {'id': key, 'number': number, 'name': Path(source.get('file', f'{number:02}')).stem,
                  'available': False, 'reference_missing': number == 37,
-                 'human_review': 'previously_accepted' if number == 1 else 'pending',
+                 'human_review': 'approved' if number in feedback['approved'] else 'pending',
                  'reason': ''}
+        if number in feedback['requested']:
+            revised = ([f'19-{index}' for index in range(1, 7)] if number == 19 else [key])
+            if not all(item in feedback['revisions'] for item in revised):
+                entry['reason'] = '用户要求的修订模型尚未就绪'
+                catalog[key] = entry
+                continue
+            for item_id in revised:
+                item = feedback['revisions'][item_id]
+                catalog[item_id] = {**entry, 'id':item_id, 'name':item['name'], 'available':True,
+                                    'human_review':'revision_pending_review', 'quantity':1,
+                                    '_mesh':item['mesh'], '_board':item['board'], '_rust':item['rust']}
+            continue
         try:
             if number == 1:
                 out = ROOT / 'outputs' / '01阀门-六视图重建-v7'
@@ -90,7 +106,7 @@ def load_catalog():
             entry.update({'available': True, '_mesh': mesh, '_board': board, '_rust': rust})
         except (OSError, ValueError, TypeError, KeyError, json.JSONDecodeError):
             entry['reason'] = '模型文件或对照资料未找到'
-        catalog[number] = entry
+        catalog[key] = entry
     return catalog
 
 
@@ -149,10 +165,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._file(HERE / 'review-viewer.html', 'text/html; charset=utf-8')
         if path in ('/review-viewer.css', '/review-viewer.js'):
             return self._file(HERE / path[1:])
-        asset = re.fullmatch(r'/api/(model|board|rust)/(\d{1,2})', path)
+        asset = re.fullmatch(r'/api/(model|board|rust)/(\d{1,2}(?:-[1-6])?)', path)
         if asset:
             kind, raw = asset.groups()
-            item = self.server.catalog.get(int(raw))
+            parts = raw.split('-', 1)
+            key = str(int(parts[0])) + ('-' + parts[1] if len(parts) > 1 else '')
+            if key == '19' and '19-1' in self.server.catalog:
+                key = '19-1'
+            item = self.server.catalog.get(key)
             if not item or not item['available']:
                 return self._json(404, {'error': '模型资料不存在'})
             key = {'model': '_mesh', 'board': '_board', 'rust': '_rust'}[kind]

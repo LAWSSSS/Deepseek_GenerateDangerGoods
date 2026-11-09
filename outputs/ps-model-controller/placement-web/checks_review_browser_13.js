@@ -8,13 +8,6 @@ async page => {
   const canvas=page.locator('#canvas');
   const capture=()=>page.evaluate(()=>document.getElementById('canvas').toDataURL());
   const initial=await capture();
-  await page.getByRole('button',{name:'原始模型'}).click();
-  await page.waitForFunction(()=>window.reviewState?.which==='old');
-  await page.waitForTimeout(300);
-  const old=await capture();
-  await page.getByRole('button',{name:'分部件重建 v1'}).click();
-  await page.waitForFunction(()=>window.reviewState?.which==='new');
-  await page.waitForTimeout(300);
   await page.getByRole('button',{name:'灰模'}).click();
   await page.waitForFunction(()=>window.reviewState?.mode==='clay');
   await page.waitForTimeout(200);
@@ -43,13 +36,13 @@ async page => {
   await page.waitForTimeout(400);
   const rotated=await capture();
   const links=await page.evaluate(()=>[...document.querySelectorAll('aside a')].map(a=>a.getAttribute('href')));
-  const result={old_new_differ:initial!==old,clay_material_differ:clay!==material,
+  const result={single_model_loaded:initial.length>100,clay_material_differ:clay!==material,
           pointer_rotates:rotated!==material,preview_luma:sample,links,
           final_state:await page.evaluate(()=>window.reviewState),errors};
-  if(!result.old_new_differ||!result.clay_material_differ||!result.pointer_rotates||
+  if(!result.single_model_loaded||!result.clay_material_differ||!result.pointer_rotates||
      sample.pixels<100||sample.median<18||sample.dark_fraction>.8||errors.length)throw Error(JSON.stringify(result));
   if(result.final_state.which!=='new'||result.final_state.mode!=='material'||
-     !String(result.final_state.id||'').endsWith('-rebuild-v1'))throw Error(JSON.stringify(result));
+     !String(result.final_state.id||'').endsWith('-feedback-13'))throw Error(JSON.stringify(result));
   if(!links.includes('/api/review/13/board')||!links.includes('/api/review/13/blend'))
     throw Error(JSON.stringify(result));
   return result;

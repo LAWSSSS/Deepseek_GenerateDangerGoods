@@ -47,10 +47,34 @@ class PlacementChecks(unittest.TestCase):
     def test_library_and_rejected_foreign_origin(self):
         response = self.client.get('/api/assets')
         original=[r for r in response.json() if not r['manual_only']]
-        self.assertEqual(len(original),39)
-        self.assertEqual(sum(not r['passed'] for r in original),15)
+        baseline=[r for r in server.ROWS.values() if not r.get('manual_only')]
+        self.assertEqual(len(baseline),39)
+        self.assertEqual(sum(not r.get('reconstruction',{}).get('fidelity',{}).get('passed') for r in baseline),15)
+        hidden={r['number'] for r in baseline if r.get('superseded_by_feedback')}
+        self.assertEqual({r['number'] for r in original},set(range(1,40))-hidden)
         self.assertEqual(self.client.get('/api/assets',headers={'origin':'https://evil.example'}).status_code,403)
         self.assertEqual(self.client.get('/api/assets',headers={'host':'evil.example'}).status_code,403)
+
+    def test_user_feedback_models_are_single_and_supersede_groups(self):
+        rows=self.client.get('/api/assets').json()
+        for number,count in ((13,1),(19,6),(31,1)):
+            candidates=[row for row in rows if row['number']==number]
+            self.assertEqual(len(candidates),count)
+            self.assertTrue(all(row['quantity']==1 and row['manual_only'] for row in candidates))
+            self.assertTrue(all(row['model_review']=='pending' for row in candidates))
+            for row in candidates:
+                self.assertEqual(self.client.get('/api/model/'+row['id']).status_code,200)
+                result=self.client.post(self.url+'/state',json={**self.state,'asset':row['id'],'quantity':2})
+                self.assertEqual(result.status_code,400)
+                result=self.client.post(self.url+'/state',json={**self.state,'asset':row['id'],'quantity':1})
+                self.assertEqual(result.status_code,200)
+        old=next(key for key,row in server.ROWS.items() if row.get('number')==19 and not row.get('manual_only'))
+        self.assertEqual(self.client.post(self.url+'/state',json={**self.state,'asset':old}).status_code,400)
+        page=self.client.get('/review/13')
+        self.assertEqual(page.status_code,200)
+        self.assertIn('单只模型检查',page.text)
+        self.assertEqual(self.client.get('/api/review/13/board').status_code,200)
+        self.assertEqual(self.client.get('/api/review/13/blend').status_code,200)
 
     def test_masks_union_undo_and_revision(self):
         a,b = self.masks(); rev = self.live['revision']
@@ -144,7 +168,8 @@ class PlacementChecks(unittest.TestCase):
             candidate=next((r for r in rows if r.get('version')==version),None)
             if candidate:
                 self.assertTrue(candidate['manual_only'])
-                self.assertEqual(candidate['model_review'],'pending')
+                self.assertEqual(candidate['model_review'],
+                                 'approved' if candidate['number'] in server.load_feedback()['approved'] else 'pending')
                 self.assertEqual(candidate['scene_validation'],'pending')
 
     def test_review_images_open_inline_and_blend_downloads(self):

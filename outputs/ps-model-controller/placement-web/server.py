@@ -29,6 +29,7 @@ from scene_v2 import Perception, digest
 from relight import ambient_match
 from occlusion import refine_thin_mask, thin_line_seeds
 from lighting_estimate import estimate_light_from_rods
+from review_feedback import load_feedback
 
 LIBRARY = ROOT / 'outputs/三维模型库-圆润复验/results.jsonl'
 SCENE = ROOT / 'outputs/固定场景-39件尺寸标注/场景配置.json'
@@ -558,6 +559,53 @@ def register_rebuilt_candidate_13(folder=None):
 
 
 register_rebuilt_candidate_13()
+USER_FEEDBACK = load_feedback()
+
+
+def register_user_feedback():
+    """Keep prior rows for old sessions, and offer only the corrected versions."""
+    feedback = USER_FEEDBACK
+    requested = feedback['requested']
+    for row in ROWS.values():
+        if row.get('number') in requested:
+            row['superseded_by_feedback'] = True
+    for key, revision in feedback['revisions'].items():
+        number = revision['number']
+        original = next((row for row in ROWS.values()
+                         if row.get('number') == number and not row.get('manual_only')), None)
+        if not original:
+            continue
+        asset_id = original['asset_id'] + '-feedback-' + key
+        reason = ('根据人工意见修订；单件模型，外观待复核，现场尺度、落稳与遮挡尚未验收。')
+        ROWS[asset_id] = {
+            **original, 'asset_id':asset_id, 'file':f'{key} {revision["name"]}',
+            'mesh':str(revision['mesh']), 'mesh_sha256':revision['mesh_sha256'],
+            'status':'review', 'reason':reason, 'manual_only':True,
+            'version':'user-feedback-single-v1', 'shape_basis':'user_feedback_revision',
+            'model_review':'pending', 'scene_validation':'pending', 'quantity':1,
+            'feedback_revision':key, 'superseded_by_feedback':False,
+            'reconstruction':{**original.get('reconstruction',{}),
+                              'fidelity':{'passed':False,'status':'unknown',
+                                          'reason':'单件或实体外壳需要新的源视图复核'}},
+        }
+    try:
+        sequence = json.loads((ROOT/'work/direct-deepseek/sequence.json').read_text(encoding='utf8'))
+        versions = {}
+        for number in feedback['approved']:
+            if number == 1:
+                info = json.loads((ROOT/'outputs/01阀门-六视图重建-v7/result.json').read_text(encoding='utf8'))
+            else:
+                record = sequence['items'][f'{number:02}']['record']
+                info = json.loads(Path(record).read_text(encoding='utf8'))
+            versions[number] = info.get('version')
+        for row in ROWS.values():
+            if row.get('manual_only') and row.get('version') and row.get('version') == versions.get(row.get('number')):
+                row['model_review'] = 'approved'
+    except (OSError, ValueError, TypeError, KeyError):
+        pass
+
+
+register_user_feedback()
 SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
@@ -610,8 +658,10 @@ async def assets(request):
                           'shape_basis':r.get('shape_basis', 'single_image_reconstruction'),
                           'model_review':r.get('model_review', 'pending'),
                           'scene_validation':r.get('scene_validation', 'pending'),
+                          'quantity':r.get('quantity'),
                           'passed': bool(r.get('reconstruction', {}).get('fidelity', {}).get('passed'))}
-                         for r in sorted(ROWS.values(),key=lambda row:(row['number'],bool(row.get('manual_only'))))])
+                         for r in sorted(ROWS.values(),key=lambda row:(row['number'],bool(row.get('manual_only'))))
+                         if not r.get('superseded_by_feedback')])
 
 
 async def model(request):
@@ -673,7 +723,8 @@ async def model_review_page_12(request):
 
 
 async def model_review_page_13(request):
-    return FileResponse(HERE/'model-review-13.html')
+    return FileResponse(HERE/('model-review-13-single.html' if '13' in USER_FEEDBACK['revisions']
+                              else 'model-review-13.html'))
 
 
 REVIEW_FOLDERS = {
@@ -855,6 +906,16 @@ REVIEW_FILES = {
 
 async def model_review_file(request):
     number=request.path_params['number']
+    if number == 13 and '13' in USER_FEEDBACK['revisions']:
+        revision=USER_FEEDBACK['revisions']['13']
+        folder=revision['mesh'].parent
+        allowed={'board':revision['board'], 'blend':revision['blend'],
+                 'record':folder/'geometry-check.json', 'front':folder/'renders/front.png',
+                 'local':folder/'renders/3q.png'}
+        path=allowed.get(request.path_params['name'])
+        if not path or not path.is_file():return err('检查文件不存在',404)
+        return FileResponse(path,filename=path.name,
+                            content_disposition_type='attachment' if path.suffix.lower()=='.blend' else 'inline')
     folder_name=REVIEW_FOLDERS.get(number)
     folder=ROOT/folder_name if folder_name else None
     allowed=REVIEW_FILES.get(number, {})
@@ -910,6 +971,13 @@ async def background(request):
 def validate_state(data, s):
     if data.get('asset') not in ROWS:
         raise ValueError('请选择模型库中的物品')
+    row = ROWS[data['asset']]
+    if row.get('superseded_by_feedback'):
+        raise ValueError('此版本已按人工意见修订，请重新选择新模型')
+    if row.get('quantity') == 1:
+        for field in ('quantity', 'count'):
+            if field in data and (type(data[field]) is not int or data[field] != 1):
+                raise ValueError('此模型每次只能放置一件')
     values = {}
     for name, lower, upper in [('x', 0, s['width']), ('y', 0, s['height']),
                                ('size', 16, max(s['width'], s['height'])),
@@ -1149,6 +1217,8 @@ async def preview(request):
         revision = data.get('revision')
         if revision != s['revision'] or not s['state']:
             return err('摆位已变化，请重新生成', 409)
+        if ROWS[s['state']['asset']].get('superseded_by_feedback'):
+            raise ValueError('此版本已按人工意见修订，请重新选择新模型')
         encoded = data.get('image', '')
         if not encoded.startswith('data:image/png;base64,') or len(encoded) > 12_000_000:
             raise ValueError('三维占位图格式或大小不正确')
@@ -1452,6 +1522,8 @@ async def automatic(request):
         s = session(request)
         if not s['state']:
             raise ValueError('请先选择物品')
+        if ROWS[s['state']['asset']].get('superseded_by_feedback'):
+            raise ValueError('此版本已按人工意见修订，请重新选择新模型')
         if ROWS[s['state']['asset']].get('manual_only'):
             raise ValueError('六视图修复候选仅供人工预览，尚未通过自动放置的物理校验')
         out = DATA / f"auto-{s['id']}-{int(time.time())}"
