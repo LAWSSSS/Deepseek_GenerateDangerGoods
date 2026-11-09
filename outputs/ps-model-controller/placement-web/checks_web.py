@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from starlette.testclient import TestClient
 import server
-from relight import ambient_match, estimate_render_environment
+from relight import ambient_match, apply_contact_ao, estimate_render_environment
 from contact_shadow import make_contact_shadow
 from photometry import quiet_photo
 from occlusion import refine_thin_mask, thin_line_seeds
@@ -206,10 +206,10 @@ class PlacementChecks(unittest.TestCase):
         self.assertEqual(result.status_code,400)
 
     def test_validate_bad_pose_and_model(self):
-        for bad in ({'size':float('nan')},{'asset':'../../bad'},{'elevation':90},{'elevation':0}):
+        for bad in ({'size':float('nan')},{'asset':'../../bad'},{'elevation':90},{'elevation':-90}):
             response=self.client.post(self.url+'/state',json={**self.state,**bad}) if 'size' not in bad else None
             if response is not None:self.assertEqual(response.status_code,400)
-        for elevation in (1,89):
+        for elevation in (-89,0,89):
             response=self.client.post(self.url+'/state',json={**self.state,'elevation':elevation})
             self.assertEqual(response.status_code,200)
             self.assertEqual(response.json()['state']['elevation'],elevation)
@@ -296,6 +296,17 @@ class RelightChecks(unittest.TestCase):
         self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')), alpha))
         self.assertIn('background_lab', evidence)
         self.assertIn('accent_chroma_cap', evidence)
+
+    def test_contact_ao_darkens_base_without_changing_alpha(self):
+        obj = Image.new('RGBA',(60,60),(140,120,100,0))
+        alpha = np.zeros((60,60),np.uint8); alpha[8:60,10:50]=255
+        obj.putalpha(Image.fromarray(alpha))
+        result = apply_contact_ao(obj)
+        self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')), alpha))
+        before = np.asarray(obj)[..., :3].astype(float)
+        after = np.asarray(result)[..., :3].astype(float)
+        self.assertLess(after[59, 20].mean(), before[59, 20].mean())
+        self.assertEqual(after[15, 20].mean(), before[15, 20].mean())
 
 
 class ContactShadowChecks(unittest.TestCase):

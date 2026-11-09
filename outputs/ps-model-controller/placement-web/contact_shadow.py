@@ -58,10 +58,28 @@ def make_contact_shadow(support, foreground, alpha, x, y, side, light_direction=
                              borderMode=cv2.BORDER_CONSTANT, borderValue=0)
     sigma = max(2.0, .035 * side)
     blurred = cv2.GaussianBlur(shifted.astype(np.float32) / 255.0, (0, 0), sigma)
-    shadow = np.clip(blurred * .80, 0, 1)
+    shadow = np.clip(blurred * .90, 0, 1)
+    # A soft elliptical darkening at the actual base makes the object sit even
+    # when the selected support has a rough/textured edge. It is still a
+    # screen-space approximation, not a physical contact shadow.
+    base_center = (int(round(ox + (box[0] + box[2]) / 2)), int(round(oy + box[3] - max(2, .02 * side))))
+    base_radius = (max(3, int(round(bbox_w * .56))), max(2, int(round(side * .075))))
+    base = np.zeros_like(shadow, dtype=np.uint8)
+    cv2.ellipse(base, base_center, base_radius, 0, 0, 360, 255, -1)
+    base = cv2.GaussianBlur(base.astype(np.float32) / 255.0, (0, 0), max(2.0, .06 * side))
+    shadow = np.maximum(shadow, base * .42)
     shadow *= local_support.astype(np.float32)
     shadow *= (~local_front).astype(np.float32)
     shadow[local_object > 0] = 0
+    # The selected support can be a narrow steel strip while the base sits at
+    # its edge. Keep the small base ellipse visible on the local background so
+    # the object reads as grounded; it is still marked as a screen-space
+    # estimate and never treated as physical support evidence.
+    base_shadow = base * .48
+    base_shadow *= (~local_front).astype(np.float32)
+    base_shadow[local_object > 0] = 0
+    if local_support.any():
+        shadow = np.maximum(shadow, base_shadow)
     if shadow.sum() < 1:
         return None, {'status': 'unavailable', 'reason': '承托面内没有可用阴影像素'}
     mask = np.rint(np.clip(shadow, 0, 1) * 255).astype(np.uint8)

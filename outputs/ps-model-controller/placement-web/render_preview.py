@@ -1,4 +1,4 @@
-"""Render the unmodified glTF pose using the browser's orthographic camera."""
+"""Render the unmodified glTF pose using the browser's perspective camera."""
 import json
 import math
 import sys
@@ -26,6 +26,15 @@ if not math.isfinite(world_strength) or not .1 <= world_strength <= 1.2:
 background = scene.world.node_tree.nodes.get('Background')
 background.inputs['Color'].default_value = (*world_color, 1)
 background.inputs['Strength'].default_value = world_strength
+texture_path = environment.get('texture')
+if texture_path and Path(texture_path).is_file():
+    nodes = scene.world.node_tree.nodes
+    links = scene.world.node_tree.links
+    environment_node = nodes.new('ShaderNodeTexEnvironment')
+    environment_node.image = bpy.data.images.load(texture_path, check_existing=False)
+    environment_node.image.colorspace_settings.name = 'sRGB'
+    environment_node.projection = 'EQUIRECTANGULAR'
+    links.new(environment_node.outputs['Color'], background.inputs['Color'])
 objects = [worker.load_mesh(request['mesh'])]
 points = [p for obj in objects for p in worker.world_vertices(obj)]
 low = Vector([min(p[i] for p in points) for i in range(3)])
@@ -36,7 +45,7 @@ if span <= 0:
     raise ValueError('模型尺寸为空')
 a, e = map(math.radians, (request['azimuth'], request['elevation']))
 direction = Vector((math.sin(a)*math.cos(e), -math.cos(a)*math.cos(e), math.sin(e)))
-camera=worker.make_camera(scene, center + direction * span * 5, center, ortho_scale=2 * span / 1.35)
+camera=worker.make_camera(scene, center + direction * span * 2.35, center, fov=35)
 key_direction = environment.get('key_direction') or [-.45, -.60]
 if len(key_direction) != 2 or not all(math.isfinite(v) and abs(v) <= 1.01 for v in key_direction):
     raise ValueError('环境光方向估计无效')

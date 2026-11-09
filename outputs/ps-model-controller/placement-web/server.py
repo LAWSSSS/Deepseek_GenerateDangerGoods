@@ -14,7 +14,7 @@ from pathlib import Path
 import cv2
 import httpx
 import numpy as np
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE.parent))
 from scene_v2 import Perception, digest
-from relight import ambient_match, estimate_render_environment
+from relight import ambient_match, apply_contact_ao, estimate_render_environment
 from photometry import quiet_photo
 from contact_shadow import make_contact_shadow
 from occlusion import refine_thin_mask, thin_line_seeds
@@ -685,7 +685,7 @@ SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
 CHAT_ACTIVE = set()
-RENDER_ALGORITHM = 'scene-light-contact-v6'
+RENDER_ALGORITHM = 'scene-light-contact-v7'
 ANALYSIS_ALGORITHM = 'native-thin-occlusion-v1'
 
 
@@ -1059,7 +1059,7 @@ def validate_state(data, s):
     values = {}
     for name, lower, upper in [('x', 0, s['width']), ('y', 0, s['height']),
                                ('size', 16, max(s['width'], s['height'])),
-                               ('azimuth', -3600, 3600), ('elevation', 1, 89)]:
+                               ('azimuth', -3600, 3600), ('elevation', -89, 89)]:
         value = float(data[name])
         if not np.isfinite(value) or not lower <= value <= upper:
             raise ValueError(f'{name} 超出范围')
@@ -1390,6 +1390,10 @@ async def preview(request):
         light_rect=(max(0,int(cx-side)),max(0,int(cy-side)),min(s['width'],int(cx+side)),min(s['height'],int(cy+side)))
         with Image.open(s['background']) as background:
             light_frame=ImageOps.exif_transpose(background).convert('RGB').crop(light_rect)
+        environment_path = folder / 'environment.png'
+        environment_image = light_frame.resize((512, 256), Image.Resampling.LANCZOS)
+        environment_image = environment_image.filter(ImageFilter.GaussianBlur(22))
+        environment_image.save(environment_path)
         lighting=await asyncio.to_thread(estimate_light_from_rods,light_frame,(cx-light_rect[0],cy-light_rect[1]),side)
         if s.get('support'):
             with Image.open(Path(s['directory'])/f"analysis-{revision}"/f"{s['support']}.png") as im:
@@ -1400,6 +1404,7 @@ async def preview(request):
         environment=await asyncio.to_thread(
             estimate_render_environment, light_frame, support_mask & ~front_mask,
             (cx-light_rect[0], cy-light_rect[1]), side, lighting)
+        environment['texture'] = str(environment_path)
         req = {'mesh':str(mesh), 'azimuth':st['azimuth'], 'elevation':st['elevation'], 'output':str(output),
                'lighting':lighting, 'environment':environment}
         (folder/'request.json').write_text(json.dumps(req), encoding='utf8')
@@ -1440,6 +1445,7 @@ async def preview(request):
         obj = obj.resize((side, side), Image.Resampling.LANCZOS)
         x, y = round(st['x']-side/2), round(st['y']-side/2)
         matched, photo = await asyncio.to_thread(match_local_photo,s,obj,x,y)
+        matched = apply_contact_ao(matched)
         base = Image.open(s['background']).convert('RGBA')
         result = base.copy()
         front_mask = foreground(s)

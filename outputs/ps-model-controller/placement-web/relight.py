@@ -107,6 +107,28 @@ def estimate_render_environment(frame_crop, support, center, size, lighting=None
     }
 
 
+def apply_contact_ao(obj, strength=.16):
+    """Darken the lowest object band slightly without touching alpha.
+
+    This is an appearance cue for the review preview, not a physical
+    occlusion calculation.
+    """
+    rgba = np.asarray(obj.convert('RGBA')).copy()
+    alpha = rgba[:, :, 3]
+    ys, xs = np.nonzero(alpha >= 128)
+    if len(ys) < 20:
+        return obj.copy()
+    top, bottom = int(ys.min()), int(ys.max())
+    band = max(2, round((bottom - top + 1) * .10))
+    start = max(0, bottom - band + 1)
+    for row in range(start, bottom + 1):
+        t = (bottom - row) / max(1, band - 1)
+        factor = 1.0 - float(np.clip(strength, 0, .35)) * (1.0 - t)
+        core = alpha[row] >= 16
+        rgba[row, core, :3] = np.rint(rgba[row, core, :3] * factor).astype(np.uint8)
+    return Image.fromarray(rgba)
+
+
 def ambient_match(frame, support, foreground, obj, x, y):
     """Return RGB-adjusted RGBA and evidence; never alter the object's alpha.
 
