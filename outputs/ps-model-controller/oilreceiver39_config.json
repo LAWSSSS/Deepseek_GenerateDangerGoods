@@ -1,0 +1,146 @@
+{
+  "version": "oilreceiver39-parametric-v1",
+  "number": 39,
+  "name": "集油器2.jpg",
+  "radial_segments": 128,
+  "shape_basis": "source_photo_with_uncalibrated_six_view_visual_reference",
+  "reference_role": "visual_match_unverified",
+  "scale_note": "Working scale is inferred from the visible 10 L / 3.7 gal label and the clean-photo pixel ratio (overall height / body diameter). It is not a measured dimension and must be confirmed before site placement.",
+  "proportion_source": {
+    "photo": "outputs/物品高清输入-39件/原貌HD/39-集油器2.png",
+    "rust": "outputs/物品高清输入-39件/生锈HD/39-集油器2.png",
+    "reference": "references/parallel-six-view/六视角青绿色压力油罐产品图лириға.png",
+    "reference_note": "The six-view sheet is an uncalibrated visual match of the same teal HPEOK PHO-10 oil-receiver family as the source photograph. It is used for topology, port placement, valve orientation and hidden-face inference only; panel scales differ between views and are not treated as measurements.",
+    "visible_structure": "Upright teal painted steel pressure vessel with torispherical top and bottom heads, upper and lower circumferential weld seams, two circular front sight/plug bosses with red/black indicators, a yellow HPEOK PHO-10 label, a vertical top stainless valve assembly with brass plug, quick-connect on the left and black ribbed knob on the right, a matching bottom drain valve, and a small angled brass/bronze service fitting on the upper-left shoulder.",
+    "pixel_ratios": "Clean photo foreground is 315 px wide and 1233 px tall; body maximum diameter about 311 px; body (excluding end valves) about 1045 px tall. The candidate uses overall height / body diameter about 3.93 and body height / diameter about 3.30.",
+    "status": "uncalibrated_visual_match",
+    "label_evidence": "Readable source label: HPEOK, 油分离器 / Oil Receiver, Type PHO-10, Inlet/Outlet 3/8\" ODF, 3450 kPa 500 psi, CE/PED, 10 L / 3.7 gal, 7 kg, 2018.12.13. The rectified visible label is used as a texture; obscured text is left as photographed rather than invented."
+  },
+  "scale": {
+    "body_max_diameter_m": 0.165,
+    "body_bottom_z_m": 0.035,
+    "body_top_z_m": 0.580,
+    "overall_height_m_approx": 0.648,
+    "basis": "label volume 10 L + clean-photo pixel ratio",
+    "inference": true
+  },
+  "body": {
+    "outer_radius_m": 0.0825,
+    "wall_assumption": "closed solid exterior; wall thickness and internal cavity are not modelled",
+    "profile": [
+      [0.0, 0.035],
+      [0.012, 0.0354],
+      [0.024, 0.0366],
+      [0.036, 0.0395],
+      [0.048, 0.0440],
+      [0.060, 0.0505],
+      [0.070, 0.0585],
+      [0.0765, 0.0685],
+      [0.0805, 0.0790],
+      [0.0820, 0.0890],
+      [0.0825, 0.1000],
+      [0.0825, 0.5150],
+      [0.0820, 0.5260],
+      [0.0805, 0.5360],
+      [0.0765, 0.5465],
+      [0.070, 0.5565],
+      [0.060, 0.5645],
+      [0.048, 0.5710],
+      [0.036, 0.5755],
+      [0.024, 0.5784],
+      [0.012, 0.5796],
+      [0.0, 0.5800]
+    ],
+    "seams": [
+      {"name": "Weld seam upper", "z": 0.5300, "major": 0.0820, "minor": 0.0017},
+      {"name": "Weld seam lower", "z": 0.1000, "major": 0.0820, "minor": 0.0017}
+    ]
+  },
+  "side_ports": {
+    "centers_z_m": [0.4655, 0.1876],
+    "azimuth_deg": 0.0,
+    "boss": {
+      "across_flats_m": 0.046,
+      "depth_m": 0.011,
+      "center_radius_m": 0.0855,
+      "outer_ring_major_m": 0.0195,
+      "outer_ring_minor_m": 0.0032,
+      "face_radius_m": 0.0190,
+      "inner_ring_major_m": 0.0138,
+      "inner_ring_minor_m": 0.0018,
+      "glass_radius_m": 0.0120,
+      "glass_thickness_m": 0.0030,
+      "red_dot_radius_m": 0.0028,
+      "screw_radius_m": 0.0018,
+      "screw_ring_radius_m": 0.0078
+    },
+    "note": "Port bosses and their indicator dots are visible in the source photo and the six-view sheet; the internal sight-glass construction and thread are inferred."
+  },
+  "label": {
+    "z_center_m": 0.3290,
+    "height_m": 0.0780,
+    "arc_half_angle_deg": 36.0,
+    "surface_offset_m": 0.0007,
+    "thickness_m": 0.0008,
+    "texture_note": "Perspective-rectified crop of the visible clean label; lower line blur is preserved, not re-rendered."
+  },
+  "top_assembly": {
+    "neck": {"z0": 0.5780, "z1": 0.5870, "radius": 0.0200},
+    "brass_ring": {"z0": 0.5870, "z1": 0.5900, "radius": 0.0210},
+    "hex_nut": {"z0": 0.5900, "z1": 0.6020, "across_flats": 0.0400},
+    "block": {"center_z": 0.6110, "half": [0.0160, 0.0200, 0.0090]},
+    "brass_plug": {"z0": 0.6200, "z1": 0.6290, "across_flats": 0.0260},
+    "slot": {"center": [0.0, 0.0, 0.6293], "half": [0.0090, 0.0012, 0.0006]},
+    "left_coupler": {"y0": -0.0200, "y1": -0.0550, "base_radius": 0.0100, "tip_radius": 0.0090},
+    "right_nipple": {"y0": 0.0200, "y1": 0.0320, "radius": 0.0085},
+    "knob": {"y0": 0.0320, "y1": 0.0520, "radius": 0.0165, "flutes": 16},
+    "knob_cap": {"y0": 0.0520, "y1": 0.0620, "radius": 0.0110},
+    "red_cap": {"center": [-0.0200, -0.0040, 0.6250], "radius": 0.0040, "height": 0.0100}
+  },
+  "bottom_assembly": {
+    "neck": {"z0": 0.0350, "z1": 0.0200, "radius": 0.0180},
+    "brass_ring": {"z0": 0.0200, "z1": 0.0170, "radius": 0.0190},
+    "hex_nut": {"z0": 0.0170, "z1": 0.0050, "across_flats": 0.0380},
+    "block": {"center_z": -0.0080, "half": [0.0160, 0.0190, 0.0110]},
+    "brass_plug": {"x0": 0.0160, "x1": 0.0260, "across_flats": 0.0200},
+    "left_coupler": {"y0": -0.0190, "y1": -0.0520, "base_radius": 0.0095, "tip_radius": 0.0085},
+    "right_nipple": {"y0": 0.0190, "y1": 0.0300, "radius": 0.0080},
+    "knob": {"y0": 0.0300, "y1": 0.0480, "radius": 0.0155, "flutes": 16},
+    "knob_cap": {"y0": 0.0480, "y1": 0.0580, "radius": 0.0105}
+  },
+  "side_fitting": {
+    "azimuth_deg": -47.0,
+    "surface_z_m": 0.5480,
+    "axis": [0.45, -0.75, 0.48],
+    "boss_radius_m": 0.0090,
+    "boss_length_m": 0.0070,
+    "brass_hex_across_flats_m": 0.0140,
+    "brass_hex_length_m": 0.0080,
+    "cap_radius_m": 0.0060,
+    "cap_length_m": 0.0065
+  },
+  "material_profile": {
+    "teal_paint_rgb": [18, 133, 133],
+    "teal_dark_rgb": [8, 88, 90],
+    "rust_rgb": [118, 72, 42],
+    "rust_dark_rgb": [68, 42, 28],
+    "exposed_steel_rgb": [96, 101, 105],
+    "label_paper_roughness": 0.55,
+    "stainless_roughness": 0.30,
+    "brass_roughness": 0.32,
+    "black_plastic_roughness": 0.44,
+    "red_plastic_roughness": 0.36,
+    "sight_glass_roughness": 0.14,
+    "bronze_roughness": 0.48
+  },
+  "render": {
+    "view_resolution": 640,
+    "view_samples": 32,
+    "detail_resolution": 640,
+    "detail_samples": 20,
+    "material_resolution": 768,
+    "material_samples": 24,
+    "turntable_resolution": 384,
+    "turntable_samples": 8
+  }
+}
