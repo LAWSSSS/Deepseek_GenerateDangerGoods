@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>三维模型查看器</title>
+  <link rel="stylesheet" href="/review-viewer.css">
+  <script type="importmap">
+    {"imports":{"three":"/vendor/build/three.module.js","three/addons/":"/vendor/examples/jsm/"}}
+  </script>
+</head>
+<body>
+  <header class="top">
+    <div>
+      <p class="eyebrow">三维模型人工审阅</p>
+      <h1>逐件查看模型</h1>
+      <p class="subtitle">在此查看模型，再到审阅表填写你的意见。</p>
+    </div>
+    <div class="status-tag">本机查看</div>
+  </header>
+
+  <main>
+    <section class="toolbar" aria-label="选择物品">
+      <div class="item-select">
+        <label for="item">物品编号</label>
+        <select id="item" aria-label="物品编号"></select>
+      </div>
+      <div class="paging">
+        <button id="previous" type="button">上一件</button>
+        <button id="next" type="button">下一件</button>
+      </div>
+      <div class="view-controls" aria-label="查看模式">
+        <button id="material" type="button" class="active" aria-pressed="true">材质</button>
+        <button id="clay" type="button" aria-pressed="false">灰模</button>
+        <button id="reset" type="button">重置视角</button>
+      </div>
+    </section>
+
+    <section class="content">
+      <div class="model-panel">
+        <div class="panel-heading">
+          <div><h2 id="title">正在读取模型</h2><p id="review-status">候选模型</p></div>
+          <span class="pill">可旋转 3D</span>
+        </div>
+        <div id="viewport" class="viewport">
+          <canvas id="canvas" aria-label="三维模型，按住鼠标左键拖动旋转"></canvas>
+          <div id="loading" class="loading" role="status">正在加载模型…</div>
+        </div>
+        <div class="controls-help">左键拖动旋转 · 滚轮缩放 · 右键拖动平移</div>
+      </div>
+
+      <aside class="reference-panel">
+        <div class="panel-heading"><div><h2>做锈素材</h2><p>与模型对照外形和表面</p></div></div>
+        <div class="reference-image"><img id="rust" alt="当前物品的做锈素材"></div>
+        <a id="board" class="board-link" target="_blank" rel="noopener">查看六视图新旧对照</a>
+        <p id="reference-note" class="reference-note">不同图片的观察角度可能不同。</p>
+      </aside>
+    </section>
+    <p class="footer-note">此页面用于查看模型，不会更改审阅表或模型文件。模型与现场合成仍需分别检查。</p>
+  </main>
+  <script type="module" src="/review-viewer.js"></script>
+</body>
+</html>
