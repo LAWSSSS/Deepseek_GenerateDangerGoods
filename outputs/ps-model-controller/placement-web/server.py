@@ -658,6 +658,7 @@ async def assets(request):
                           'shape_basis':r.get('shape_basis', 'single_image_reconstruction'),
                           'model_review':r.get('model_review', 'pending'),
                           'scene_validation':r.get('scene_validation', 'pending'),
+                          'review_url':f"/review/{int(r['number']):02d}" if 1 <= int(r['number']) <= 13 else None,
                           'quantity':r.get('quantity'),
                           'passed': bool(r.get('reconstruction', {}).get('fidelity', {}).get('passed'))}
                          for r in sorted(ROWS.values(),key=lambda row:(row['number'],bool(row.get('manual_only'))))

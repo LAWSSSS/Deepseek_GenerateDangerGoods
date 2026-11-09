@@ -6,13 +6,32 @@ let session=null, assets=[], model=null, position={x:0,y:0,size:300,azimuth:80,e
 const renderer=new THREE.WebGLRenderer({canvas:$('modelCanvas'),alpha:true,antialias:true,preserveDrawingBuffer:true});
 renderer.setSize(768,768,false); renderer.setClearColor(0,0); renderer.outputColorSpace=THREE.SRGBColorSpace;
 const scene=new THREE.Scene(), camera=new THREE.OrthographicCamera(-1,1,1,-1,.01,50);
-// Neutral lighting while the user manipulates the original model. Scene-specific
-// light and color are estimated only after a support area has been selected.
-scene.add(new THREE.AmbientLight(0xffffff,2));
-// glTF defaults to fully metallic when a material is absent. AmbientLight does
-// not illuminate metals, so provide a neutral reflection environment as well.
-const environmentPixels=new Uint8Array(64*32*4).fill(255);
-const environmentTexture=new THREE.DataTexture(environmentPixels,64,32,THREE.RGBAFormat);
+// Match the standalone model review page's neutral studio light. The white
+// ambient-only setup washed out metal and made the live model look different
+// from the reviewed GLB. Scene-specific light is still estimated only after a
+// support area has been selected.
+scene.add(new THREE.AmbientLight(0xffffff,.75));
+for(const [lightPosition,intensity] of [[[4,6,5],1.4],[[-4,3,-4],.7]]){
+  const light=new THREE.DirectionalLight(0xffffff,intensity);
+  light.position.set(...lightPosition);
+  scene.add(light);
+}
+// A softbox-shaped reflection environment, copied from the review page so the
+// same glTF material has the same metal/roughness response in both views.
+const environmentWidth=512,environmentHeight=256;
+const environmentPixels=new Uint8Array(environmentWidth*environmentHeight*4);
+const panels=[[.13,.46,.045,.28,.82],[.39,.43,.055,.34,.92],[.72,.47,.035,.25,.74],[.91,.30,.09,.11,.52]];
+for(let y=0;y<environmentHeight;y++)for(let x=0;x<environmentWidth;x++){
+  const u=x/environmentWidth,v=y/environmentHeight;let value=.30+.10*Math.cos((v-.35)*Math.PI);
+  for(const [cx,cy,sx,sy,power] of panels){
+    const d=Math.abs(u-cx),dx=Math.min(d,1-d)/sx,dy=Math.abs(v-cy)/sy;
+    value+=power*Math.exp(-Math.pow(dx,6)-Math.pow(dy,6));
+  }
+  const channel=Math.round(Math.min(1,value)*255),i=(y*environmentWidth+x)*4;
+  environmentPixels[i]=environmentPixels[i+1]=environmentPixels[i+2]=channel;
+  environmentPixels[i+3]=255;
+}
+const environmentTexture=new THREE.DataTexture(environmentPixels,environmentWidth,environmentHeight,THREE.RGBAFormat);
 environmentTexture.colorSpace=THREE.SRGBColorSpace;
 environmentTexture.mapping=THREE.EquirectangularReflectionMapping;
 environmentTexture.needsUpdate=true;
@@ -25,7 +44,7 @@ function endpoint(tail=''){return `/api/sessions/${session.id}${tail}`}
 function say(t){$('status').textContent=t}
 function error(e){say('操作未完成：'+e.message)}
 function render(){let a=THREE.MathUtils.degToRad(position.azimuth), e=THREE.MathUtils.degToRad(position.elevation);camera.position.set(5*Math.sin(a)*Math.cos(e),5*Math.sin(e),5*Math.cos(a)*Math.cos(e));camera.lookAt(0,0,0);camera.updateProjectionMatrix();renderer.render(scene,camera)}
-async function loadModel(){if(!session||!$('asset').value)return;const serial=++loadSerial;try{let gltf=await new GLTFLoader().loadAsync('/api/model/'+$('asset').value);if(serial!==loadSerial)return;if(model)scene.remove(model);model=new THREE.Group();gltf.scene.rotation.x=-Math.PI/2;model.add(gltf.scene);model.updateMatrixWorld(true);let box=new THREE.Box3().setFromObject(model), center=box.getCenter(new THREE.Vector3()), size=box.getSize(new THREE.Vector3());model.position.sub(center);model.scale.setScalar(1.35/Math.max(size.x,size.y,size.z));model.position.multiplyScalar(model.scale.x);scene.add(model);render();$('object').hidden=false;layout();const a=assets.find(x=>x.id===$('asset').value);const review=a.model_review==='approved'?'模型已由你确认通过':a.manual_only?'候选模型待审':'原模型';const evidence=a.shape_basis==='user_feedback_revision'?'修订后的源视图待核':a.passed?'源视图检查通过':'源视图未通过或待核';$('assetStatus').textContent=review+'；'+evidence+'；'+(a.reason||'姿态和场景融合仍待复核。');await sync()}catch(e){error(e)}}
+async function loadModel(){if(!session||!$('asset').value)return;const serial=++loadSerial;try{let gltf=await new GLTFLoader().loadAsync('/api/model/'+$('asset').value);if(serial!==loadSerial)return;if(model)scene.remove(model);model=new THREE.Group();gltf.scene.rotation.x=-Math.PI/2;model.add(gltf.scene);model.updateMatrixWorld(true);let box=new THREE.Box3().setFromObject(model), center=box.getCenter(new THREE.Vector3()), size=box.getSize(new THREE.Vector3());model.position.sub(center);model.scale.setScalar(1.35/Math.max(size.x,size.y,size.z));model.position.multiplyScalar(model.scale.x);scene.add(model);render();$('object').hidden=false;layout();const a=assets.find(x=>x.id===$('asset').value);const reviewLink=$('modelReview');if(a.review_url){reviewLink.href=a.review_url;reviewLink.textContent=`查看第 ${String(a.number).padStart(2,'0')} 件完整模型检查页`;reviewLink.hidden=false}else{reviewLink.hidden=true}const review=a.model_review==='approved'?'模型已由你确认通过':a.manual_only?'候选模型待审':'原模型';const evidence=a.shape_basis==='user_feedback_revision'?'修订后的源视图待核':a.passed?'源视图检查通过':'源视图未通过或待核';$('assetStatus').textContent=review+'；'+evidence+'；'+(a.reason||'姿态和场景融合仍待复核。');await sync()}catch(e){error(e)}}
 function layout(){if(!session)return;let w=$('stage').clientWidth, scale=w/session.width;let obj=$('object');obj.style.width=position.size*scale+'px';obj.style.height=position.size*scale+'px';obj.style.left=(position.x-position.size/2)*scale+'px';obj.style.top=(position.y-position.size/2)*scale+'px';$('coordinates').textContent=`中心 (${Math.round(position.x)}, ${Math.round(position.y)}) · 占位 ${Math.round(position.size)} px`;for(let k of ['azimuth','elevation','size'])$(k).value=Math.round(position[k]);}
 async function sync(){if(!session||!model)return;const sid=session.id, state={...position,asset:$('asset').value};syncQueue=syncQueue.catch(()=>{}).then(async()=>{let updated=await api(`/api/sessions/${sid}/state`,post(state));if(session?.id!==sid)return;session=updated;$('result').hidden=true;$('download').hidden=true;$('mask').hidden=true;$('regions').innerHTML='';$('checks').textContent='人工位置与视角已记录；落稳、尺度、可见面、保护区和遮挡均待核验。'});return syncQueue}
 function schedule(){clearTimeout(syncTimer);syncTimer=setTimeout(()=>{syncTimer=null;sync().catch(error)},250)}
