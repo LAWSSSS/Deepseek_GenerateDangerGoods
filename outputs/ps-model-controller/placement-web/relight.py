@@ -6,6 +6,107 @@ from PIL import Image
 from photometry import fit_photo, statistics
 
 
+def _srgb_to_linear(value):
+    value = float(np.clip(value, 0, 1))
+    return value / 12.92 if value <= .04045 else ((value + .055) / 1.055) ** 2.4
+
+
+def estimate_render_environment(frame_crop, support, center, size, lighting=None):
+    """Estimate a bounded world colour and soft key for the Blender preview.
+
+    The result is a screen-space appearance estimate. It is not a measured
+    3-D light direction; callers must keep ``light_direction`` unknown unless
+    the rod estimator explicitly returns an estimate.
+    """
+    support = np.asarray(support, dtype=bool)
+    measured = statistics(np.asarray(frame_crop.convert('RGB')), support)
+    fallback = {
+        'status': 'insufficient_samples',
+        'confidence': 'unknown',
+        'world_color': [0.32, 0.32, 0.32],
+        'world_strength': 0.55,
+        'key_direction': [-0.45, -0.60],
+        'key_strength': 0.65,
+        'fill_strength': 0.25,
+        'light_direction': 'unknown',
+        'reason': '承托面样本不足，使用中性环境',
+    }
+    if measured is None:
+        return fallback
+    scene, _ = measured
+    luma = float(scene['luma_p20_p50_p80'][1]) / 255.0
+    contrast = float(scene['contrast_p80_p20']) / 255.0
+    # Keep the world nearly neutral; a small neutral-AB tint is enough to
+    # avoid a pure-white studio look without inventing a coloured light.
+    ab = scene.get('neutral_ab') or [0.0, 0.0]
+    lab = np.array([[[50.0, float(ab[0]), float(ab[1])]]], dtype=np.float32)
+    tint = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)[0, 0].astype(np.float32)
+    tint /= max(float(tint.mean()), 1e-4)
+    grey = luma * (0.88 + 0.12 * np.clip(tint, .7, 1.3))
+    world = np.rint(np.clip(grey, .18, .42) * 255).astype(np.uint8)
+    world_color = [_srgb_to_linear(channel / 255) for channel in world]
+    world_strength = float(np.clip(.35 + contrast * .55, .30, .78))
+
+    rods = lighting or {}
+    direction = None
+    confidence = 'assumed'
+    status = 'assumed'
+    light_direction = 'unknown'
+    if rods.get('status') == 'estimated':
+        raw = rods.get('direction_screen') or []
+        if len(raw) == 2 and np.all(np.isfinite(raw)) and np.linalg.norm(raw) > 1e-4:
+            candidate = np.asarray(raw, dtype=float)
+            candidate /= np.linalg.norm(candidate)
+            # Reject a nearly vertical/bottom-up cue as a scene light; those
+            # cues are more likely bright support pixels than illumination.
+            if candidate[1] <= .5:
+                direction = candidate
+                status = 'estimated'
+                confidence = 'low'
+                light_direction = 'low_confidence_screen_direction'
+    if direction is None:
+        rows, cols = np.nonzero(support)
+        if len(rows) >= 120:
+            cx, cy = center
+            side = max(1.0, float(size))
+            nx = (cols - cx) / side
+            ny = (rows - cy) / side
+            if np.percentile(nx, 90) - np.percentile(nx, 10) > .7 and \
+                    np.percentile(ny, 90) - np.percentile(ny, 10) > .7:
+                design = np.column_stack((np.ones(len(rows)), nx, ny))
+                coeff, *_ = np.linalg.lstsq(design, np.asarray(frame_crop.convert('L'))[rows, cols], rcond=None)
+                residual = np.asarray(frame_crop.convert('L'))[rows, cols] - design @ coeff
+                mad = float(np.median(np.abs(residual - np.median(residual))))
+                gradient = coeff[1:]
+                if np.linalg.norm(gradient) > max(2.0, mad * .25):
+                    candidate = gradient / np.linalg.norm(gradient)
+                    # A bright bottom edge usually comes from the support
+                    # surface or a shadow, not from a light source below the
+                    # scrap pile; reject that low-confidence direction.
+                    if candidate[1] <= .25:
+                        direction = candidate
+                        status = 'gradient_estimate'
+                        confidence = 'low'
+                        light_direction = 'screen_gradient_assumption'
+    if direction is None:
+        direction = np.array([-0.45, -0.60], dtype=float)
+        direction /= np.linalg.norm(direction)
+        status = 'assumed'
+        confidence = 'assumed'
+    return {
+        'status': status,
+        'confidence': confidence,
+        'world_color': [round(float(v), 5) for v in world_color],
+        'world_strength': round(world_strength, 3),
+        'key_direction': [round(float(v), 4) for v in direction],
+        'key_strength': round(float(np.clip(.55 + contrast * .7, .45, 1.15)), 3),
+        'fill_strength': round(float(np.clip(.18 + contrast * .25, .16, .32)), 3),
+        'light_direction': light_direction,
+        'scene_luma_p20_p50_p80': scene['luma_p20_p50_p80'],
+        'scene_neutral_ab': scene.get('neutral_ab'),
+    }
+
+
 def ambient_match(frame, support, foreground, obj, x, y):
     """Return RGB-adjusted RGBA and evidence; never alter the object's alpha.
 

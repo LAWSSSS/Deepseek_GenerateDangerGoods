@@ -10,7 +10,9 @@ import numpy as np
 from PIL import Image
 from starlette.testclient import TestClient
 import server
-from relight import ambient_match
+from relight import ambient_match, estimate_render_environment
+from contact_shadow import make_contact_shadow
+from photometry import quiet_photo
 from occlusion import refine_thin_mask, thin_line_seeds
 from lighting_estimate import estimate_light_from_rods
 
@@ -204,9 +206,13 @@ class PlacementChecks(unittest.TestCase):
         self.assertEqual(result.status_code,400)
 
     def test_validate_bad_pose_and_model(self):
-        for bad in ({'size':float('nan')},{'asset':'../../bad'},{'elevation':90}):
+        for bad in ({'size':float('nan')},{'asset':'../../bad'},{'elevation':90},{'elevation':0}):
             response=self.client.post(self.url+'/state',json={**self.state,**bad}) if 'size' not in bad else None
             if response is not None:self.assertEqual(response.status_code,400)
+        for elevation in (1,89):
+            response=self.client.post(self.url+'/state',json={**self.state,'elevation':elevation})
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.json()['state']['elevation'],elevation)
         with self.assertRaises(ValueError):server.validate_state({**self.state,'size':float('nan')},self.live)
 
 
@@ -259,6 +265,68 @@ class RelightChecks(unittest.TestCase):
         result,info=ambient_match(frame,np.ones((240,240),bool),np.zeros((240,240),bool),obj,80,80)
         self.assertGreater(info['detail_blur_sigma_px'],0)
         self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')),pixels[:,:,3]))
+
+    def test_render_environment_is_bounded_and_gradient_is_low_confidence(self):
+        x = np.linspace(60,170,240,dtype=np.uint8)
+        pixels = np.repeat(np.broadcast_to(x,(240,240))[:,:,None],3,axis=2).copy()
+        frame = Image.fromarray(pixels)
+        env = estimate_render_environment(frame, np.ones((240,240),bool), (120,120), 160)
+        self.assertIn(env['status'], ('gradient_estimate','assumed'))
+        self.assertEqual(len(env['world_color']), 3)
+        self.assertTrue(all(0 <= v <= 1 for v in env['world_color']))
+        self.assertGreaterEqual(env['world_strength'], .30)
+        self.assertLessEqual(env['world_strength'], .78)
+        self.assertEqual(len(env['key_direction']), 2)
+        self.assertIn(env['light_direction'], ('screen_gradient_assumption','unknown'))
+        empty = estimate_render_environment(Image.new('RGB',(300,300),(80,80,80)),
+                                            np.zeros((300,300),bool), (150,150), 100)
+        self.assertEqual(empty['status'], 'insufficient_samples')
+        self.assertEqual(empty['light_direction'], 'unknown')
+
+    def test_quiet_photo_preserves_alpha_and_is_bounded(self):
+        x = np.linspace(60,120,240,dtype=np.uint8)
+        pixels = np.repeat(np.broadcast_to(x,(240,240))[:,:,None],3,axis=2).copy()
+        frame = Image.fromarray(pixels)
+        obj = Image.new('RGBA',(80,80),(150,120,100,0))
+        alpha = np.zeros((80,80),np.uint8); alpha[10:70,10:70]=255
+        obj.putalpha(Image.fromarray(alpha))
+        support = np.ones((240,240),bool)
+        nearby = np.ones((240,240),bool)
+        result, evidence = quiet_photo(frame, support, nearby, obj, 80, 80, 80)
+        self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')), alpha))
+        self.assertIn('background_lab', evidence)
+        self.assertIn('accent_chroma_cap', evidence)
+
+
+class ContactShadowChecks(unittest.TestCase):
+    def test_shadow_is_bounded_to_support_and_keeps_alpha_input(self):
+        support = np.zeros((200,200),bool); support[50:150,40:160] = True
+        foreground = np.zeros((200,200),bool)
+        alpha = np.zeros((60,60),np.uint8); alpha[8:60,10:50] = 255
+        before = alpha.copy()
+        layer, info = make_contact_shadow(support, foreground, alpha, 70, 70, 60, [0.3, 0.8])
+        self.assertTrue(np.array_equal(alpha, before))
+        self.assertIsNotNone(layer)
+        self.assertEqual(info['status'], 'estimated')
+        shadow_alpha = np.asarray(layer.getchannel('A'))
+        self.assertGreater(int(shadow_alpha.sum()), 0)
+        l,t,r,b = info['crop']
+        self.assertGreaterEqual(l, 40)
+        self.assertLessEqual(r, 160)
+        self.assertGreaterEqual(t, 50)
+        self.assertLessEqual(b, 150)
+        self.assertTrue(all(0 <= v <= 1 for v in info['direction_screen']))
+
+    def test_shadow_refuses_missing_support_or_foreground(self):
+        support = np.zeros((200,200),bool)
+        alpha = np.zeros((60,60),np.uint8); alpha[8:60,10:50] = 255
+        layer, info = make_contact_shadow(support, np.zeros((200,200),bool), alpha, 70, 70, 60)
+        self.assertIsNone(layer)
+        self.assertNotEqual(info['status'], 'estimated')
+        support[50:150,40:160] = True
+        foreground = np.ones((200,200),bool)
+        layer, info = make_contact_shadow(support, foreground, alpha, 70, 70, 60)
+        self.assertIsNone(layer)
 
 
 class ThinOcclusionChecks(unittest.TestCase):

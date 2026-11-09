@@ -26,7 +26,9 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE.parent))
 from scene_v2 import Perception, digest
-from relight import ambient_match
+from relight import ambient_match, estimate_render_environment
+from photometry import quiet_photo
+from contact_shadow import make_contact_shadow
 from occlusion import refine_thin_mask, thin_line_seeds
 from lighting_estimate import estimate_light_from_rods
 from review_feedback import load_feedback
@@ -683,7 +685,7 @@ SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
 CHAT_ACTIVE = set()
-RENDER_ALGORITHM = 'scene-light-canonical-axis-v4'
+RENDER_ALGORITHM = 'scene-light-contact-v6'
 ANALYSIS_ALGORITHM = 'native-thin-occlusion-v1'
 
 
@@ -1057,7 +1059,7 @@ def validate_state(data, s):
     values = {}
     for name, lower, upper in [('x', 0, s['width']), ('y', 0, s['height']),
                                ('size', 16, max(s['width'], s['height'])),
-                               ('azimuth', -3600, 3600), ('elevation', 10, 85)]:
+                               ('azimuth', -3600, 3600), ('elevation', 1, 89)]:
         value = float(data[name])
         if not np.isfinite(value) or not lower <= value <= upper:
             raise ValueError(f'{name} 超出范围')
@@ -1281,8 +1283,53 @@ def match_local_photo(s, obj, x, y):
     front = np.asarray(foreground(s).crop(crop)) >= 128
     with Image.open(s['background']) as im:
         frame = im.convert('RGB').crop(crop)
+    if n:
+        yy, xx = np.indices(mask.shape)
+        cx, cy = x-crop[0]+side/2, y-crop[1]+side/2
+        distance = np.sqrt((xx-cx)**2 + (yy-cy)**2)
+        nearby = mask & ~front & (distance > side*.50) & (distance < side*.92)
+        try:
+            matched, evidence = quiet_photo(frame, mask, nearby, obj, x-crop[0], y-crop[1], side)
+            core = np.asarray(obj.getchannel('A')) >= 190
+            before_lab = cv2.cvtColor(np.asarray(obj.convert('RGB')), cv2.COLOR_RGB2LAB)
+            after_lab = cv2.cvtColor(np.asarray(matched.convert('RGB')), cv2.COLOR_RGB2LAB)
+            before_ab = before_lab[core][:, 1:].astype(np.float32) - 128
+            after_ab = after_lab[core][:, 1:].astype(np.float32) - 128
+            before_chroma = float(np.median(np.linalg.norm(before_ab, axis=1))) if core.sum() else 0
+            after_chroma = float(np.median(np.linalg.norm(after_ab, axis=1))) if core.sum() else 0
+            # Strongly coloured objects (red paint, labels) must keep their
+            # identity; the local steel field must not turn them grey/brown.
+            if before_chroma > 20 and after_chroma < before_chroma*.62:
+                raise ValueError('quiet_photo_desaturated_colour')
+            photo = {
+                'status': 'estimated',
+                'method': 'bounded_local_light_field',
+                'support_verification': s.get('support_mode') or 'user_selected_pending',
+                'light_direction': 'unknown',
+                'nearby_samples': int(nearby.sum()),
+                'quiet_photo': evidence,
+                'object_after': None,
+            }
+            before = np.asarray(obj.convert('RGB'))
+            after = np.asarray(matched.convert('RGB'))
+            alpha = np.asarray(obj.getchannel('A')) >= 190
+            if alpha.sum() >= 60:
+                photo['object_before'] = {
+                    'luma_p20_p50_p80': [round(float(v), 1) for v in
+                                         np.percentile(cv2.cvtColor(before, cv2.COLOR_RGB2GRAY)[alpha], [20, 50, 80])],
+                }
+                photo['object_after'] = {
+                    'luma_p20_p50_p80': [round(float(v), 1) for v in
+                                         np.percentile(cv2.cvtColor(after, cv2.COLOR_RGB2GRAY)[alpha], [20, 50, 80])],
+                }
+            return matched, photo
+        except (ValueError, KeyError, OSError, cv2.error, IndexError):
+            pass
     result, photo = ambient_match(frame, mask, front, obj, x-crop[0], y-crop[1])
     photo['support_verification'] = (s.get('support_mode') or 'surrounding_scene_unverified')
+    if n:
+        photo['quiet_photo_fallback'] = True
+        photo['quiet_photo_fallback_reason'] = 'colored_object_or_insufficient_local_samples'
     return result, photo
 
 
@@ -1323,7 +1370,7 @@ async def preview(request):
         if s.get('support') is None:
             ranked = sorted((c for c in s['candidates'] if c['id'] not in s['selected']),
                             key=lambda c:c.get('support_score',0),reverse=True)
-            if ranked and ranked[0].get('support_score',0)>=.25 and (len(ranked)==1 or
+            if ranked and ranked[0].get('support_score',0)>=.15 and (len(ranked)==1 or
                     ranked[0]['support_score']-ranked[1].get('support_score',0)>=.08):
                 s['support'] = ranked[0]['id']
                 s['support_mode'] = 'estimated'
@@ -1344,8 +1391,17 @@ async def preview(request):
         with Image.open(s['background']) as background:
             light_frame=ImageOps.exif_transpose(background).convert('RGB').crop(light_rect)
         lighting=await asyncio.to_thread(estimate_light_from_rods,light_frame,(cx-light_rect[0],cy-light_rect[1]),side)
+        if s.get('support'):
+            with Image.open(Path(s['directory'])/f"analysis-{revision}"/f"{s['support']}.png") as im:
+                support_mask=np.asarray(im.convert('L').crop(light_rect))>127
+        else:
+            support_mask=np.ones((light_frame.height,light_frame.width),dtype=bool)
+        front_mask=np.asarray(foreground(s).crop(light_rect))>=128
+        environment=await asyncio.to_thread(
+            estimate_render_environment, light_frame, support_mask & ~front_mask,
+            (cx-light_rect[0], cy-light_rect[1]), side, lighting)
         req = {'mesh':str(mesh), 'azimuth':st['azimuth'], 'elevation':st['elevation'], 'output':str(output),
-               'lighting':lighting}
+               'lighting':lighting, 'environment':environment}
         (folder/'request.json').write_text(json.dumps(req), encoding='utf8')
         blender = ROOT/'work/blender45/blender-4.5.3-windows-x64/blender.exe'
         if not blender.is_file():
@@ -1367,8 +1423,18 @@ async def preview(request):
         two = np.asarray(blender_image.getchannel('A').resize((512,512), Image.Resampling.LANCZOS)) >= 128
         union = np.count_nonzero(one | two)
         iou = float(np.count_nonzero(one & two) / union) if union else 0
-        if iou < .95:
-            raise ValueError(f'网页与 Blender 的投影不一致（IoU {iou:.3f}），停止生成')
+        edge_iou = None
+        if iou < .94:
+            # At very shallow angles the same silhouette can differ by a
+            # couple of antialiased edge pixels between Three.js and Cycles.
+            # Accept only if a 2-pixel edge tolerance still aligns the masks.
+            kernel = np.ones((5,5), np.uint8)
+            one_d = cv2.dilate(one.astype(np.uint8), kernel) > 0
+            two_d = cv2.dilate(two.astype(np.uint8), kernel) > 0
+            edge_union = int(np.count_nonzero(one_d | two_d))
+            edge_iou = float(np.count_nonzero(one_d & two_d) / edge_union) if edge_union else 0
+        if iou < .94 and (edge_iou is None or edge_iou < .97):
+            raise ValueError(f'网页与 Blender 的投影不一致（IoU {iou:.3f}，边缘 IoU {edge_iou or 0:.3f}），停止生成')
         obj = blender_image
         side = round(st['size'])
         obj = obj.resize((side, side), Image.Resampling.LANCZOS)
@@ -1376,8 +1442,21 @@ async def preview(request):
         matched, photo = await asyncio.to_thread(match_local_photo,s,obj,x,y)
         base = Image.open(s['background']).convert('RGBA')
         result = base.copy()
-        result.alpha_composite(matched, (x, y))
         front_mask = foreground(s)
+        support_mask = np.zeros((s['height'], s['width']), dtype=bool)
+        if s.get('support'):
+            with Image.open(Path(s['directory'])/f"analysis-{revision}"/f"{s['support']}.png") as im:
+                support_mask = np.asarray(im.convert('L')) > 127
+        shadow_layer, shadow_info = make_contact_shadow(
+            support_mask, np.asarray(front_mask) >= 128, np.asarray(obj.getchannel('A')),
+            x, y, side, environment.get('key_direction'))
+        if shadow_layer is not None:
+            crop = shadow_info['crop']
+            result.alpha_composite(shadow_layer, (crop[0], crop[1]))
+            shadow_info['path'] = str(Path(s['directory']) / 'object-shadow.png')
+        else:
+            shadow_info = {**shadow_info, 'path': None}
+        result.alpha_composite(matched, (x, y))
         object_pixels = np.asarray(obj.getchannel('A')) >= 128
         overlap = np.asarray(front_mask.crop((x,y,x+side,y+side))) >= 128
         visible_ratio = 1-float(np.count_nonzero(object_pixels & overlap))/max(1,int(object_pixels.sum()))
@@ -1392,13 +1471,18 @@ async def preview(request):
                 return err('摆位已变化，忽略旧预览', 409)
             obj.save(Path(s['directory']) / 'object.png')
             matched.save(Path(s['directory']) / 'object-matched.png')
+            if shadow_layer is not None:
+                shadow_layer.save(Path(s['directory']) / 'object-shadow.png')
             result.convert('RGB').save(Path(s['directory']) / 'preview.png')
             s['preview_revision'] = revision
             s['preview_generation'] = generation
             s['render_algorithm'] = RENDER_ALGORITHM
             s.pop('export',None)
             s['projection_iou'] = round(iou, 4)
+            s['projection_edge_iou'] = round(edge_iou, 4) if edge_iou is not None else round(iou, 4)
             s['lighting']=lighting
+            s['scene_light']=environment
+            s['shadow']=shadow_info
             s['object_visible_fraction'] = round(visible_ratio,4)
             for candidate in s['candidates']:
                 candidate['object_overlap_pixels']=overlaps[candidate['id']]
@@ -1408,8 +1492,8 @@ async def preview(request):
             s['tone'] = None
             s['photometry'] = photo
             s['warnings'] = ['Blender 视角渲染，未验证刚体、接触、尺度和遮挡；不是 Photoshop 最终结果。',
-                             ('已依据'+('自动估计的承托区域' if s.get('support_mode')=='estimated' else '人工选择的区域' if s.get('support') else '周边像素（承托面未确认）')+'估算局部环境光和颜色；实际光源方向、承托面及保护区仍待确认。') if photo and photo.get('status')=='measured' else '可用的环境像素不足，尚未重建环境光和调色。',
-                             '没有经过验证的接触点，尚未生成接触阴影。']
+                             ('已依据'+('自动估计的承托区域' if s.get('support_mode')=='estimated' else '人工选择的区域' if s.get('support') else '周边像素（承托面未确认）')+'估算局部环境光和颜色；实际光源方向、承托面及保护区仍待确认。') if photo and photo.get('status') in ('measured','estimated') else '可用的环境像素不足，尚未重建环境光和调色。',
+                             ('已生成屏幕空间估计接触阴影，不是物理接触阴影。' if s.get('shadow',{}).get('status')=='estimated' else '没有经过验证的接触点，未生成接触阴影。')]
             if visible_ratio<.5:
                 s['warnings'].append(f'遮挡后物体仅露出约 {visible_ratio:.0%}，请确认前景选择。')
             if s['selected'] and all(overlaps.get(n,0)==0 for n in s['selected']):
@@ -1464,10 +1548,18 @@ async def photoshop_export(request):
             im.convert('RGBA').crop(bbox).save(folder/'neutral.png')
         mask = np.asarray(foreground(s))
         entry = save_mask(mask, folder/'foreground.png', [0,0,s['width'],s['height']], (255,255,255))
+        shade = None
+        shadow_bounds = None
+        shadow = s.get('shadow') or {}
+        if shadow.get('status') == 'estimated' and shadow.get('path') and Path(shadow['path']).is_file():
+            with Image.open(shadow['path']) as im:
+                im.convert('RGBA').save(folder/'shadow.png')
+            shadow_bounds = shadow.get('crop')
+            shade = {'path': str(folder/'shadow.png'), 'x': int(shadow_bounds[0]), 'y': int(shadow_bounds[1])}
         spec = {'id':'manual','asset':str(folder/'asset.png'),'center':[(l+r)/2,(t+b)/2],
                 'width':r-l,'angle':0,'canvas':[s['width'],s['height']], 'crop':[0,0,s['width'],s['height']],
                 'unmatched_asset':str(folder/'neutral.png'),
-                'tone':{'brightness':0,'warmth':0,'saturation':0,'blur_px':0},'shade':None,'occlusion':entry,
+                'tone':{'brightness':0,'warmth':0,'saturation':0,'blur_px':0},'shade':shade,'occlusion':entry,
                 'png':str(folder/'manual.png'),'psd':str(folder/'manual.psd')}
         mcp = ROOT/'work/photoshop-mcp-env/Scripts/photoshop-mcp-server.exe'
         if not mcp.is_file():
@@ -1490,6 +1582,9 @@ async def photoshop_export(request):
             before = np.asarray(bg.convert('RGB')); after = np.asarray(result.convert('RGB'))
             changed = np.any(before != after,axis=2)
             changed[t:b,l:r] = False
+            if shadow_bounds is not None:
+                sl, st, sr, sb = shadow_bounds
+                changed[max(0,st):min(s['height'],sb),max(0,sl):min(s['width'],sr)] = False
             outside = int(changed.sum())
         if outside:
             raise ValueError(f'编辑范围外有 {outside} 像素变化，导出未通过验证')
@@ -1498,7 +1593,8 @@ async def photoshop_export(request):
                 return err('摆位或遮挡已变化，导出结果已过期',409)
             s['export'] = {'directory':str(folder),'status':'review','outside_changed_pixels':outside,
                            'projection_iou':s.get('projection_iou'),
-                           'limitations':['落稳、支撑、尺度、保护区、同层调色、阴影及前后顺序待确认']}
+                           'limitations':['落稳、支撑、尺度、保护区、同层调色、阴影及前后顺序待确认',
+                                          '接触阴影为屏幕空间估计，不是物理阴影']}
             save(s)
         return JSONResponse(s['export'])
     except Exception as e:
