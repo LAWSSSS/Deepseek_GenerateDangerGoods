@@ -64,10 +64,15 @@ def estimate_render_environment(frame, samples, lighting=None):
     }
 
 
-def ambient_match(frame, support, foreground, obj, x, y, *, anchored=False, seed=0):
+def ambient_match(frame, support, foreground, obj, x, y, *, anchored=False, seed=0, samples=None):
     """Apply bounded lightness, white balance and sensor response, retaining alpha."""
     alpha = np.asarray(obj.getchannel('A'))
-    samples = local_samples(frame, support, foreground, aligned_alpha(obj.getchannel('A'), frame.size, x, y))
+    if samples is None:
+        samples = local_samples(frame, support, foreground, aligned_alpha(obj.getchannel('A'), frame.size, x, y))
+    else:
+        # Reuse exactly the scene evidence that lit the 3D render. Always
+        # exclude the actual rendered object as well as the client silhouette.
+        samples = samples & support & ~foreground & (aligned_alpha(obj.getchannel('A'), frame.size, x, y) == 0)
     rgb = np.asarray(obj.convert('RGB'))
     core = alpha >= 190
     measured = statistics(np.asarray(frame), samples)
@@ -106,18 +111,24 @@ def ambient_match(frame, support, foreground, obj, x, y, *, anchored=False, seed
     # filtering. Colour outside the silhouette cannot bleed into openings.
     detail_ratio = ((before['detail'] or 0) + 1) / ((scene['detail'] or 0) + 1)
     scene_noise = scene['noise'] or 0
-    blur = float(np.clip(.43 + .23 * np.log(detail_ratio) + .04 * scene_noise, 0, .85))
-    if blur >= .26:
+    # Do not blur already smoother objects because the scene is noisy. This
+    # used to suppress model surface detail even when it was below the scene.
+    blur = float(np.clip(.42 * np.sqrt(max(0, np.log(detail_ratio))), 0, .85)) if detail_ratio > 1.25 else 0.0
+    sharpen = float(np.clip(.20 * np.log(1 / detail_ratio), 0, .28)) if detail_ratio < .8 else 0.0
+    if blur > 0 or sharpen > 0:
         coverage = alpha.astype(np.float32) / 255
-        weights = cv2.GaussianBlur(coverage, (0, 0), blur)
-        filtered = cv2.GaussianBlur(matched * coverage[:, :, None], (0, 0), blur)
-        matched = np.where(weights[:, :, None] > 1e-5,
-                           filtered / np.maximum(weights[:, :, None], 1e-5), matched)
-    else:
-        blur = 0.0
+        sigma = blur if blur > 0 else .65
+        weights = cv2.GaussianBlur(coverage, (0, 0), sigma)
+        filtered = cv2.GaussianBlur(matched * coverage[:, :, None], (0, 0), sigma)
+        filtered = np.where(weights[:, :, None] > 1e-5,
+                            filtered / np.maximum(weights[:, :, None], 1e-5), matched)
+        # Restrained sharpening uses existing RGB details; alpha and openings
+        # remain unchanged and the correction cannot exceed three RGB levels.
+        matched = filtered if blur > 0 else matched + np.clip((matched-filtered)*sharpen, -3, 3)
 
     # Reproduce the measured noise level without copying a background pattern.
-    object_noise = before['noise'] or 0
+    response_stats = statistics(np.uint8(np.rint(np.clip(matched, 0, 255))), core)
+    object_noise = (response_stats[0]['noise'] if response_stats else before['noise']) or 0
     grain = float(np.clip(np.sqrt(max(0, scene_noise ** 2 - object_noise ** 2)) * .82, 0, 2.6))
     if grain >= .35:
         noise = np.random.default_rng(seed).normal(0, grain, alpha.shape).astype(np.float32)
@@ -136,4 +147,15 @@ def ambient_match(frame, support, foreground, obj, x, y, *, anchored=False, seed
         'highlight_knee_lightness': round(knee, 3),
         'chroma_gain': round(chroma, 3), 'neutral_cast_ab': cast.round(3).tolist(),
         'detail_blur_sigma_px': round(blur, 3), 'sensor_grain_sigma': round(grain, 3),
+        'detail_sharpen_amount': round(sharpen, 3),
     }
+
+
+def lighting_samples(frame, support, excluded, alpha):
+    """Choose one auditable scene sample for both rendering and final tone."""
+    if support is not None:
+        samples = local_samples(frame, support, excluded, alpha)
+        if statistics(np.asarray(frame), samples) is not None:
+            return samples, 'projected_support_only'
+    samples = local_samples(frame, np.ones_like(excluded), excluded, alpha)
+    return samples, 'surrounding_scene_unverified'

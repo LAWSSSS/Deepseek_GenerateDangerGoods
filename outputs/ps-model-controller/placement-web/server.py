@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE.parent))
 from scene_v2 import Perception, digest
-from relight import aligned_alpha, ambient_match, estimate_render_environment, local_samples
+from relight import aligned_alpha, ambient_match, estimate_render_environment, lighting_samples
 from contact_shadow import MIN_SUPPORT, contact_clusters, contact_coverage, make_contact_shadow, projected_footprint
 from occlusion import foreground_matte, refine_thin_mask, thin_line_seeds
 from lighting_estimate import estimate_light_from_rods
@@ -684,7 +684,7 @@ SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
 CHAT_ACTIVE = set()
-RENDER_ALGORITHM = 'mesh-contact-camera-v8'
+RENDER_ALGORITHM = 'contact-anchor-surface-light-v9'
 ANALYSIS_ALGORITHM = 'native-thin-occlusion-v2'
 
 
@@ -1064,6 +1064,14 @@ def validate_state(data, s):
         if not np.isfinite(value) or not lower <= value <= upper:
             raise ValueError(f'{name} 超出范围')
         values[name] = value
+    anchor = data.get('contact_anchor')
+    if anchor is not None:
+        if (not isinstance(anchor, list) or len(anchor) != 2
+                or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                           and np.isfinite(v) for v in anchor)
+                or not 0 <= anchor[0] <= s['width'] or not 0 <= anchor[1] <= s['height']):
+            raise ValueError('接触参考点超出画面或格式无效')
+        values['contact_anchor'] = [float(v) for v in anchor]
     return {'asset': data['asset'], **values}
 
 
@@ -1316,10 +1324,17 @@ def review_contact(s, footprint, regions, front, reason=None):
     return ident, mode, regions[ident] if supported else None, scores, evidence
 
 
-def match_local_photo(s, frame, obj, x, y, support, front):
+def match_local_photo(s, frame, obj, x, y, support, front, *, samples=None, sample_basis=None):
     """Use the support sample when it has enough neighbouring pixels."""
     seed = int(s['background_sha256'][:16], 16)
     nearby = np.ones_like(front, dtype=bool)
+    if samples is not None:
+        anchored = sample_basis == 'projected_support_only'
+        matched, photo = ambient_match(frame, support if anchored else nearby, front, obj, x, y,
+                                      anchored=anchored, seed=seed, samples=samples)
+        photo['support_verification'] = sample_basis
+        photo['shared_render_samples'] = True
+        return matched, photo
     if support is not None:
         matched, photo = ambient_match(frame, support, front, obj, x, y, anchored=True, seed=seed)
         if photo['status'] == 'measured':
@@ -1328,6 +1343,66 @@ def match_local_photo(s, frame, obj, x, y, support, front):
     matched, photo = ambient_match(frame, nearby, front, obj, x, y, seed=seed)
     photo['support_verification'] = 'surrounding_scene_unverified'
     return matched, photo
+
+
+async def render_worker(req, folder):
+    """One bounded Blender process for geometry preflight or material rendering."""
+    blender = ROOT/'work/blender45/blender-4.5.3-windows-x64/blender.exe'
+    if not blender.is_file():
+        raise ValueError('找不到 Blender，无法生成实际渲染')
+    (folder/'request.json').write_text(json.dumps(req), encoding='utf8')
+    with (folder/'blender.log').open('wb') as log:
+        process = await asyncio.create_subprocess_exec(str(blender), '--background', '--factory-startup',
+            '--python-exit-code', '1', '--python', str(HERE/'render_preview.py'), '--', str(folder/'request.json'),
+            cwd=str(ROOT), stdout=log, stderr=log)
+        try:
+            code = await asyncio.wait_for(process.wait(), timeout=180)
+        except asyncio.TimeoutError:
+            process.kill(); await process.wait()
+            raise ValueError('Blender 渲染超时')
+    expected = folder/'contact.json' if req.get('geometry_only') else Path(req['output'])
+    if code or not expected.is_file():
+        raise ValueError('Blender 渲染失败，请查看会话目录中的日志')
+
+
+async def contact_preflight(req, directory, mesh_sha256):
+    """Cache pose geometry separately from position, light and material renders."""
+    identity = {'mesh_sha256': mesh_sha256,
+                'pose': {k: req[k] for k in ('azimuth', 'elevation', 'rotation_deg')},
+                'worker': digest(HERE/'render_preview.py'),
+                'blender_worker': digest(HERE.parent/'blender_worker.py'),
+                'blender_version': '4.5.3'}
+    signature = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
+    folder = directory / ('geometry-' + signature[:24])
+    cached = folder/'verified.json'
+    if cached.is_file():
+        entry = json.loads(cached.read_text(encoding='utf8'))
+        if entry['signature'] == signature and entry['contact_sha256'] == digest(folder/'contact.json'):
+            return json.loads((folder/'contact.json').read_text(encoding='utf8')), True
+    folder.mkdir(exist_ok=True)
+    await render_worker({**req, 'geometry_only': True, 'output': str(folder/'unused.png')}, folder)
+    ground = json.loads((folder/'contact.json').read_text(encoding='utf8'))
+    cached.write_text(json.dumps({'signature': signature, 'identity': identity,
+                                 'contact_sha256': digest(folder/'contact.json')}), encoding='utf8')
+    return ground, False
+
+
+def anchor_evidence(state, ground):
+    uv = ground.get('anchor_uv')
+    if uv is None:
+        if state.get('contact_anchor') is not None:
+            raise ValueError('网格接触参考点无法核对，请取消固定或更换姿态')
+        return {'status': 'unknown', 'physical_support': 'unknown'}
+    x, y, side = placement_box(state)
+    actual = [x + side * uv[0], y + side * uv[1]]
+    requested = state.get('contact_anchor')
+    drift = float(np.linalg.norm(np.subtract(actual, requested))) if requested is not None else None
+    if drift is not None and drift > 1.5:
+        raise ValueError(f'网页与 Blender 的接触参考点偏差 {drift:.2f} px，请重新加载模型')
+    return {'status': 'locked' if requested is not None else 'unlocked',
+            'requested_px': requested, 'actual_px': [round(v, 4) for v in actual],
+            'drift_px': round(drift, 4) if drift is not None else None,
+            'threshold_px': 1.5, 'basis': ground.get('anchor_basis'), 'physical_support': 'unknown'}
 
 
 async def preview(request):
@@ -1392,27 +1467,30 @@ async def preview(request):
             front |= regions[ident]
         client_alpha = obj.getchannel('A').resize((side, side), Image.Resampling.LANCZOS)
         projected = aligned_alpha(client_alpha, frame.size, ox, oy)
-        lighting = await asyncio.to_thread(estimate_light_from_rods, frame, (st['x']-left, st['y']-top), side)
-        samples = local_samples(frame, np.ones_like(front), front, projected)
-        environment = await asyncio.to_thread(estimate_render_environment, frame, samples, lighting)
         req = {'mesh':str(mesh), 'azimuth':st['azimuth'], 'elevation':st['elevation'],
                'rotation_deg':[float(st.get('rot_x',0)),float(st.get('rot_y',0)),float(st.get('rot_z',0))],
-               'output':str(output), 'lighting':lighting, 'environment':environment}
-        (folder/'request.json').write_text(json.dumps(req), encoding='utf8')
-        blender = ROOT/'work/blender45/blender-4.5.3-windows-x64/blender.exe'
-        if not blender.is_file():
-            raise ValueError('找不到 Blender，无法生成实际渲染')
-        with (folder/'blender.log').open('wb') as log:
-            process = await asyncio.create_subprocess_exec(str(blender), '--background', '--factory-startup',
-                '--python-exit-code', '1', '--python', str(HERE/'render_preview.py'), '--', str(folder/'request.json'),
-                cwd=str(ROOT), stdout=log, stderr=log)
-            try:
-                code = await asyncio.wait_for(process.wait(), timeout=180)
-            except asyncio.TimeoutError:
-                process.kill(); await process.wait()
-                raise ValueError('Blender 渲染超时')
-        if code or not output.is_file():
-            raise ValueError('Blender 渲染失败，请查看会话目录中的日志')
+               'output':str(output)}
+        ground, geometry_cached = await contact_preflight(req, Path(s['directory']), row['mesh_sha256'])
+        anchor = anchor_evidence(st, ground)
+        patch = projected_footprint(ground['polygons'], side)
+        footprint = aligned_alpha(patch, frame.size, ox, oy) > 0
+        contact_reason = ground.get('reason')
+        if np.count_nonzero(footprint) != np.count_nonzero(np.asarray(patch)):
+            contact_reason = '接触斑超出画面'
+        support, support_mode, support_mask, scores, contact = review_contact(
+            job, footprint, regions, front, contact_reason)
+        lighting = await asyncio.to_thread(estimate_light_from_rods, frame, (st['x']-left, st['y']-top), side)
+        samples, sample_basis = lighting_samples(frame, support_mask, front, projected)
+        environment = await asyncio.to_thread(estimate_render_environment, frame, samples, lighting)
+        environment['sample_basis'] = sample_basis
+        environment['support_id'] = support if sample_basis == 'projected_support_only' else None
+        Image.fromarray(samples.astype(np.uint8) * 255).save(folder/'light-samples.png')
+        environment['sample_mask_sha256'] = digest(folder/'light-samples.png')
+        req.update(lighting=lighting, environment=environment)
+        await render_worker(req, folder)
+        rendered_ground = json.loads((folder/'contact.json').read_text(encoding='utf8'))
+        if rendered_ground != ground:
+            raise ValueError('渲染与预检的接触投影不一致，停止生成')
         with Image.open(output) as image:
             blender_image = image.convert('RGBA')
         one = np.asarray(obj.getchannel('A').resize((512,512), Image.Resampling.LANCZOS)) >= 128
@@ -1437,15 +1515,9 @@ async def preview(request):
             raise ValueError('缩放后的物体透明度为空')
         major = max(bounds[2]-bounds[0], bounds[3]-bounds[1])
         alpha = aligned_alpha(obj.getchannel('A'), frame.size, ox, oy)
-        ground = json.loads((folder/'contact.json').read_text(encoding='utf8'))
-        patch = projected_footprint(ground['polygons'], side)
-        footprint = aligned_alpha(patch, frame.size, ox, oy) > 0
-        contact_reason = ground.get('reason')
-        if np.count_nonzero(footprint) != np.count_nonzero(np.asarray(patch)):
-            contact_reason = '接触斑超出画面'
-        support, support_mode, support_mask, scores, contact = review_contact(
-            job, footprint, regions, front, contact_reason)
-        matched, photo = await asyncio.to_thread(match_local_photo, job, frame, obj, ox, oy, support_mask, front)
+        matched, photo = await asyncio.to_thread(match_local_photo, job, frame, obj, ox, oy, support_mask, front,
+                                               samples=samples, sample_basis=sample_basis)
+        photo['sample_mask_sha256'] = environment['sample_mask_sha256']
         result = base.copy()
         shadow_layer = None
         shadow_info = {'status': 'unavailable', 'reason': contact['reason']}
@@ -1482,6 +1554,8 @@ async def preview(request):
             s['shadow']=shadow_info
             s['support'], s['support_mode'] = support, support_mode
             s['contact'] = contact
+            s['contact_anchor'] = anchor
+            s['geometry_cache_hit'] = geometry_cached
             s['object_visible_fraction'] = round(visible_ratio,4)
             for candidate in s['candidates']:
                 ident = candidate['id']

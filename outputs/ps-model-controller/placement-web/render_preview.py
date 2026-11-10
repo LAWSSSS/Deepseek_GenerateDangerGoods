@@ -24,8 +24,6 @@ def clip_to_height(points, height):
 
 
 def ground_projection(scene, camera, obj, span, elevation):
-    if elevation < 8:
-        return {'polygons': [], 'reason': '当前观察角度不足以判断承托投影'}
     points = np.asarray(worker.world_vertices(obj), dtype=np.float64)
     floor = points[:, 2].min()
     height = floor + span * .012
@@ -34,10 +32,12 @@ def ground_projection(scene, camera, obj, span, elevation):
     obj.data.loop_triangles.foreach_get('vertices', indices.ravel())
     near = points[:, 2] <= height
     polygons = []
+    patches = []
     for face in indices[near[indices].any(axis=1)]:
         patch = clip_to_height(points[face], height)
         if len(patch) < 3:
             continue
+        patches.append(patch)
         # Project onto the hypothesized ground plane using the render camera.
         screen = [worker.world_to_camera_view(scene, camera, Vector((x, y, floor))) for x, y, _ in patch]
         if any(point.z <= 0 for point in screen):
@@ -46,7 +46,20 @@ def ground_projection(scene, camera, obj, span, elevation):
         area2 = np.dot(xy[:, 0], np.roll(xy[:, 1], -1)) - np.dot(xy[:, 1], np.roll(xy[:, 0], -1))
         if abs(area2) > 1e-9:
             polygons.append(xy.round(6).tolist())
-    return {'polygons': polygons, 'band_fraction': .012, 'plane': 'lowest_world_z'}
+    if not patches:
+        return {'polygons': [], 'reason': '没有可定位的网格接触区域'}
+    patches = np.concatenate(patches)
+    # This is a placement reference between the contact patches, not a claim
+    # that the space between separated feet is itself supported.
+    anchor = (patches.min(axis=0) + patches.max(axis=0)) / 2
+    anchor[2] = floor
+    point = worker.world_to_camera_view(scene, camera, Vector(anchor))
+    result = {'polygons': polygons, 'band_fraction': .012, 'plane': 'lowest_world_z',
+              'anchor_uv': [float(point.x), float(1 - point.y)],
+              'anchor_basis': 'near_ground_patch_bounds_center', 'physical_support': 'unknown'}
+    if elevation < 8:
+        result.update(polygons=[], reason='当前观察角度不足以判断承托投影')
+    return result
 
 
 def ambient_dome(scene, color, strength):
@@ -96,6 +109,14 @@ direction = Vector((math.sin(a)*math.cos(e), -math.cos(a)*math.cos(e), math.sin(
 camera = worker.make_camera(scene, center + direction * span * 2.35, center, fov=35)
 bpy.context.view_layer.update()
 
+output = Path(request['output'])
+contact = ground_projection(scene, camera, obj, span, request['elevation'])
+output.with_name('contact.json').write_text(json.dumps(contact, ensure_ascii=False), encoding='utf8')
+if request.get('geometry_only'):
+    # The server uses these actual projected patches to choose scene samples
+    # before lighting. No material render or physical acceptance is implied.
+    sys.exit(0)
+
 environment = request.get('environment') or {}
 world_color = environment.get('world_color', [.36, .36, .36])
 light_color = environment.get('light_color', [1., 1., 1.])
@@ -121,7 +142,4 @@ soft.data.energy = 470 * span * span * float(np.clip(environment.get('key_streng
 soft.location = center + key_world.normalized() * span * 3.5
 soft.rotation_euler = (center - soft.location).to_track_quat('-Z', 'Y').to_euler()
 
-output = Path(request['output'])
-contact = ground_projection(scene, camera, obj, span, request['elevation'])
-output.with_name('contact.json').write_text(json.dumps(contact, ensure_ascii=False), encoding='utf8')
 worker.render(scene, output)

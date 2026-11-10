@@ -10,7 +10,7 @@ import numpy as np
 from PIL import Image
 from starlette.testclient import TestClient
 import server
-from relight import ambient_match, estimate_render_environment
+from relight import ambient_match, estimate_render_environment, lighting_samples
 from contact_shadow import make_contact_shadow, projected_footprint
 from photometry import quiet_photo
 from occlusion import foreground_matte, refine_thin_mask, thin_line_seeds
@@ -129,6 +129,26 @@ class PlacementChecks(unittest.TestCase):
         self.client.post(self.url+'/state',json={**self.state,'x':65})
         result = self.client.post(self.url+'/preview',json={'revision':old,'image':''})
         self.assertEqual(result.status_code,409)
+
+    def test_contact_anchor_is_optional_and_finite(self):
+        self.assertNotIn('contact_anchor', self.live['state'])
+        good = {**self.state, 'contact_anchor': [64, 75]}
+        self.assertEqual(self.client.post(self.url+'/state',json=good).status_code,200)
+        self.assertEqual(self.live['state']['contact_anchor'], [64, 75])
+        for bad in ([64, 97], [64], '64,75', [True, 75], [64, None]):
+            response = self.client.post(self.url+'/state',json={**good, 'contact_anchor':bad})
+            self.assertEqual(response.status_code,400)
+
+    def test_anchor_tolerance_covers_pixel_rounding_not_pose_mismatch(self):
+        state = {**self.state, 'contact_anchor':[64, 74]}
+        info = server.anchor_evidence(state, {'anchor_uv':[.5,.85]})
+        self.assertEqual(info['status'], 'locked')
+        self.assertEqual(info['drift_px'], 0)
+        self.assertEqual(info['physical_support'], 'unknown')
+        with self.assertRaisesRegex(ValueError, '偏差'):
+            server.anchor_evidence(state, {'anchor_uv':[.5,.70]})
+        with self.assertRaisesRegex(ValueError, '无法核对'):
+            server.anchor_evidence(state, {})
 
     def test_support_cannot_also_be_foreground(self):
         self.masks(); rev = self.live['revision']
@@ -313,6 +333,46 @@ class RelightChecks(unittest.TestCase):
         self.assertIn('accent_chroma_cap', evidence)
 
 class ContactShadowChecks(unittest.TestCase):
+    def test_render_and_tone_share_supported_scene_evidence(self):
+        pixels = np.full((240,240,3), [210,180,160], np.uint8)
+        pixels[80:230, 20:220] = [68, 82, 90]
+        frame = Image.fromarray(pixels)
+        support = np.zeros((240,240),bool); support[80:230,20:220] = True
+        front = np.zeros_like(support); front[80:230,20:40] = True
+        alpha = np.zeros((240,240),np.uint8); alpha[100:180,80:160] = 255
+        samples, basis = lighting_samples(frame, support, front, alpha)
+        self.assertEqual(basis, 'projected_support_only')
+        self.assertFalse(samples[~support | front | (alpha>0)].any())
+        environment = estimate_render_environment(frame, samples)
+        obj = Image.new('RGBA',(80,80),(130,50,35,255))
+        _, photo = server.match_local_photo({'background_sha256':'12345678'}, frame, obj, 80, 100,
+                                           support, front, samples=samples, sample_basis=basis)
+        self.assertEqual(environment['scene_luma_p20_p50_p80'], photo['scene']['luma_p20_p50_p80'])
+        self.assertEqual(environment['sample_pixels'], photo['scene']['samples'])
+        self.assertTrue(photo['shared_render_samples'])
+
+    def test_insufficient_surface_samples_remain_unverified(self):
+        frame = Image.new('RGB', (240,240), (85,90,95))
+        alpha = np.zeros((240,240),np.uint8); alpha[80:160,80:160] = 255
+        support = alpha>0
+        samples, basis = lighting_samples(frame, support, np.zeros_like(support), alpha)
+        self.assertEqual(basis, 'surrounding_scene_unverified')
+        self.assertGreater(np.count_nonzero(samples), 100)
+
+    def test_smoother_object_is_not_blurred_and_holes_remain_exact(self):
+        rng = np.random.default_rng(42)
+        rgb = np.uint8(np.clip(110+rng.normal(0,10,(240,240,3)),0,255))
+        frame = Image.fromarray(rgb)
+        obj = Image.new('RGBA',(80,80),(130,80,60,255))
+        alpha = np.full((80,80),255,np.uint8); alpha[30:50,30:50] = 0
+        alpha[:,0] = 127
+        obj.putalpha(Image.fromarray(alpha))
+        support = np.ones((240,240),bool)
+        result, photo = ambient_match(frame, support, np.zeros_like(support), obj,80,80,seed=42)
+        self.assertEqual(photo['detail_blur_sigma_px'], 0)
+        self.assertLessEqual(photo['detail_sharpen_amount'], .28)
+        self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')),alpha))
+
     def test_shadow_is_bounded_to_support_and_keeps_alpha_input(self):
         support = np.zeros((200,200),bool)
         support[100:132,60:140] = True
@@ -363,6 +423,33 @@ class ContactShadowChecks(unittest.TestCase):
         self.assertIsNotNone(mask)
         self.assertEqual(contact['min_coverage'], 1)
         self.assertEqual(contact['physical_support'], 'unknown')
+
+
+class GeometryCacheChecks(unittest.IsolatedAsyncioTestCase):
+    async def test_cache_reuses_light_changes_but_not_pose_or_damaged_evidence(self):
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            req = {'azimuth':80, 'elevation':45, 'rotation_deg':[30,45,20], 'environment':{'strength':.2}}
+            calls = []
+            async def fake_worker(request, folder):
+                calls.append(request)
+                (folder/'contact.json').write_text(json.dumps({'polygons':[], 'anchor_uv':[.5,.8]}))
+            with patch.object(server, 'render_worker', side_effect=fake_worker):
+                ground, hit = await server.contact_preflight(req, directory, 'mesh-a')
+                self.assertFalse(hit)
+                _, hit = await server.contact_preflight({**req,'environment':{'strength':.9}}, directory, 'mesh-a')
+                self.assertTrue(hit)
+                self.assertEqual(len(calls), 1)
+                cached = next(directory.glob('geometry-*/contact.json'))
+                cached.write_text(json.dumps({'polygons':[], 'anchor_uv':[.1,.1]}))
+                ground, hit = await server.contact_preflight(req, directory, 'mesh-a')
+                self.assertFalse(hit)
+                self.assertEqual(ground['anchor_uv'], [.5,.8])
+                _, hit = await server.contact_preflight({**req,'azimuth':110}, directory, 'mesh-a')
+                self.assertFalse(hit)
+                _, hit = await server.contact_preflight(req, directory, 'mesh-b')
+                self.assertFalse(hit)
+                self.assertEqual(len(calls), 4)
 
 
 class ThinOcclusionChecks(unittest.TestCase):
