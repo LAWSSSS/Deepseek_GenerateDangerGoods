@@ -27,6 +27,29 @@ GROUP_LABELS={'development':'开发集历史验证','heldout':'留出集历史�
               'regression_53':'相机53回归','regression_36':'相机36回归','recovery':'原拒绝任务复验'}
 
 
+def scale_diagnostic(record,job,selected):
+    candidates=json.loads((job/'candidates.json').read_text(encoding='utf8'))['candidates']
+    candidate=next(c for c in candidates if c['id']==selected['params']['candidate'])
+    geometry=job/(candidate['id']+'-geometry.jpg')
+    if not geometry.is_file():return None
+    with Image.open(record['background']) as original:width,height=original.size
+    image=Image.open(geometry).convert('RGB');image.load()
+    canvas=Image.new('RGB',(image.width,image.height+110),(23,31,38));canvas.paste(image,(0,0))
+    draw=ImageDraw.Draw(canvas);font=ImageFont.truetype('C:/Windows/Fonts/msyh.ttc',20)
+    x,y=candidate['anchor_px'];x*=image.width/width;y*=image.height/height
+    draw.ellipse((x-6,y-6,x+6,y+6),fill=(255,80,200))
+    scale=candidate['scale'];reference=scale.get('reference')
+    if reference:
+        points=[(u*image.width,v*image.height) for u,v in reference]
+        draw.line(points,fill=(255,80,200),width=4)
+    text=f"{record['asset_id']} · {record['status']} · 未遮挡投影 {selected['checks']['scale']['measurement_px']:.1f} px · 遮挡 {selected.get('occlusion_fraction',0):.1%}"
+    draw.text((16,image.height+8),text,font=font,fill='white')
+    mm=scale.get('reference_mm');detail=f"参照尺寸区间 {mm} mm（估计）" if mm else '缺少同层尺寸参照：仅作展示估计'
+    draw.text((16,image.height+40),detail,font=font,fill=(237,190,99))
+    draw.text((16,image.height+72),'绿色：承托片；橙色：接触斑；粉色：接触锚点/尺度参照。隐藏高度并非实测。',font=font,fill=(195,210,215))
+    target=job/'support-scale-inspection.jpg';canvas.save(target,quality=90);return target
+
+
 def report(batches,out):
     out=Path(out).resolve();out.mkdir(parents=True,exist_ok=True)
     records=[];runs=[]
@@ -91,6 +114,8 @@ def report(batches,out):
                 selected=next(v for v in r['iterations'] if v['iteration']==r['best_iteration'])
                 artifacts.extend([('承托与接触斑',job/(selected['params']['candidate']+'-geometry.jpg')),
                     ('前后遮挡',Path(selected['image']).with_suffix('.occlusion.png'))])
+                marked=scale_diagnostic(r,job,selected)
+                if marked:artifacts.append(('尺度与支撑检查图',marked))
             for label,path in artifacts:
                 if path.is_file():
                     relative=Path(os.path.relpath(path,out)).as_posix()
@@ -116,6 +141,7 @@ body{background:#171f26;color:#e8eef2;font:16px system-ui;margin:30px auto;max-w
 <h1>跨背景批量验证 · 全部任务</h1><p>每张原尺寸 PNG 放置一个物品。以下展示每个任务的程序最佳版本；没有成图的任务保留原因。场景几何、尺度和光照为估计；展示合格不改变旧流程正式验收。</p>'''+table+'</table><p><a href="validation.json">完整统计</a></p>'+''.join(sections)
     (out/'index.html').write_text(page,encoding='utf8')
     print(json.dumps({k:v for k,v in stats.items() if k not in ('runs','final_checks')},ensure_ascii=False,indent=2))
+    return stats
 
 
 if __name__=='__main__':

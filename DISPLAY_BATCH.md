@@ -4,6 +4,8 @@
 
 `accepted_display` 是新流程的展示状态，不改变已有 `manual_only`、模型人工确认或正式场景验收状态。已有 10 号去独立操作杆、13 号单罐、19 号拆瓶、31 号封闭缸壁修订继续由当前模型目录提供。
 
+最新实测及交付见 [摄影融合与废钢堆验证](DISPLAY_FUSION_VALIDATION.md)：138/138 有图，2 展示合格、136 待审；摄影和展示质量目标尚未达到。不要用出图率替代验收。
+
 ## 使用
 
 在仓库根目录运行，先安装新增碰撞分解依赖：
@@ -113,3 +115,5 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/report_display_b
 固定摆位摄影复验入口为 `replay_display_photography.py --batches <旧批次...> --out <新目录> --rerender-materials`。补齐 EXR 后按版本缓存，固定原 alpha、阴影、位置、尺度与姿态，不重新落稳。`prepare_display_fusion.py --batches <旧批次...> --out <新验证目录>` 生成 48 项恢复清单和 138 项回归清单及配置；两份清单用相同配对种子复用缓存。真实渲染锚点核查使用 `checks_display_renders.py --batch <新批次> --out <新检查目录>`，只读取已有分辨率缓存，不调用模型或新增渲染。
 
 旧批次若在后续复核异常时丢失最佳版本元数据，可运行 `recover_display_evidence.py --batches <已完成批次目录>`。它只按已有检查与评分恢复失败任务的最佳已审图，保留原记录及散列；不调用模型、不渲染、不改变失败状态。独立回读入口为 `audit_display_outputs.py --batches <批次目录> --out <报告 JSON>`。
+
+整轮摄影/恢复/回归汇总入口为 `report_display_fusion.py --root <含 recovery 与 regression 的验证目录> --photo <固定摄影目录> --history <本轮各次尝试目录...>`。它只在两个真实批次均完成后发布最终总览，按每次 `usage-*.json` 汇总真实请求，保留被中断尝试的成本；分别统计视觉达标、程序未知与最终展示状态。跨分辨率检查失败时仍写出全部六类结果及差异图，并以非零码退出，不能按全通过记账。
