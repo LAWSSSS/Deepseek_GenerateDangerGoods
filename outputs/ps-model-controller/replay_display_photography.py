@@ -16,7 +16,8 @@ from display_batch.common import ROOT,atomic_json,signature,file_hash,implementa
 from display_batch.compose import compose,sample_environment,warp
 from display_batch.scene import Scenes
 from display_batch.schema import BatchConfig,Review,apply_actions,PHOTO_CONTROLS,MATERIAL_PROFILES,LIGHT_PROFILES
-from display_batch.pipeline import final_resolution,REVIEW_PROMPT,RENDER_VERSION
+from display_batch.pipeline import REVIEW_PROMPT
+from display_batch.rendering import reference_resolution, REFERENCE_RENDER_VERSION
 from display_batch.worker import Blender
 
 
@@ -36,7 +37,7 @@ def old_render(cache,asset,candidate,params,environment):
     env={k:environment[k] for k in keys}
     request={'mesh':asset['mesh'],'matrix':candidate['matrix'],'yaw':candidate['yaw'],
         'plane_normal':candidate.get('plane_normal',[0,0,1]),'elevation':candidate['elevation'],
-        'environment':env,'resolution':final_resolution(candidate),
+        'environment':env,'resolution':reference_resolution(candidate),
         'roughness_delta':MATERIAL_PROFILES[params['material']],
         'dust_gain':1.6 if params['material']=='weathered' else 1.,'light_gain':LIGHT_PROFILES[params['light']]}
     key=signature('pbr-linear-shadow-v7',asset['mesh_hash'],request,'OPTIX','blender-4.5.3')
@@ -128,7 +129,7 @@ async def main(args):
                         'elevation':candidate['elevation'],'environment':environment,'resolution':meta['resolution'],
                         'roughness_delta':MATERIAL_PROFILES[best_old['params']['material']],
                         'dust_gain':1.6,'light_gain':LIGHT_PROFILES[best_old['params']['light']]}
-                    new_render=cache/'photo-renders'/signature(RENDER_VERSION,asset['mesh_hash'],request)
+                    new_render=cache/'photo-renders'/signature(REFERENCE_RENDER_VERSION,asset['mesh_hash'],request)
                     new_render.mkdir(parents=True,exist_ok=True);metadata_path=new_render/'result.json'
                     if metadata_path.is_file():new_meta=json.loads(metadata_path.read_text(encoding='utf8'))
                     else:

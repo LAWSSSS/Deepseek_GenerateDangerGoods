@@ -1,4 +1,5 @@
 """Real Blender/Bullet regressions, distinct from the 1000-job queue simulation."""
+import argparse
 import asyncio
 import json
 import math
@@ -25,8 +26,8 @@ def fixture(folder,name,pieces):
             'assembly':'rigid_assembly','initial_matrices':[np.eye(4).tolist()]}
 
 
-async def main():
-    out=ROOT/'outputs/摄影嵌入-物理回归-20261110';out.mkdir(parents=True,exist_ok=True)
+async def main(out):
+    out=Path(out).resolve();out.mkdir(parents=True,exist_ok=True)
     worker=Blender(out/'worker','CPU');records={}
     try:
         with tempfile.TemporaryDirectory(prefix='display-physics-') as directory:
@@ -72,4 +73,7 @@ async def main():
     print(json.dumps({'passed':len(records),'seconds':round(worker.seconds,3),'report':str(out/'checks.json')}))
 
 
-if __name__=='__main__':asyncio.run(main())
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--out',default=ROOT/'outputs/摄影嵌入-物理回归-20261110')
+    asyncio.run(main(parser.parse_args().out))

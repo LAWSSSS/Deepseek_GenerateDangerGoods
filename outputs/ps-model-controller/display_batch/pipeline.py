@@ -11,29 +11,25 @@ import statistics
 import time
 import numpy as np
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from . import VERSION
-from .ai import Vision, ProviderUnavailable
+from .ai import Vision, ProviderUnavailable, token_summary
 from .assets import prepare as prepare_asset
 from .common import ROOT, HERE, atomic_json, file_hash, load_catalog, resolve, signature, implementation_manifest
 from .compose import compose, sample_environment
 from .scene import Scenes, choose_candidates, projection_geometry, fitted_masks, fit_checks
-from .schema import (BatchConfig, Review, Probe, MATERIAL_PROFILES, LIGHT_PROFILES,
-                     TONE_PROFILES, PHOTO_CONTROLS, StructureConfirmation, apply_actions, version_rank)
-from .pile import support_union, diagnostic, depth_order
+from .schema import (Review, Probe, PHOTO_CONTROLS, StructureConfirmation, version_rank)
+from .pile import support_union, diagnostic
 from .geometry import contact_support
 from .store import Store
 from .worker import Blender, RenderUnavailable
+from .framing import final_resolution
+from .rendering import RenderCache, RENDER_VERSION
+from .review import allowed_actions, evidence_status, inspect, repair, PLACEMENT_DEFECTS
+from .materials import material_kind, SURFACE_DUST
 
-RENDER_VERSION='pbr-linear-patina-v9'
-COMPOSE_VERSION='scrap-gray-pile-v5'
-
-
-def final_resolution(candidate):
-    # Sample the whole render frustum at twice its final scale, not just the object bbox.
-    pixels=2*candidate.get('full_px',candidate['target_px']*2.2)
-    return int(min(2048,max(512,2**math.ceil(math.log2(max(1,pixels))))))
+COMPOSE_VERSION='scrap-gray-pile-v6-window'
 
 
 REVIEW_PROMPT='''Critically inspect the actual final composite panorama and enlarged crop against the source object.
@@ -129,14 +125,22 @@ def write_summary(out,store,usage=None,run=None):
     groups={}
     for row in rows:
         group=row['payload'].get('group','batch')
-        g=groups.setdefault(group,{'total':0,'accepted_display':0,'review':0,'failed':0,'pending':0})
+        g=groups.setdefault(group,{'total':0,'accepted_display':0,'review':0,'failed':0,'pending':0,
+                                   'photo_pass':0,'visual_pass':0,'unknown_evidence':0})
         g['total']+=1;g[row['state'] if row['state'] in g else 'pending']+=1
+        record=row['result'] or {}
+        g['photo_pass']+=record.get('photo_status')=='pass'
+        g['visual_pass']+=record.get('visual_status')=='pass'
+        g['unknown_evidence']+=record.get('evidence_status')=='unknown'
     for group in groups.values():group['acceptance_rate']=group['accepted_display']/max(1,group['total'])
     times=[r['seconds'] for r in records if 'seconds' in r]
     summary={'version':VERSION,'counts':store.counts(),'groups':groups,'formal_acceptance':'not_changed',
              'run':run,'usage_current_run':usage,'seconds_median':statistics.median(times) if times else None,
              'seconds_p95':sorted(times)[min(len(times)-1,math.ceil(len(times)*.95)-1)] if times else None,
              'generated_pngs':sum(bool(r.get('image')) for r in records),
+             'reused_pngs':sum(bool(r.get('reused_from') and r.get('image')) for r in records),
+             'photo_pass':sum(r.get('photo_status')=='pass' for r in records),
+             'visual_pass':sum(r.get('visual_status')=='pass' for r in records),
              'image_rate':sum(bool(r.get('image')) for r in records)/max(1,len(rows))}
     atomic_json(out/'summary.json',summary)
     sections=[]
@@ -159,6 +163,7 @@ class Pipeline:
         self.run_id=time.strftime('%Y%m%d-%H%M%S')+f'-{os.getpid()}'
         self.vision=Vision(config,self.cache/'vision',self.out/f'usage-{self.run_id}.json')
         self.blender=Blender(self.cache/('worker-'+str(os.getpid())),config.render_device)
+        self.renders=RenderCache(self.cache,self.blender)
         self.scenes=Scenes(self.cache,self.vision);self.assets={}
         self.catalog=load_catalog();self.store=Store(self.out/'jobs.sqlite')
         self.cpu=asyncio.Semaphore(config.cpu_concurrency)
@@ -190,23 +195,15 @@ class Pipeline:
             return self.assets[k]
 
     async def render(self,asset,scene,candidate,params,resolution):
-        environment,samples=await asyncio.to_thread(sample_environment,scene,candidate)
-        req={'mesh':asset['mesh'],'matrix':candidate['matrix'],'yaw':candidate['yaw'],
-             'plane_normal':candidate.get('plane_normal',[0,0,1]),
-             'elevation':candidate['elevation'],'environment':environment,'resolution':resolution,
-             'roughness_delta':MATERIAL_PROFILES[params['material']],
-             'dust_gain':1.6 if params['material']=='weathered' else 1.,
-             'light_gain':LIGHT_PROFILES[params['light']]}
-        if candidate.get('camera'):req['camera']=candidate['camera']
-        if candidate.get('receiver',{}).get('patches'):req['receiver']=candidate['receiver']
-        key=signature(RENDER_VERSION,asset['mesh_hash'],req,self.config.render_device,'blender-4.5.3')
-        folder=self.cache/'renders'/key;folder.mkdir(parents=True,exist_ok=True)
-        info=folder/'result.json';hit=info.is_file()
-        if hit:meta=json.loads(info.read_text(encoding='utf8'))
-        else:
-            meta=await self.blender.ask('render',{**req,'output':str(folder)},timeout=240)
-            atomic_json(info,meta)
+        style=self.render_style
+        environment,samples=await asyncio.to_thread(sample_environment,scene,candidate,scene_lighting=style=='scene')
+        folder,meta,hit=await self.renders.get(asset,candidate,params,environment,scene['size'],resolution,
+                                             appearance=style)
         return folder,meta,environment,samples,hit
+
+    @property
+    def render_style(self):
+        return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
 
     async def validate_local_pose(self,asset,scene,candidate):
         if candidate.get('placement'):
@@ -335,16 +332,37 @@ class Pipeline:
 
     def default_params(self,candidate):
         return {'candidate':candidate,'material':'original','light':'scene','tone':'scene',
+                'photo_model':'camera' if self.config.appearance in ('camera','scene') else 'reference',
                 'photo_style':self.config.photo_style,**{k:'auto' for k in PHOTO_CONTROLS}}
 
+    @staticmethod
+    def finish_image(out,ident,result,best):
+        dest=out/('accepted' if result['status']=='accepted_display' else 'review')
+        dest.mkdir(parents=True,exist_ok=True)
+        final=dest/(ident+'.png');shutil.copy2(best['image'],final)
+        crop=dest/(ident+'.crop.jpg');shutil.copy2(best['crop'],crop)
+        review=Review.model_validate(best['review'])
+        result.update(image=str(final),crop=str(crop),best_iteration=best['iteration'],
+                      checks=best['checks'],scores=best['review']['scores'],
+                      measured_major_px=best['measured_major_px'],
+                      placement=best.get('placement','surface'),support_ids=best.get('support_ids',[]),
+                      occlusion_fraction=best.get('occlusion_fraction'),photo=best.get('photo'),
+                      evidence_confidence=best.get('evidence_confidence','unknown'),
+                      evidence_status=evidence_status(best['checks']),
+                      photo_status='pass' if review.photo_passes() else 'fail',
+                      visual_status='pass' if review.passes() else 'fail')
+
     async def job(self,job):
-        ident=job['id'];payload=job['payload'];start=time.monotonic();calls_before=len(self.vision.calls)
+        ident=job['id'];payload=job['payload'];start=time.monotonic()
         asyncio.current_task().set_name(ident)
         folder=self.out/'jobs'/ident;folder.mkdir(parents=True,exist_ok=True)
         result={'job_id':ident,'asset_id':payload['asset_id'],'background':payload['background'],
                 'group':payload.get('group','batch'),'status':'review','scene_basis':'estimated',
-                'formal_status':'unchanged','iterations':[],'timings':{}}
-        best=None
+                'formal_status':'unchanged','iterations':[],'timings':{},'candidate_visits':[],
+                'photo_status':'unknown','visual_status':'unknown','evidence_status':'unknown',
+                'cost':{'logical_reviews':0,'renders':{},'render_cache_hits':{},'asset_imports':0},
+                'actions':[]}
+        best=None;draft=None
         try:
             held=getattr(self,'model_review',{}).get(payload['asset_id'])
             if held and held.get('independent_confirmation') and held.get('mesh_hash')==payload.get('mesh_hash'):
@@ -364,80 +382,100 @@ class Pipeline:
                 stage_start=time.monotonic()
                 candidates,rejected=await asyncio.to_thread(choose_candidates,asset,scene,payload['seed'],self.config)
             result['timings']['placement_seconds']=round(time.monotonic()-stage_start,3)
-            atomic_json(folder/'candidates.json',{'candidates':candidates,'rejected':rejected})
+            candidates=sorted(candidates,key=lambda c:(len(set(c.get('uncertainties',[]))),-c['score']))[:3]
+            ready={};invalid=set()
+            def save_candidates():
+                atomic_json(folder/'candidates.json',{'candidates':[ready.get(c['id'],c) for c in candidates],
+                    'visited':result['candidate_visits'],'rejected':rejected})
+            save_candidates()
             result['rejections']=rejected
             if not candidates:
                 result['reason']='no_geometric_candidate';return result
-            # Render at most three coarse candidates; the same ranked winner starts the final loop.
-            coarse=[];validated=[]
-            for candidate in candidates:
-                try:
-                    if 'plane_normal' in candidate:
-                        candidate=await self.validate_local_pose(asset,scene,candidate)
-                    environment,samples=await asyncio.to_thread(sample_environment,scene,candidate) if 'plane_normal' in candidate else (None,None)
-                except ValueError as failure:
-                    rejected.append({'candidate':candidate['id'],'reason':str(failure)});continue
-                params=self.default_params(candidate['id'])
-                rendered=await self.render(asset,scene,candidate,params,512)
-                image=folder/(candidate['id']+'-coarse.png')
-                comp=await asyncio.to_thread(compose,scene,candidate,*rendered[:4],params,payload['seed'],image)
-                if any(c['status']=='fail' for c in comp['checks'].values()):
-                    rejected.append({'candidate':candidate['id'],'reason':'explicit_composite_check_failed',
-                                     'checks':comp['checks']});continue
-                if candidate.get('placement'):
-                    diagnostic(scene,candidate,folder/(candidate['id']+'-geometry.jpg'))
-                coarse.append({'candidate':candidate['id'],'image':str(image),
-                               'hard_failures':sum(c['status']!='pass' for c in comp['checks'].values())})
-                validated.append(candidate)
-            candidates=validated
-            atomic_json(folder/'candidates.json',{'candidates':candidates,'rejected':rejected})
-            if not candidates:
-                result['reason']='no_candidate_survived_local_physics';return result
-            atomic_json(folder/'coarse.json',coarse)
-            alternatives=Image.new('RGB',(384*len(coarse),360),(40,44,48));draw=ImageDraw.Draw(alternatives)
-            for i,item in enumerate(coarse):
-                with Image.open(Path(item['image']).with_suffix('.crop.jpg')) as thumb:
-                    thumb=thumb.convert('RGB');thumb.thumbnail((370,325))
-                    alternatives.paste(thumb,(384*i+(384-thumb.width)//2,30+(325-thumb.height)//2))
-                draw.text((384*i+10,8),item['candidate'],fill='white')
-            alternatives.save(folder/'alternatives.jpg',quality=90)
-            ranked=sorted(zip(candidates,coarse),key=lambda v:(v[1]['hard_failures'],-v[0]['score']))
-            params=self.default_params(ranked[0][0]['id'])
-            seen=set();seen_images=set();best=None;best_rank=None;no_gain=0;reason='iterations_exhausted'
-            for iteration in range(self.config.max_iterations+1):
+            params=self.default_params(candidates[0]['id'])
+            seen=set();seen_images=set();best_rank=None;no_gain=0;reason='iterations_exhausted'
+            adjustable=any(material_kind(m['name'],m['metallic'] or 0.,m['metallic_linked'],
+                           asset['semantic'].get('material_classes',[])) in SURFACE_DUST
+                           for m in asset.get('inspection',{}).get('materials',[]))
+            iteration=0;previous_candidate=None;rendered_parts={}
+            while iteration<=self.config.max_iterations:
                 psig=signature(params)
                 if psig in seen:reason='repeated_parameters';break
-                seen.add(psig);candidate=next(c for c in candidates if c['id']==params['candidate'])
-                resolution=final_resolution(candidate)
-                folder_render,meta,environment,samples,hit=await self.render(asset,scene,candidate,params,resolution)
-                image=folder/f'iteration-{iteration}.png'
-                comp=await asyncio.to_thread(compose,scene,candidate,folder_render,meta,environment,samples,
-                                              params,payload['seed'],image)
-                draft={**comp,'iteration':iteration,'params':params.copy(),
-                       'render_cache_hit':hit,'image_hash':file_hash(image)}
-                atomic_json(folder/f'draft-{iteration}.json',draft)
-                if any(c['status']=='fail' for c in comp['checks'].values()):
-                    result['rejections'].append({'candidate':candidate['id'],'reason':'final_program_checks_failed',
-                        'checks':comp['checks']})
-                    reason='final_program_checks_failed'
+                seen.add(psig);cid=params['candidate']
+                if cid not in ready:
+                    candidate=next(c for c in candidates if c['id']==cid)
+                    result['candidate_visits'].append(cid)
+                    before=time.monotonic()
+                    try:
+                        ready[cid]=await self.validate_local_pose(asset,scene,candidate) if 'plane_normal' in candidate else candidate
+                    except ValueError as failure:
+                        invalid.add(cid);rejected.append({'candidate':cid,'reason':str(failure)})
+                    finally:
+                        result['timings']['local_physics_seconds']=result['timings'].get('local_physics_seconds',0)+time.monotonic()-before
+                    if cid in ready and candidate.get('placement'):
+                        await asyncio.to_thread(diagnostic,scene,ready[cid],folder/(cid+'-geometry.jpg'))
+                    save_candidates()
+                if cid not in invalid:
+                    candidate=ready[cid]
+                    render_fields=['candidate','material','light']
+                    if self.render_style=='scene':render_fields.append('dust')
+                    rkey=tuple(params[k] for k in render_fields)
+                    if rkey not in rendered_parts:
+                        before=time.monotonic()
+                        rendered=await self.render(asset,scene,candidate,params,final_resolution(candidate))
+                        result['timings']['render_stage_seconds']=result['timings'].get('render_stage_seconds',0)+time.monotonic()-before
+                        rendered_parts[rkey]=rendered
+                        for part,info in rendered[1].get('render_cache',{}).items():
+                            tally=result['cost']['render_cache_hits' if info['hit'] else 'renders']
+                            tally[part]=tally.get(part,0)+1
+                        for key,value in rendered[1].get('render_timings',{}).items():
+                            result['timings'][key]=result['timings'].get(key,0)+value
+                        result['cost']['asset_imports']+=rendered[1].get('asset_imports',0)
+                    else:result['cost']['photo_only_reuse']=result['cost'].get('photo_only_reuse',0)+1
+                    folder_render,meta,environment,samples,hit=rendered_parts[rkey]
+                    image=folder/f'iteration-{iteration}.png'
+                    before=time.monotonic()
+                    try:
+                        async with self.cpu:
+                            comp=await asyncio.to_thread(compose,scene,candidate,folder_render,meta,environment,samples,
+                                                         params,payload['seed'],image)
+                    except ValueError as failure:
+                        if str(failure) not in ('object_fully_occluded','object_too_small'):raise
+                        invalid.add(cid);rejected.append({'candidate':cid,'reason':str(failure)})
+                    else:
+                        if evidence_status(comp['checks'])=='fail':
+                            invalid.add(cid);rejected.append({'candidate':cid,'reason':'final_program_checks_failed','checks':comp['checks']})
+                    result['timings']['compose_seconds']=result['timings'].get('compose_seconds',0)+time.monotonic()-before
+                if cid in invalid:
+                    save_candidates()
+                    fallback=next((c['id'] for c in candidates if c['id'] not in invalid and c['id'] not in ready),None)
+                    if fallback:
+                        params=self.default_params(fallback);continue
+                    reason='no_candidate_survived_program_checks'
+                    if best is None:result.update(status='failed',evidence_status='fail')
                     break
+                draft={**comp,'iteration':iteration,'params':params.copy(),'render_cache_hit':hit,
+                       'render_cache':meta.get('render_cache',{}),'render_resolution':meta.get('resolution'),
+                       'image_hash':file_hash(image)}
+                if result['actions'] and result['actions'][-1]['iteration']==iteration-1:
+                    result['actions'][-1]['effect']={'params':params.copy(),'image_hash':draft['image_hash'],
+                        'changed_pixels':draft['image_hash']!=result['iterations'][-1]['image_hash'],
+                        'repeated_image':draft['image_hash'] in seen_images}
                 if draft['image_hash'] in seen_images:
                     reason='no_effective_image_change';break
                 seen_images.add(draft['image_hash'])
+                atomic_json(folder/f'draft-{iteration}.json',draft)
                 self.store.checkpoint(ident,'review_request',{'last_iteration':iteration,
                     'params':params,'draft':str(folder/f'draft-{iteration}.json')})
-                review=await self.vision.ask('review',Review,REVIEW_PROMPT,
-                    {'name':asset['name'],'features':asset['semantic']['key_features'],'params':params,
-                     'allowed':{'candidate':[c['id'] for c in candidates], 'material':list(MATERIAL_PROFILES),
-                                'light':list(LIGHT_PROFILES),'tone':list(TONE_PROFILES),
-                                **{k:list(v) for k,v in PHOTO_CONTROLS.items()}},
-                     'profile_meanings':{'clearer':'reduce roughness, stronger existing metal highlights',
-                         'softer':'increase roughness, soften specular reflection',
-                         'weathered':'increase light surface dust on exposed paint while retaining bare-metal reflections',
-                         'defined':'stronger broad directional light', 'darker':'reduce object exposure'},
-                     'estimated_size_mm':asset['semantic']['major_mm'],
-                     'checks':comp['checks'],'source_note':'The current reconstructed model preserves user-approved revisions; judge missing geometry against this current model, not the pose of an upright source photo.'},
-                     [comp['preview'],comp['crop'],folder_render/'object.png',asset['board'],folder/'alternatives.jpg'])
+                choices=[c for c in candidates if c['id'] not in invalid]
+                ids=[c['id'] for c in choices]
+                allowed=allowed_actions(params,comp,ids,render_style=self.render_style,adjustable=adjustable)
+                geometry_board=folder/(cid+'-geometry.jpg') if previous_candidate and previous_candidate!=cid and candidate.get('placement') else None
+                result['cost']['logical_reviews']+=1
+                review=await inspect(self.vision,REVIEW_PROMPT,asset,comp,params,allowed,folder_render,
+                    compact=self.config.review_format=='compact',geometry_board=geometry_board,
+                    candidate_evidence=[{'id':c['id'],'placement':c.get('placement'),
+                                         'uncertainties':c.get('uncertainties',[])} for c in choices])
+                previous_candidate=cid
                 entry={**draft,'review':review.model_dump()}
                 result['iterations'].append(entry)
                 atomic_json(folder/f'iteration-{iteration}.json',entry)
@@ -463,54 +501,76 @@ class Pipeline:
                             'defects':[d.model_dump() for d in suspects]}
                         atomic_json(self.out/'model-review.json',self.model_review)
                         reason='asset_structure_requires_review';break
+                if evidence_status(comp['checks'])=='unknown' and review.photo_passes() and review.scores.edge>=3:
+                    unresolved=[d for d in review.defects if d.visibility=='visible' and d.severity in ('major','fatal')]
+                    repairable=any(d.code in PLACEMENT_DEFECTS for d in unresolved) and any(v!=cid for v in ids)
+                    structure_ok=review.scores.structure>=3 or any(
+                        d.code=='structure' and d.visibility!='visible' for d in review.defects)
+                    if structure_ok and not repairable and not any(d.code not in PLACEMENT_DEFECTS for d in unresolved):
+                        reason='visual_ok_evidence_unresolved';break
                 if iteration>=self.config.max_iterations:break
                 if no_gain>=2:reason='no_improvement';break
                 if not review.actions:reason='no_valid_action';break
-                try:params=apply_actions(params,review.actions,[c['id'] for c in candidates])
-                except ValueError:reason='invalid_ai_action';break
+                updated,actions=repair(params,review,allowed,ids,lambda p:signature(p) in seen,
+                                       dust_in_shader=self.render_style=='scene')
+                result['actions'].append({'iteration':iteration,'decisions':actions})
+                if updated is None:
+                    reason='repeated_parameters' if all(a['disposition']=='repeated_parameters' for a in actions) else 'no_effective_action'
+                    break
+                params=updated;iteration+=1
             if best:
-                dest=self.out/('accepted' if result['status']=='accepted_display' else 'review')
-                dest.mkdir(parents=True,exist_ok=True)
-                final=dest/(ident+'.png');shutil.copy2(best['image'],final)
-                crop=dest/(ident+'.crop.jpg');shutil.copy2(best['crop'],crop)
-                result.update(image=str(final),crop=str(crop),best_iteration=best['iteration'],
-                              checks=best['checks'],scores=best['review']['scores'],
-                              measured_major_px=best['measured_major_px'],
-                              placement=best.get('placement','surface'),support_ids=best.get('support_ids',[]),
-                              occlusion_fraction=best.get('occlusion_fraction'),photo=best.get('photo'),
-                              evidence_confidence=best.get('evidence_confidence','unknown'))
+                self.finish_image(self.out,ident,result,best)
             result['reason']=reason
             return result
         except (ProviderUnavailable,RenderUnavailable):
             raise
         except Exception as error:
             result.update(status='failed',reason=f'{type(error).__name__}: {str(error)[:260]}')
-            # Preserve a concrete image even if review/IO later fails. It is never accepted.
-            existing=sorted(folder.glob('iteration-*.png'),key=lambda p:int(p.stem.rsplit('-',1)[1]))
-            if existing:
-                dest=self.out/'review';dest.mkdir(exist_ok=True)
-                source=Path(best['image']) if best else existing[-1]
-                final=dest/(ident+'.png');shutil.copy2(source,final)
-                result['image']=str(final)
-                cropped=source.with_suffix('.crop.jpg')
-                if cropped.is_file():
-                    crop=dest/(ident+'.crop.jpg');shutil.copy2(cropped,crop);result['crop']=str(crop)
-                if best:
-                    result.update(best_iteration=best['iteration'],checks=best['checks'],
-                                  scores=best['review']['scores'],measured_major_px=best['measured_major_px'])
-                else:
-                    draft_path=folder/('draft-'+source.stem.rsplit('-',1)[1]+'.json')
-                    if draft_path.is_file():
-                        draft=json.loads(draft_path.read_text(encoding='utf8'))
-                        result.update(checks=draft['checks'],draft_record=str(draft_path),unreviewed_draft=True,
-                                      measured_major_px=draft['measured_major_px'])
+            if best:self.finish_image(self.out,ident,result,best)
+            elif draft:
+                result.update(checks=draft['checks'],draft_record=str(folder/f"draft-{draft['iteration']}.json"),
+                    unreviewed_draft=True,measured_major_px=draft['measured_major_px'],
+                    evidence_status=evidence_status(draft['checks']))
             return result
         finally:
             result['seconds']=round(time.monotonic()-start,3)
-            result['new_api_calls']=sum(c.get('job_id')==ident for c in self.vision.calls)
+            calls=[c for c in self.vision.calls if c.get('job_id')==ident]
+            usage=token_summary(calls)
+            result['new_api_calls']=usage['api_calls']
+            result['cost']['api_retries']=sum(c.get('attempt',0)>0 and c.get('state')!='not_sent' for c in calls)
+            result['cost']['reported_tokens']=usage['reported_tokens']
+            result['cost']['unreported_calls']=usage['unreported_calls']
+            result['timings']['api_seconds']=round(sum(c.get('seconds',0) for c in calls),3)
             atomic_json(folder/'result.json',result)
 
-    async def run(self):
+    def reuse_completed(self,source,implementation):
+        source=Path(source).resolve()
+        source_manifest=json.loads((source/'implementation.json').read_text(encoding='utf8'))
+        source_config=json.loads((source/'config.json').read_text(encoding='utf8'))
+        exclude={'output','manifest','count','offline'}
+        if signature(source_manifest)!=signature(implementation) or {
+            k:v for k,v in source_config.items() if k not in exclude
+        }!=self.config.model_dump(exclude=exclude):
+            raise ValueError('pilot was produced with different code or settings')
+        previous=Store(source/'jobs.sqlite')
+        try:completed={signature(r['payload']):r for r in previous.rows() if r['result'] and r['result'].get('image')}
+        finally:previous.close()
+        for row in self.store.rows():
+            if row['state']!='queued':continue
+            original=completed.get(signature(row['payload']))
+            if not original or original['state'] not in ('accepted_display','review'):continue
+            result=dict(original['result'])
+            entry=next(e for e in result['iterations'] if e['iteration']==result['best_iteration'])
+            if file_hash(result['image'])!=entry['image_hash']:
+                raise ValueError('pilot result no longer matches its verified PNG')
+            self.finish_image(self.out,row['id'],result,{**entry,'image':result['image'],'crop':result['crop']})
+            result.update(job_id=row['id'],reused_from={'batch':str(source),'job_id':original['id']},
+                          source_seconds=result['seconds'],seconds=0.,timings={},new_api_calls=0,
+                          cost={'logical_reviews':0,'renders':{},'render_cache_hits':{},'asset_imports':0,
+                                'api_retries':0,'reported_tokens':0,'unreported_calls':0})
+            self.store.finish(row['id'],result['status'],result)
+
+    async def run(self,*,reuse_from=None):
         started=time.monotonic();state='complete';error=None
         jobs=make_jobs(self.config,self.catalog)
         implementation=implementation_manifest()
@@ -523,7 +583,8 @@ class Pipeline:
             atomic_json(self.out/'inputs.json',jobs)
             atomic_json(self.out/'implementation.json',implementation)
             try:
-                if not self.config.offline:
+                if reuse_from:self.reuse_completed(reuse_from,implementation)
+                if not self.config.offline and self.store.counts().get('queued'):
                     probe_path=self.out/'capability-probe.jpg'
                     with Image.open(jobs[0]['background']) as im:
                         im=im.convert('RGB');im.thumbnail((512,512));im.save(probe_path,quality=80)
@@ -533,7 +594,7 @@ class Pipeline:
                 async def consumer():
                     nonlocal state,error
                     while not stop.is_set():
-                        job=self.store.claim()
+                        job=self.store.claim(group_size=4)
                         if not job:return
                         print(json.dumps({'event':'start','job':job['id'],'asset':job['payload']['asset_id']},ensure_ascii=False),flush=True)
                         try:result=await self.job(job)
@@ -556,6 +617,9 @@ class Pipeline:
                 summary['run']['worker_launch_seconds']=self.blender.start_seconds
                 summary['run']['gpu_wait_seconds']=self.blender.wait_seconds
                 summary['run']['api_seconds']=round(sum(c['seconds'] for c in self.vision.calls),3)
+                summary['run']['render_counts']=dict(self.renders.totals)
+                summary['run']['render_stage_seconds']=dict(self.renders.timings)
+                summary['run']['memory_retries']=self.blender.memory_retries
                 atomic_json(self.out/'summary.json',summary)
                 self.store.close()
             return summary

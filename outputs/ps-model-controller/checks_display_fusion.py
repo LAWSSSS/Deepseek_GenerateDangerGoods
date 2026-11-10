@@ -8,12 +8,21 @@ import cv2
 from PIL import Image
 
 from display_batch.photography import match_linear,display,sensor_statistics
+from display_batch.compose import taper_shadow
 from display_batch.geometry import camera_for,project
 from display_batch.pile import zbuffer,mesh_raster,receiver_mesh,depth_order,local_scale
 from display_batch.schema import BatchConfig,Action,apply_actions,version_rank
 
 
 class PhotoTests(unittest.TestCase):
+    def test_estimated_receiver_edge_is_softened_inside_its_mask(self):
+        receiver=np.zeros((60,80),bool);receiver[8:50,9:70]=True
+        loss=np.float32(receiver)*.45
+        feathered=taper_shadow(loss,8,receiver)
+        self.assertAlmostEqual(float(feathered[25,25]),.45,places=5)
+        self.assertLess(float(feathered[25,9]),.03)
+        self.assertTrue(np.all(feathered[~receiver]==0))
+
     def fixture(self):
         rng=np.random.default_rng(3)
         frame=np.uint8(np.clip(120+rng.normal(0,2,(64,64,3)),0,255))
@@ -46,12 +55,12 @@ class PhotoTests(unittest.TestCase):
 
     def test_plastic_retains_surface_instead_of_becoming_metal_or_dust(self):
         frame,alpha,rgb,env=self.fixture()
-        _,paint=match_linear(rgb,alpha,frame.reshape(-1,3),np.zeros_like(alpha),{},17,env)
         env['material_classes']=['plastic']
-        _,plastic=match_linear(rgb,alpha,frame.reshape(-1,3),np.zeros_like(alpha),{},17,env)
+        converted,plastic=match_linear(rgb,alpha,frame.reshape(-1,3),np.zeros_like(alpha),{},17,env)
+        more_dust,_=match_linear(rgb,alpha,frame.reshape(-1,3),np.zeros_like(alpha),{'dust':'more'},17,env)
         self.assertTrue(plastic['polymer_preservation'])
-        self.assertLess(plastic['dust_mean'],paint['dust_mean']*.5)
-        self.assertLess(plastic['surface_wear_rms'],paint['surface_wear_rms']*.5)
+        np.testing.assert_array_equal(converted,more_dust)
+        self.assertEqual(plastic['surface_wear_rms'],0)
 
     def test_photo_controls_do_not_change_candidate(self):
         p=apply_actions({'candidate':'A'},[Action(kind='chroma',value='more'),Action(kind='dust',value='less')],['A'])

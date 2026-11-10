@@ -24,6 +24,8 @@ class Blender:
         self.wait_seconds=0.
         self.operation_seconds={}
         self.start_seconds=0.
+        self.memory_retries=0
+        self.persistent_data=device!='CPU'
 
     def start(self):
         if self.process is not None and self.process.poll() is None:return
@@ -38,31 +40,48 @@ class Blender:
         self.start_seconds+=time.monotonic()-started
 
     async def ask(self, operation, payload, timeout=180):
+        waiting=time.monotonic()
         async with self.lock:
-            waiting=time.monotonic()
             if self.device!='CPU':
                 while not self.gpu_lease.acquire():await asyncio.sleep(.5)
             self.wait_seconds+=time.monotonic()-waiting
-            self.start(); self.counter+=1
-            out=self.root/f'rpc-{self.counter:06}-{signature(operation,payload)[:8]}.json'
-            if out.exists():out.unlink()
-            request={**payload,'operation':operation,'reply':str(out),'device':self.device}
-            start=time.monotonic()
+            request=dict(payload)
+            if operation=='render_parts':
+                request['persistent_data']=self.persistent_data
+            data=await self.roundtrip(operation,request,timeout)
+            error=data.get('error','').lower()
+            if request.get('persistent_data') and any(s in error for s in ('out of memory','failed to allocate')):
+                # Restart only this worker, preserving the global GPU lease and all render settings.
+                self.process.kill()
+                await asyncio.to_thread(self.process.wait)
+                self.persistent_data=False
+                self.memory_retries+=1
+                data=await self.roundtrip(operation,{**request,'persistent_data':False},timeout)
+            if data.get('error'):
+                error=data['error']
+                if any(s in error.lower() for s in ('no device','cuda','optix','out of memory','failed to allocate')):
+                    raise RenderUnavailable('Blender: '+error)
+                raise RuntimeError('Blender: '+error)
+            return data
+
+    async def roundtrip(self,operation,payload,timeout):
+        self.start();self.counter+=1
+        out=self.root/f'rpc-{self.counter:06}-{signature(operation,payload)[:8]}.json'
+        if out.exists():out.unlink()
+        request={**payload,'operation':operation,'reply':str(out),'device':self.device}
+        start=time.monotonic()
+        try:
             self.process.stdin.write(json.dumps(request,ensure_ascii=True)+'\n');self.process.stdin.flush()
             while not out.is_file():
                 if self.process.poll() is not None:raise RenderUnavailable('Blender worker exited; inspect worker.log')
                 if time.monotonic()-start>timeout:
-                    self.process.kill();self.process.wait();raise TimeoutError('Blender '+operation+' timed out')
+                    self.process.kill();await asyncio.to_thread(self.process.wait)
+                    raise TimeoutError('Blender '+operation+' timed out')
                 await asyncio.sleep(.15)
+            return json.loads(out.read_text(encoding='utf8'))
+        finally:
             elapsed=time.monotonic()-start;self.seconds+=elapsed
             self.operation_seconds[operation]=self.operation_seconds.get(operation,0)+elapsed
-            data=json.loads(out.read_text(encoding='utf8'))
-            if data.get('error'):
-                error=data['error']
-                if any(s in error.lower() for s in ('no device','cuda','optix','out of memory')):
-                    raise RenderUnavailable('Blender: '+error)
-                raise RuntimeError('Blender: '+error)
-            return data
 
     async def close(self):
         try:

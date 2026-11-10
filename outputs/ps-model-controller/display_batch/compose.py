@@ -12,6 +12,7 @@ from .geometry import contact_support
 from .schema import TONE_PROFILES
 from .photography import match_linear, sensor_statistics
 from .pile import depth_order
+from .framing import edit_bounds
 
 
 def linear(rgb):
@@ -24,7 +25,7 @@ def srgb(rgb):
     return np.where(rgb<=.0031308,rgb*12.92,1.055*rgb**(1/2.4)-.055)
 
 
-def sample_environment(scene, candidate):
+def sample_environment(scene, candidate, *, scene_lighting=False):
     site=next(s for s in scene['supports'] if s['id']==candidate['site_id'])
     w,h=scene['size'];x,y,r,b=candidate['bounds'];pad=round(max(r-x,b-y)*.8)
     l,t,rr,bb=max(0,x-pad),max(0,y-pad),min(w,r+pad),min(h,b+pad)
@@ -53,13 +54,73 @@ def sample_environment(scene, candidate):
                  'dust_color':linear(median/255).tolist(),
                  'sensor':sensor_statistics(rgb[t:bb,l:rr],sample[t:bb,l:rr]) if sample[t:bb,l:rr].sum()>=100
                           else sensor_statistics(rgb,sample)}
+    if scene_lighting:
+        # Use a blurred field so individual steel edges do not become light sources.
+        field=cv2.resize(np.float32(lum[t:bb,l:rr]),(96,96),interpolation=cv2.INTER_AREA)
+        field=cv2.GaussianBlur(field,(0,0),4.)
+        region=cv2.resize(sample[t:bb,l:rr].astype(np.uint8),(96,96),interpolation=cv2.INTER_NEAREST)>0
+        p20,p80=np.percentile(field[region] if region.sum()>=100 else lum[sample],[20,80])
+        environment.update(light_spread=float(np.clip((p80-p20)/max(p80,20),.08,.7)),
+                           light_level=float(np.clip(luminance/130,.65,1.35)),
+                           light_confidence=answer['light_confidence'],
+                           lighting_basis='broad_direction_estimate' if environment['key_direction'] else 'soft_dome_estimate')
     return environment,sample
 
 
-def warp(source, full_px, offset, bounds, *, premultiplied=False):
-    x,y,r,b=bounds;n=source.shape[1]
-    m=np.float32([[full_px/n,0,offset[0]-x],[0,full_px/n,offset[1]-y]])
-    return cv2.warpAffine(source,m,(r-x,b-y),flags=cv2.INTER_LINEAR,borderMode=cv2.BORDER_CONSTANT)
+def warp(source, full_px, offset, bounds, *, window=None, nearest=False):
+    x,y,r,b=bounds
+    if window is None:
+        scale=full_px/source.shape[1]
+        dx,dy=offset[0]-x,offset[1]-y
+    else:
+        ox,oy,rr,bb=window['rect']
+        if source.shape[:2]!=(bb-oy,rr-ox):
+            raise ValueError('render_pass_does_not_match_window')
+        scale=full_px/window['frame']
+        # Camera UVs are pixel edges. OpenCV's integer coordinates are pixel centres.
+        dx=offset[0]+(ox+.5)*scale-.5-x
+        dy=offset[1]+(oy+.5)*scale-.5-y
+        if scale<.8 and not nearest:
+            sigma=.45*math.sqrt(1/scale**2-1)
+            source=cv2.GaussianBlur(source,(0,0),sigma,borderType=cv2.BORDER_CONSTANT)
+    m=np.float32([[scale,0,dx],[0,scale,dy]])
+    flags=cv2.INTER_NEAREST if nearest else cv2.INTER_LINEAR
+    return cv2.warpAffine(source,m,(r-x,b-y),flags=flags,borderMode=cv2.BORDER_CONSTANT)
+
+
+def object_window(meta):
+    return None if meta.get('legacy_grid') else meta.get('object_window')
+
+
+def taper_shadow(loss, width, receiver):
+    """Taper a shadow clipped by the estimated receiver or by the edit window."""
+    h,w=loss.shape
+    if min(h,w)<3:return loss
+    xx=np.minimum(np.arange(w),np.arange(w)[::-1])
+    yy=np.minimum(np.arange(h),np.arange(h)[::-1])
+    boundary=cv2.distanceTransform(receiver.astype(np.uint8),cv2.DIST_L2,cv2.DIST_MASK_PRECISE)
+    distance=np.minimum(boundary,np.minimum(xx[None,:],yy[:,None]))
+    t=np.float32(np.clip(distance/width,0,1))
+    return loss*t*t*(3-2*t)
+
+
+def depth_on_image(path, alpha, full_px, offset, bounds, camera, window):
+    distance=cv2.imread(str(path),cv2.IMREAD_UNCHANGED)
+    if distance is None:raise ValueError('missing_object_depth_pass')
+    if distance.ndim==3:distance=distance[:,:,0]
+    if window is None:
+        ox,oy,n=0,0,distance.shape[1]
+    else:
+        ox,oy=window['rect'][:2];n=window['frame']
+    vv,uu=np.ogrid[oy:oy+distance.shape[0],ox:ox+distance.shape[1]]
+    tangent=2*math.tan(math.radians(camera['fov'])/2)
+    distance=distance/np.sqrt(1+(((uu+.5)/n-.5)*tangent)**2+(((vv+.5)/n-.5)*tangent)**2)
+    distance=np.where((alpha>.001)&np.isfinite(distance)&(distance<1e8),distance,0).astype(np.float32)
+    if window is not None:
+        # Z is not an antialiased coverage pass. Never interpolate two surfaces'
+        # depths or infer transparency from a missing depth sample.
+        return warp(distance,full_px,offset,bounds,window=window,nearest=True)
+    return warp(distance*alpha,full_px,offset,bounds)/np.maximum(warp(alpha,full_px,offset,bounds),1e-6)
 
 
 def match_rgb(rgb, alpha, background_pixels, specular_weight, tone, seed):
@@ -103,65 +164,77 @@ def match_rgb(rgb, alpha, background_pixels, specular_weight, tone, seed):
 
 def compose(scene,candidate,render_dir,render_meta,environment,samples,params,seed,out):
     render_dir=Path(render_dir)
+    source=np.asarray(Image.open(render_dir/'object.png').getchannel('A'),np.float32)/255
     alpha_dir=Path(candidate.get('fixed_alpha_dir',render_dir))
-    source=np.asarray(Image.open(alpha_dir/'object.png').convert('RGBA')).astype(np.float32)/255
-    w,h=scene['size'];x,y,r,b=candidate['bounds'];pad=max(12,round(candidate['target_px']*.12))
-    bounds=[max(0,x-pad),max(0,y-pad),min(w,r+pad),min(h,b+pad)]
+    fixed_alpha=alpha_dir!=render_dir
+    alpha_source=np.asarray(Image.open(alpha_dir/'object.png').getchannel('A'),np.float32)/255 if fixed_alpha else source
+    w,h=scene['size'];bounds=edit_bounds(candidate,scene['size'])
     x,y,r,b=bounds
     # Anchor derives from contact geometry, never from the alpha or shadow bounding box.
     offset=np.asarray(candidate['anchor_px'])-np.asarray(render_meta['anchor_uv'])*candidate['full_px']
-    alpha=warp(source[:,:,3],candidate['full_px'],offset,bounds)
+    full=candidate['full_px'];window=object_window(render_meta)
+    color_alpha=warp(source,full,offset,bounds,window=window)
+    alpha=warp(alpha_source,full,offset,bounds) if fixed_alpha else color_alpha
     spec=cv2.imread(str(render_dir/'specular0001.exr'),cv2.IMREAD_UNCHANGED)
     diff=cv2.imread(str(render_dir/'diffuse0001.exr'),cv2.IMREAD_UNCHANGED)
     if spec is None or diff is None:raise ValueError('missing_linear_material_passes')
     combined_path=render_dir/'combined0001.exr'
     combined=cv2.imread(str(combined_path),cv2.IMREAD_UNCHANGED) if combined_path.is_file() else None
     radiance=(combined[:,:,:3] if combined is not None else spec[:,:,:3]+diff[:,:,:3])[:,:,::-1]
-    raw=warp(radiance,candidate['full_px'],offset,bounds)/np.maximum(alpha[...,None],1e-6)
+    raw=warp(radiance,full,offset,bounds,window=window)/np.maximum(color_alpha[...,None],1e-6)
     highlight=np.max(spec[:,:,:3],axis=2)/np.maximum(np.max(spec[:,:,:3]+diff[:,:,:3],axis=2),.0001)
-    highlight=warp(highlight*source[:,:,3],candidate['full_px'],offset,bounds)/np.maximum(alpha,1e-6)
+    if 'object_window' in render_meta:
+        # Beauty is the denoised radiance. The other passes are only smooth guides.
+        highlight=cv2.GaussianBlur(highlight*source,(0,0),.85)/np.maximum(cv2.GaussianBlur(source,(0,0),.85),1e-6)
+    highlight=warp(highlight*source,full,offset,bounds,window=window)/np.maximum(color_alpha,1e-6)
     channels={}
     for name in ('metallic','upward'):
         path=render_dir/(name+'0001.exr')
         if path.is_file():
             value=cv2.imread(str(path),cv2.IMREAD_UNCHANGED)
             if value.ndim==3:value=value[:,:,0]
-            channels[name]=warp(value,candidate['full_px'],offset,bounds)/np.maximum(alpha,1e-6)
+            channels[name]=warp(value,full,offset,bounds,window=window)/np.maximum(color_alpha,1e-6)
     photo_environment={**environment,'material_classes':candidate.get('material_classes',[])}
-    rgb,photo=match_linear(raw,alpha,np.asarray(scene['frame'])[samples],highlight,params,seed,photo_environment,**channels)
+    reference=params.get('photo_model','reference')=='reference'
+    rgb,photo=match_linear(raw,alpha,np.asarray(scene['frame'])[samples],highlight,params,seed,photo_environment,
+                           reference=reference,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     site=next(s for s in scene['supports'] if s['id']==candidate['site_id'])
     support=np.logical_or.reduce([s['mask'][y:b,x:r] for s in scene['supports']
         if s['id'] in candidate.get('support_ids',[site['id']])]);protected=scene['protected'][y:b,x:r]
     order={'confidence':'legacy_estimate','basis':'frozen_original_occlusion'}
     if candidate.get('placement') and not candidate.get('legacy_occlusion'):
-        depth_path=render_dir/'depth0001.exr'
-        if not depth_path.is_file():raise ValueError('missing_object_depth_pass')
-        distance=cv2.imread(str(depth_path),cv2.IMREAD_UNCHANGED)
-        if distance.ndim==3:distance=distance[:,:,0]
-        n=distance.shape[0];vv,uu=np.mgrid[0:n,0:n]
-        tangent=2*math.tan(math.radians(render_meta['camera']['fov'])/2)
-        distance=distance/np.sqrt(1+(((uu+.5)/n-.5)*tangent)**2+(((vv+.5)/n-.5)*tangent)**2)
-        distance=np.where((source[:,:,3]>.001)&np.isfinite(distance)&(distance<1e8),distance,0)
-        object_z=warp((distance*source[:,:,3]).astype(np.float32),candidate['full_px'],offset,bounds)/np.maximum(alpha,1e-6)
+        object_z=depth_on_image(alpha_dir/'depth0001.exr',alpha_source,full,offset,bounds,
+                                render_meta['camera'],None if fixed_alpha else window)
         foreground,order=depth_order(scene,candidate,bounds,object_z,alpha,refine=True)
+        if window is not None and not fixed_alpha:
+            order['depth_unresolved_fraction']=float(((object_z<=0)&(alpha>.5)).sum()/max(1,(alpha>.5).sum()))
     else:foreground=(scene['depth_native'][y:b,x:r]>site['depth']+.10)&~support
     foreground &= ~protected
     visible_alpha=alpha*((~foreground)&(~protected))
     shadow_dir=Path(candidate.get('fixed_shadow_dir',render_dir))
-    with_shadow=np.asarray(Image.open(shadow_dir/'with-shadow.png').convert('RGB'),dtype=np.float32)/255
-    without_shadow=np.asarray(Image.open(shadow_dir/'without-shadow.png').convert('RGB'),dtype=np.float32)/255
-    if (shadow_dir/'with-shadow-linear0001.exr').is_file() and (shadow_dir/'without-shadow-linear0001.exr').is_file():
-        a=cv2.imread(str(shadow_dir/'with-shadow-linear0001.exr'),cv2.IMREAD_UNCHANGED)[:,:,:3].mean(axis=2)
-        base=cv2.imread(str(shadow_dir/'without-shadow-linear0001.exr'),cv2.IMREAD_UNCHANGED)[:,:,:3].mean(axis=2)
+    parts={} if candidate.get('fixed_shadow_dir') else render_meta.get('part_paths',{})
+    with_path=Path(parts.get('with_shadow',shadow_dir))/'with-shadow-linear0001.exr'
+    without_path=Path(parts.get('without_shadow',shadow_dir))/'without-shadow-linear0001.exr'
+    if with_path.is_file() and without_path.is_file():
+        a=cv2.imread(str(with_path),cv2.IMREAD_UNCHANGED)[:,:,:3].mean(axis=2)
+        base=cv2.imread(str(without_path),cv2.IMREAD_UNCHANGED)[:,:,:3].mean(axis=2)
         shadow_basis='scene_linear_EXR_ratio'
     else:
+        with_shadow=np.asarray(Image.open(shadow_dir/'with-shadow.png').convert('RGB'),dtype=np.float32)/255
+        without_shadow=np.asarray(Image.open(shadow_dir/'without-shadow.png').convert('RGB'),dtype=np.float32)/255
         a=linear(with_shadow).mean(axis=2);base=linear(without_shadow).mean(axis=2)
         shadow_basis='legacy_sRGB_decoded_ratio'
     loss=np.clip(1-a/np.maximum(base,.015),0,.65)
     loss[base<.015]=0
-    loss=warp(loss,candidate['full_px'],offset,bounds)
+    shadow_window=render_meta.get('shadow_window') if window is not None and parts else None
+    loss=warp(loss,full,offset,bounds,window=shadow_window)
     loss *= support & ~foreground & ~protected
+    if not reference:
+        # A finite, image-derived receiver is not an observed cast-shadow edge.
+        # Fade its cutoff inside the support without adding shadow to unsupported pixels.
+        receiver=warp(np.float32(base>=.015),full,offset,bounds,window=shadow_window)>.6
+        loss=taper_shadow(loss,max(5,min(28,round(candidate['target_px']*.036))),receiver&support)
     loss[loss<1/512]=0
     base_rgb=np.asarray(scene['frame']).copy();crop=base_rgb[y:b,x:r].astype(np.float32)/255
     shaded=linear(crop)*(1-loss[:,:,None])
@@ -210,7 +283,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
                  'basis':'estimated_plane_not_measured_irregular_pile'},
       'occlusion':{'status':'fail' if foreground_changes else 'unknown' if
                    (order.get('confidence')=='unknown' and order.get('occluded_fraction',0)>.02)
-                   or order.get('ambiguous_fraction',0)>.25 else 'pass',
+                   or order.get('ambiguous_fraction',0)>.25 or order.get('depth_unresolved_fraction',0)>.02 else 'pass',
                    'foreground_changed_pixels':foreground_changes,'depth_evidence':order},
       'scale':{'status':candidate['scale'].get('status','pass') if abs(unoccluded_major-expected)<=tolerance else 'fail',
                'basis':'estimated_local_reference','measurement_px':unoccluded_major,'visible_px':major,
@@ -236,6 +309,8 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             'uncertainties':candidate.get('uncertainties',[]),'depth_order':order,'shadow_basis':shadow_basis,
             'alpha_hash':hashlib.sha256(alpha.tobytes()).hexdigest(),
             'visible_alpha_hash':hashlib.sha256(visible_alpha.tobytes()).hexdigest(),
+            'foreground_mask_hash':hashlib.sha256(np.packbits(foreground)).hexdigest(),
+            'shadow_hash':hashlib.sha256(loss.tobytes()).hexdigest(),
             'scene_basis':'estimated','alpha_pixels':int((visible_alpha>.5).sum()),
             'occlusion_fraction':float(1-visible_alpha.sum()/max(alpha.sum(),1e-6)),
             'image':str(out),'crop':str(Path(out).with_suffix('.crop.jpg')),

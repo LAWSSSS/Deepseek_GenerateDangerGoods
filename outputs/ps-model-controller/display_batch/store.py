@@ -12,6 +12,8 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, timeout=30)
         self.db.row_factory = sqlite3.Row
+        self.dispatch_asset=None
+        self.dispatch_count=0
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript("""
         CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -38,13 +40,25 @@ class Store:
         with self.db:
             self.db.execute("UPDATE jobs SET state='queued' WHERE state='running'")
 
-    def claim(self):
+    def claim(self, group_size=1):
         self.db.execute("BEGIN IMMEDIATE")
-        row = self.db.execute("SELECT * FROM jobs WHERE state='queued' ORDER BY ordinal LIMIT 1").fetchone()
+        row=None
+        if self.dispatch_asset is not None and self.dispatch_count<group_size:
+            row=self.db.execute("SELECT * FROM jobs WHERE state='queued' "
+                "AND json_extract(payload,'$.asset_id')=? ORDER BY ordinal LIMIT 1",
+                (self.dispatch_asset,)).fetchone()
+        if row is None:
+            row=self.db.execute("SELECT * FROM jobs WHERE state='queued' "
+                "ORDER BY (stage<>'queued') DESC, ordinal LIMIT 1").fetchone()
+            self.dispatch_count=0
         if row:
             self.db.execute("UPDATE jobs SET state='running',updated=? WHERE id=?", (time.time(), row['id']))
         self.db.commit()
-        return self.decode(row) if row else None
+        if row is None:return None
+        job=self.decode(row)
+        self.dispatch_asset=job['payload'].get('asset_id')
+        self.dispatch_count+=1
+        return job
 
     @staticmethod
     def decode(row):

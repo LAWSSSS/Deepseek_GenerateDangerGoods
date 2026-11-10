@@ -20,6 +20,8 @@ from display_batch.geometry import (camera_for, project, contact_geometry, conta
 from display_batch.compose import match_rgb, linear, srgb, warp
 from display_batch.ai import Vision, ProviderUnavailable
 from display_batch.pipeline import Pipeline, batch_lock, final_resolution
+from display_batch.framing import render_windows
+from display_batch.rendering import part_keys
 from display_batch.scene import support_anchors
 from display_batch.common import atomic_json,file_hash
 from display_batch.assets import prepare as prepare_asset
@@ -59,10 +61,39 @@ class GeometryTests(unittest.TestCase):
         self.assertGreaterEqual(len(anchors),2)
         self.assertTrue(all(mask[y,x] for x,y in anchors))
 
-    def test_final_sampling_accounts_for_render_frustum(self):
-        self.assertEqual(final_resolution({'target_px':200,'full_px':470}),1024)
-        self.assertEqual(final_resolution({'target_px':400,'full_px':880}),2048)
-        self.assertEqual(final_resolution({'target_px':2000,'full_px':4400}),2048)
+    def test_region_sampling_preserves_frustum_and_pixel_centres(self):
+        c={'target_px':400,'full_px':1200,'bounds':[465,420,865,540],'offset':[100.,50.]}
+        resolution=final_resolution(c)
+        self.assertEqual(resolution,832)
+        windows=render_windows(c,(1300,1200),resolution)
+        frame=windows['object']['frame'];x,y,r,b=windows['object']['rect']
+        self.assertEqual(max(r-x,b-y),resolution)
+        self.assertLess((r-x)*(b-y),frame*frame/4)
+        full=np.zeros((frame,frame),np.float32)
+        full[y+12:b-12,x+12:r-12]=.75
+        crop=full[y:b,x:r]
+        bounds=[400,350,940,620]
+        a=warp(full,1200,c['offset'],bounds,window={'frame':frame,'rect':[0,0,frame,frame]})
+        z=warp(crop,1200,c['offset'],bounds,window=windows['object'])
+        np.testing.assert_array_equal(a>.5,z>.5)
+        self.assertLess(np.max(np.abs(a-z)),.003)
+        more_shadow=render_windows({**c,'target_px':450},(1300,1200),resolution)
+        self.assertEqual(windows['object'],more_shadow['object'])
+        self.assertNotEqual(windows['shadow'],more_shadow['shadow'])
+
+    def test_only_receiver_baseline_survives_material_change(self):
+        request={'appearance':'scene','camera':{},'plane_normal':[0,0,1],'mesh_hash':'g','matrix':[],
+                 'yaw':0,'roughness_delta':0.,'dust_gain':1.,'dust_control':1.,'material_classes':['steel'],
+                 'environment':{'world_color':[.2,.2,.2]},'light_gain':1.,
+                 'windows':{'object':{'frame':1600,'rect':[400,500,1200,900]},
+                            'shadow':{'frame':512,'rect':[70,80,420,440]}}}
+        original=part_keys(request,'OPTIX','test')
+        material=part_keys({**request,'roughness_delta':.04},'OPTIX','test')
+        self.assertNotEqual(original['object'],material['object'])
+        self.assertNotEqual(original['with_shadow'],material['with_shadow'])
+        self.assertEqual(original['without_shadow'],material['without_shadow'])
+        relit=part_keys({**request,'light_gain':.8},'OPTIX','test')
+        self.assertTrue(all(relit[k]!=original[k] for k in original))
 
     def test_separated_feet_do_not_create_support_in_gap(self):
         foot=np.zeros((80,100),np.uint8);foot[30:40,10:20]=255;foot[30:40,70:80]=255
@@ -121,16 +152,16 @@ class QueueTests(unittest.TestCase):
     def test_1000_jobs_restart_exactly_once(self):
         with tempfile.TemporaryDirectory() as d:
             path=Path(d)/'jobs.sqlite';store=Store(path)
-            jobs=[{'n':i} for i in range(1000)];store.initialize('frozen',jobs)
+            jobs=[{'n':i,'asset_id':str(i%29)} for i in range(1000)];store.initialize('frozen',jobs)
             completed=[]
             for _ in range(137):
-                job=store.claim();completed.append(job['id']);store.finish(job['id'],'review',{'id':job['id']})
-            interrupted=store.claim();store.checkpoint(interrupted['id'],'review',{'iteration':1})
+                job=store.claim(group_size=4);completed.append(job['id']);store.finish(job['id'],'review',{'id':job['id']})
+            interrupted=store.claim(group_size=4);store.checkpoint(interrupted['id'],'review',{'iteration':1})
             store.close();store=Store(path);store.initialize('frozen',jobs);store.recover()
-            restarted=store.claim();self.assertEqual(restarted['id'],interrupted['id'])
+            restarted=store.claim(group_size=4);self.assertEqual(restarted['id'],interrupted['id'])
             self.assertEqual(restarted['checkpoint']['iteration'],1)
             store.finish(restarted['id'],'accepted_display',{'id':restarted['id']});completed.append(restarted['id'])
-            while job:=store.claim():
+            while job:=store.claim(group_size=4):
                 self.assertNotIn(job['id'],completed);completed.append(job['id'])
                 store.finish(job['id'],'review',{'id':job['id']})
             self.assertEqual(len(set(completed)),1000)
@@ -298,7 +329,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['iterations'],[]);self.assertEqual(result['new_api_calls'],0)
             pipe.store.close()
 
-    async def run_loop(self,max_iterations,reviews,hard_pass=True):
+    async def run_loop(self,max_iterations,reviews,hard_pass=True,alternatives=1,bad_ids=()):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);pipe=Pipeline.__new__(Pipeline);pipe.config=BatchConfig(backgrounds=d,output=d,max_iterations=max_iterations)
             pipe.out=root;pipe.cpu=asyncio.Semaphore(2);pipe.store=Store(root/'jobs.sqlite')
@@ -320,11 +351,13 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             pipe.vision=FakeVision()
             async def render(*args):return (root,{},None,None,False)
             pipe.render=render
-            candidates=[{'id':'A','target_px':200,'score':1}]
+            candidates=[{'id':chr(65+i),'target_px':200,'score':3-i} for i in range(alternatives)]
             def compose(*args):
                 path=args[-1];Image.new('RGB',(12,12),({'scene':40,'darker':80,'cooler':100}.get(args[-3]['tone'],120),0,0)).save(path)
                 crop=path.with_suffix('.crop.jpg');Image.new('RGB',(12,12)).save(crop)
-                return {'checks':{'support':{'status':'pass' if hard_pass else 'fail'}},
+                status='fail' if args[-3]['candidate'] in bad_ids else hard_pass
+                if isinstance(status,bool):status='pass' if status else 'fail'
+                return {'checks':{'support':{'status':status}},
                         'image':str(path),'crop':str(crop),'preview':str(crop),'measured_major_px':200}
             with patch('display_batch.pipeline.choose_candidates',return_value=(candidates,[])),patch('display_batch.pipeline.compose',side_effect=compose):
                 result=await pipe.job(job)
@@ -346,7 +379,23 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_high_score_never_accepts_failed_contact(self):
         result,calls=await self.run_loop(2,[review(4)],hard_pass=False)
+        self.assertEqual(result['status'],'failed')
+        self.assertEqual(calls,0)
+        self.assertNotIn('image',result)
+
+    async def test_confirmed_failure_visits_one_backup_without_extra_review(self):
+        result,calls=await self.run_loop(0,[review(4)],alternatives=3,bad_ids=('A',))
+        self.assertEqual(result['status'],'accepted_display')
+        self.assertEqual(result['candidate_visits'],['A','B'])
+        self.assertEqual(calls,1)
+
+    async def test_visual_pass_with_unknown_support_does_not_retouch(self):
+        result,calls=await self.run_loop(2,[review(3,[Action(kind='material',value='weathered')])],
+                                         hard_pass='unknown',alternatives=3)
+        self.assertEqual(result['reason'],'visual_ok_evidence_unresolved')
+        self.assertEqual(result['candidate_visits'],['A'])
         self.assertEqual(result['status'],'review')
+        self.assertEqual(calls,1)
 
     async def test_default_two_repairs_are_bounded(self):
         result,calls=await self.run_loop(2,[review(1,[Action(kind='tone',value='darker')]),
@@ -362,6 +411,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         result,calls=await self.run_loop(0,[RuntimeError('invalid response')])
         self.assertEqual(result['status'],'failed');self.assertTrue(result['unreviewed_draft'])
         self.assertEqual(result['checks']['support']['status'],'pass');self.assertEqual(calls,1)
+        self.assertNotIn('image',result)
 
     async def test_unchanged_pixels_stop_before_another_paid_review(self):
         result,calls=await self.run_loop(2,[review(2,[Action(kind='chroma',value='more')])])

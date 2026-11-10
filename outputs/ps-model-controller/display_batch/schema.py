@@ -34,6 +34,9 @@ class BatchConfig(Strict):
     cpu_concurrency: int = Field(default=2, ge=1, le=2)
     price_input_per_million: float | None = Field(default=None, ge=0)
     price_output_per_million: float | None = Field(default=None, ge=0)
+    # New photographic profiles are promoted after staged evaluation.
+    appearance: Literal['reference','camera','materials','scene'] = 'reference'
+    review_format: Literal['full','compact'] = 'full'
 
 
 class Surface(Strict):
@@ -125,6 +128,11 @@ class Review(Strict):
     evidence: str = Field(max_length=240)
     def passes(self):
         return self.scores.passes() and not any(d.severity in ("major", "fatal") for d in self.defects)
+
+    def photo_passes(self):
+        return min(self.scores.lighting,self.scores.material,self.scores.texture)>=3 and not any(
+            d.severity in ('major','fatal') and d.code in ('color','lighting','material','texture')
+            for d in self.defects)
 
 
 class Probe(Strict):

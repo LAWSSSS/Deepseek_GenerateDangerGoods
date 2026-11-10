@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import traceback
 import re
+import time
 
 import bpy
 import numpy as np
@@ -14,15 +15,21 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 import blender_worker as legacy
 from display_batch.geometry import camera_for, contact_geometry, horizontal_angle, pose_points, transformed, material_detail_allowed
 from display_batch.common import atomic_json
+from display_batch.materials import material_kind, SURFACE_DUST
 
 BASE = None
 BASE_PATH = None
 BASE_ROUGHNESS = {}
 DEVICE = None
+LIVE_RENDER = None
 
 
 def reset(device='CPU', resolution=512):
-    global DEVICE
+    global DEVICE, LIVE_RENDER, BASE, BASE_PATH
+    if LIVE_RENDER is not None:
+        LIVE_RENDER=None
+        if BASE is not None:BASE.use_fake_user=False
+        BASE=BASE_PATH=None
     if DEVICE is None:
         scene=legacy.setup_scene(device,resolution)
         DEVICE=device
@@ -36,11 +43,14 @@ def reset(device='CPU', resolution=512):
         bpy.data.orphans_purge(do_recursive=True)
         scene.render.resolution_x=scene.render.resolution_y=resolution
     scene.render.film_transparent=True
+    scene.render.use_border=False
+    scene.render.use_persistent_data=False
     scene.view_settings.view_transform='AgX'
     scene.cycles.samples=32
     scene.cycles.use_denoising=True
     scene.render.image_settings.file_format='PNG'
     scene.render.image_settings.color_mode='RGBA'
+    scene.render.image_settings.color_depth='8'
     scene.use_nodes=False
     return scene
 
@@ -328,15 +338,7 @@ def shadow_output(scene,folder,name):
     legacy.render(scene,folder/(name+'.png'))
 
 
-def render(request):
-    folder=Path(request['output']);folder.mkdir(parents=True,exist_ok=True)
-    scene=reset(request['device'],request.get('resolution',1024));obj=normalized_mesh(request['mesh'])
-    vertices,faces=arrays(obj);p,rot=pose_points(vertices,request['matrix'],request['yaw'])
-    matrix=np.eye(4);matrix[:3,:3]=rot
-    obj.matrix_world=Matrix(matrix) @ Matrix(request['matrix'])
-    camera=request.get('camera') or camera_for(p,request['elevation'])
-    cam=legacy.make_camera(scene,camera['eye'],camera['target'],fov=camera['fov'])
-    illuminate(scene,cam,request['environment'],request.get('light_gain',1.))
+def configure_materials(obj,request,reference=True):
     for material in obj.data.materials:
         if not material or not material.use_nodes:continue
         for node in list(material.node_tree.nodes):
@@ -350,7 +352,11 @@ def render(request):
                     dot=tree.nodes.new('ShaderNodeVectorMath');dot.operation='DOT_PRODUCT';dot.inputs[1].default_value=(0,0,1)
                     tree.links.new(geometry.outputs['Normal'],dot.inputs[0])
                     upward=tree.nodes.new('ShaderNodeOutputAOV');upward.aov_name='upward';tree.links.new(dot.outputs['Value'],upward.inputs['Value'])
-                surface_detail(material,node,request['environment'],request.get('dust_gain',1.))
+                if reference:
+                    surface_detail(material,node,request['environment'],request.get('dust_gain',1.))
+                else:
+                    scene_surface(material,node,request)
+                    continue
             if node.type=='BSDF_PRINCIPLED' and node.inputs['Roughness'].is_linked:
                 adjustment=material.node_tree.nodes.get('batch_roughness_delta')
                 if adjustment is None:
@@ -363,6 +369,18 @@ def render(request):
             elif node.type=='BSDF_PRINCIPLED':
                 base=BASE_ROUGHNESS[(material.name,node.name)]
                 node.inputs['Roughness'].default_value=max(.08,min(.95,base+request.get('roughness_delta',0)))
+
+
+def render(request):
+    folder=Path(request['output']);folder.mkdir(parents=True,exist_ok=True)
+    scene=reset(request['device'],request.get('resolution',1024));obj=normalized_mesh(request['mesh'])
+    vertices,faces=arrays(obj);p,rot=pose_points(vertices,request['matrix'],request['yaw'])
+    matrix=np.eye(4);matrix[:3,:3]=rot
+    obj.matrix_world=Matrix(matrix) @ Matrix(request['matrix'])
+    camera=request.get('camera') or camera_for(p,request['elevation'])
+    cam=legacy.make_camera(scene,camera['eye'],camera['target'],fov=camera['fov'])
+    illuminate(scene,cam,request['environment'],request.get('light_gain',1.))
+    configure_materials(obj,request)
     bpy.context.view_layer.update()
     normal=np.asarray(request.get('plane_normal',[0,0,1]),dtype=float)
     polys,anchor=contact_geometry(p,faces,camera,normal=normal)
@@ -392,13 +410,215 @@ def render(request):
                 'depth0001.exr','metallic0001.exr','upward0001.exr']}
 
 
+def scene_surface(material, bsdf, request):
+    tree=material.node_tree
+    metal=bsdf.inputs['Metallic']
+    kind=material_kind(material.name,metal.default_value,metal.is_linked,request.get('material_classes',[]))
+    maximum=SURFACE_DUST.get(kind,0.)
+    if not maximum:
+        return
+    strength=tree.nodes.get('scene dust amount')
+    tint=tree.nodes.get('scene dust tint')
+    rough=tree.nodes.get('scene roughness')
+    if strength is None:
+        geometry=tree.nodes.new('ShaderNodeNewGeometry')
+        upward=tree.nodes.new('ShaderNodeVectorMath');upward.operation='DOT_PRODUCT'
+        upward.inputs[1].default_value=(0,0,1)
+        tree.links.new(geometry.outputs['Normal'],upward.inputs[0])
+        exposed=tree.nodes.new('ShaderNodeMapRange')
+        exposed.inputs['To Min'].default_value=.22
+        exposed.inputs['To Max'].default_value=1.
+        tree.links.new(upward.outputs['Value'],exposed.inputs[0])
+        # The shader's local AO covers recessed holes and parts hidden by the assembly.
+        occlusion=tree.nodes.new('ShaderNodeAmbientOcclusion')
+        occlusion.samples=4;occlusion.only_local=True;occlusion.inputs['Distance'].default_value=.018
+        cover=tree.nodes.new('ShaderNodeMath');cover.operation='MULTIPLY'
+        tree.links.new(occlusion.outputs['AO'],cover.inputs[0])
+        tree.links.new(exposed.outputs[0],cover.inputs[1])
+        variation=tree.nodes.new('ShaderNodeTexNoise')
+        variation.inputs['Scale'].default_value=18
+        variation.inputs['Detail'].default_value=2
+        mottling=tree.nodes.new('ShaderNodeMapRange')
+        mottling.inputs['To Min'].default_value=.15
+        mottling.inputs['To Max'].default_value=1.
+        tree.links.new(variation.outputs['Fac'],mottling.inputs[0])
+        weight=tree.nodes.new('ShaderNodeMath');weight.operation='MULTIPLY'
+        tree.links.new(cover.outputs[0],weight.inputs[0]);tree.links.new(mottling.outputs[0],weight.inputs[1])
+        strength=tree.nodes.new('ShaderNodeMath');strength.name='scene dust amount';strength.operation='MULTIPLY'
+        tree.links.new(weight.outputs[0],strength.inputs[0])
+        tint=tree.nodes.new('ShaderNodeMixRGB');tint.name='scene dust tint'
+        base=bsdf.inputs['Base Color']
+        if base.is_linked:tree.links.new(base.links[0].from_socket,tint.inputs[1])
+        else:tint.inputs[1].default_value=base.default_value
+        tree.links.new(strength.outputs[0],tint.inputs[0]);tree.links.new(tint.outputs[0],base)
+        rough=tree.nodes.new('ShaderNodeMath');rough.name='scene roughness';rough.operation='ADD';rough.use_clamp=True
+        original=bsdf.inputs['Roughness']
+        if original.is_linked:tree.links.new(original.links[0].from_socket,rough.inputs[0])
+        else:rough.inputs[0].default_value=original.default_value
+        tree.links.new(rough.outputs[0],original)
+    environment=request['environment']
+    dust=request.get('dust_gain',1.)*request.get('dust_control',1.)
+    strength.inputs[1].default_value=min(maximum*1.8,maximum*(.7+environment.get('haze',0))*dust)
+    tint.inputs[2].default_value=(*environment['dust_color'],1)
+    delta=request.get('roughness_delta',0)
+    rough.inputs[1].default_value=max(-.035,min(.045,delta))*(.25 if kind=='polymer' else 1.)
+
+
+def scene_lighting(state, camera, environment, gain, reference):
+    scene=bpy.context.scene
+    key=(camera if not reference else None,environment,gain,reference)
+    if state.get('lighting_key')==key:return
+    state['lighting_key']=key
+    if 'world_image' not in state:
+        nodes=scene.world.node_tree.nodes;nodes.clear();links=scene.world.node_tree.links
+        bg=nodes.new('ShaderNodeBackground');output=nodes.new('ShaderNodeOutputWorld')
+        image=bpy.data.images.new('batch environment',width=256,height=128,float_buffer=True)
+        image.colorspace_settings.name='Non-Color'
+        texture=nodes.new('ShaderNodeTexEnvironment');texture.image=image
+        links.new(texture.outputs['Color'],bg.inputs['Color']);links.new(bg.outputs[0],output.inputs['Surface'])
+        bg.inputs['Strength'].default_value=.65
+        state['world_image']=image
+        state['lights']=[]
+        for name in ('key','fill'):
+            light=bpy.data.lights.new(name,'AREA');light.shape='DISK'
+            obj=bpy.data.objects.new(name,light);scene.collection.objects.link(obj);state['lights'].append(obj)
+    yy,xx=np.mgrid[0:128,0:256]
+    direction=environment.get('key_direction')
+    color=np.asarray(environment['world_color'])
+    if reference:
+        sky=.12+.55*(yy/128)**2
+        reflection=np.exp(-((xx/256-.24)/.035)**2-((yy/128-.60)/.23)**2)
+        reflection+=.5*np.exp(-((xx/256-.76)/.14)**2-((yy/128-.52)/.22)**2)
+        sky=sky+6.*reflection
+        key_offset=(direction[0]*3,-2,3+max(0,-direction[1])) if direction else (-2,-3,4)
+        target=Vector((0,0,0))
+        lights=[(key_offset,160*gain,3.2),((3,1,2),65,4.5)]
+    else:
+        # Broad sky and horizon gradient, with no synthetic specular stripe.
+        spread=environment.get('light_spread',.35)
+        sky=.60+(.65+.45*spread)*(yy/128)**2
+        light=environment.get('light_level',1.)
+        target=Vector(camera['target'])
+        if direction:
+            right=Vector(camera['basis'][0])
+            offset=right*(3.8*direction[0])+Vector((0,-1.6,4.1-1.6*direction[1]))
+            lights=[(offset,210*light*gain,4.6+2*(1-spread)),((0,2.5,2.8),70*light,6.5)]
+        else:
+            lights=[((0,-.4,4.6),155*light*gain,7.5),((0,2.2,2.7),62*light,6.8)]
+    pixels=np.ones((128,256,4),np.float32)
+    pixels[:,:,:3]=sky[:,:,None]*color
+    image=state['world_image'];image.pixels.foreach_set(pixels.ravel());image.update()
+    for obj,(offset,power,size) in zip(state['lights'],lights):
+        obj.location=target+Vector(offset)
+        obj.rotation_euler=(target-obj.location).to_track_quat('-Z','Y').to_euler()
+        obj.data.energy=power;obj.data.size=size;obj.data.color=environment['light_color']
+
+
+def set_window(scene, window):
+    frame=window['frame'];x,y,r,b=window['rect']
+    render=scene.render
+    render.resolution_x=render.resolution_y=frame
+    render.use_border=window['rect']!=[0,0,frame,frame]
+    render.use_crop_to_border=render.use_border
+    if render.use_border:
+        # Blender truncates floating bounds. Offset by a small subpixel fraction
+        # so integer pixel edges round to the intended window in single precision.
+        render.border_min_x=(x+.01)/frame;render.border_max_x=min(1.,(r+.01)/frame)
+        render.border_min_y=(frame-b+.01)/frame;render.border_max_y=min(1.,(frame-y+.01)/frame)
+
+
+def render_parts(request):
+    global LIVE_RENDER, BASE, BASE_PATH
+    started=time.monotonic()
+    reference=request['appearance']=='reference'
+    if LIVE_RENDER is None or LIVE_RENDER['appearance']!=request['appearance']:
+        scene=reset(request['device'])
+        for obj in list(scene.objects):bpy.data.objects.remove(obj,do_unlink=True)
+        if BASE is not None:BASE.use_fake_user=False
+        BASE=BASE_PATH=None
+        bpy.data.orphans_purge(do_recursive=True)
+        cam=legacy.make_camera(scene,(0,-10,8),(0,0,0))
+        LIVE_RENDER={'camera':cam,'appearance':request['appearance']}
+    scene=bpy.context.scene;state=LIVE_RENDER
+    scene.render.use_persistent_data=request.get('persistent_data',True)
+    imported=0.;import_seconds=0.
+    mesh_key=(request['mesh'],request['mesh_hash'])
+    if state.get('mesh_key')!=mesh_key:
+        begin=time.monotonic()
+        if 'asset' in state:
+            bpy.data.objects.remove(state['asset'],do_unlink=True)
+            BASE.use_fake_user=False
+            BASE=BASE_PATH=None
+            bpy.data.orphans_purge(do_recursive=True)
+        asset=normalized_mesh(request['mesh'])
+        state.update(asset=asset,arrays=arrays(asset),mesh_key=mesh_key)
+        imported=1;import_seconds=time.monotonic()-begin
+    obj=state['asset'];vertices,faces=state['arrays']
+    points,rotation=pose_points(vertices,request['matrix'],request['yaw'])
+    matrix=np.eye(4);matrix[:3,:3]=rotation
+    obj.matrix_world=Matrix(matrix)@Matrix(request['matrix'])
+    camera=request.get('camera') or camera_for(points,request['elevation'])
+    cam=state['camera'];cam.location=camera['eye']
+    cam.rotation_euler=(Vector(camera['target'])-cam.location).to_track_quat('-Z','Y').to_euler()
+    cam.data.angle=math.radians(camera['fov'])
+    scene_lighting(state,camera,request['environment'],request.get('light_gain',1.),reference)
+    configure_materials(obj,request,reference)
+    normal=np.asarray(request.get('plane_normal',[0,0,1]),dtype=float)
+    receiver_key=(request.get('receiver',{}).get('patches',[]),normal.tolist())
+    if state.get('receiver_key')!=receiver_key:
+        if 'ground' in state:
+            old=state['ground'];mesh=old.data
+            bpy.data.objects.remove(old,do_unlink=True)
+            if mesh.users==0:bpy.data.meshes.remove(mesh)
+        ground=make_receiver(request,normal)
+        if 'receiver_material' not in state:
+            material=bpy.data.materials.new('neutral receiver');material.use_nodes=True
+            shader=material.node_tree.nodes.get('Principled BSDF')
+            shader.inputs['Base Color'].default_value=(.3,.3,.3,1)
+            shader.inputs['Roughness'].default_value=.9
+            state['receiver_material']=material
+        ground.data.materials.append(state['receiver_material'])
+        state.update(ground=ground,receiver_key=receiver_key)
+    ground=state['ground']
+    polys,anchor=contact_geometry(points,faces,camera,normal=normal)
+    timings={'asset_import_seconds':import_seconds,'scene_setup_seconds':time.monotonic()-started-import_seconds}
+    scene.render.image_settings.color_mode='RGBA'
+    scene.cycles.use_denoising=True
+    for part,path in request['parts'].items():
+        folder=Path(path)
+        begin=time.monotonic()
+        is_object=part=='object'
+        obj.hide_render=part=='without_shadow'
+        obj.visible_camera=is_object
+        ground.visible_camera=not is_object
+        set_window(scene,request['windows']['object' if is_object else 'shadow'])
+        scene.cycles.samples=32 if is_object else 16
+        if is_object:
+            scene.render.image_settings.file_format='PNG'
+            scene.render.image_settings.color_depth='8'
+            scene.view_settings.view_transform='AgX'
+            pass_outputs(scene,folder)
+            legacy.render(scene,folder/'object.png')
+        else:
+            scene.use_nodes=False
+            scene.view_settings.view_transform='Standard'
+            scene.render.image_settings.file_format='OPEN_EXR'
+            scene.render.image_settings.color_depth='16'
+            filename=part.replace('_','-')+'-linear0001.exr'
+            legacy.render(scene,folder/filename)
+        timings[part+'_seconds']=time.monotonic()-begin
+    return {'anchor_uv':anchor.tolist() if anchor is not None else None,
+            'contact_polygons':[q.tolist() for q in polys],'camera':camera,'device':DEVICE,
+            'imports':int(imported),'timings':timings}
+
+
 def main():
     for line in sys.stdin:
         try:
             request=json.loads(line)
         except ValueError:continue
         try:
-            result={'export':export,'settle':settle,'render':render}[request['operation']](request)
+            result={'export':export,'settle':settle,'render':render,'render_parts':render_parts}[request['operation']](request)
             atomic_json(request['reply'],result)
         except Exception as error:
             traceback.print_exc()

@@ -55,14 +55,20 @@ class Vision:
             result["cost_complete"] = not result["unreported_calls"]
         return result
 
-    async def ask(self, role, schema, prompt, payload, images=(), *, cache=True):
+    async def ask(self, role, schema, prompt, payload, images=(), *, cache=True,
+                  image_limits=None,max_output_tokens=None):
         previews=[]
-        for image in images:
+        endpoint=self.endpoint if max_output_tokens is None else self.endpoint.model_copy(
+            update={'max_output_tokens':max_output_tokens})
+        for i,image in enumerate(images):
             image=Path(image)
-            dest=self.cache/('preview-'+signature('jpeg-v1',file_hash(image))+'.jpg')
+            limit=image_limits[i] if image_limits is not None else (1280,1024)
+            encoded_key=signature('jpeg-v1',file_hash(image)) if limit==(1280,1024) else signature(
+                'jpeg-v2',limit,file_hash(image))
+            dest=self.cache/('preview-'+encoded_key+'.jpg')
             if not dest.is_file():
                 with Image.open(image) as im:
-                    im=ImageOps.exif_transpose(im).convert('RGB');im.thumbnail((1280,1024))
+                    im=ImageOps.exif_transpose(im).convert('RGB');im.thumbnail(limit)
                     for quality in (85,75,60,45):
                         data=io.BytesIO();im.save(data,format='JPEG',quality=quality)
                         if len(data.getvalue())<=384*1024:break
@@ -71,7 +77,7 @@ class Vision:
                     dest.write_bytes(data.getvalue())
             previews.append(dest)
         images=tuple(previews)
-        key = signature("vision-v1", self.endpoint.model_dump(), schema.model_json_schema(),
+        key = signature("vision-v1", endpoint.model_dump(), schema.model_json_schema(),
                         role, prompt, semantic_payload(payload), [file_hash(p) for p in images])
         path = self.cache/f"{key}.json"
         if cache and path.is_file():
@@ -88,7 +94,7 @@ class Vision:
                 report = {"calls": []}
                 start = time.monotonic()
                 try:
-                    answer = await ModelClient(self.http, report).ask(self.endpoint, role, schema,
+                    answer = await ModelClient(self.http, report).ask(endpoint, role, schema,
                         prompt + " Return only the requested JSON tool arguments. Coordinates are normalized [0,1]."
                         " Write evidence in concise Chinese, at most 60 Chinese characters. Respect all schema string limits.",
                         retry_payload, images, tool="inspect_display", detail="high")
