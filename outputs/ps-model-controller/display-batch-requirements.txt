@@ -1,0 +1,2 @@
+# Additional collision dependency; use the existing project Python environment.
+coacd==1.0.14

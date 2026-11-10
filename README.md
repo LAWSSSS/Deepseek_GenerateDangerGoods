@@ -1,5 +1,7 @@
 # 废钢监控异物合成
 
+新增[多背景批量展示流程](DISPLAY_BATCH.md)：使用当前 44 个模型条目，按每张背景独立选位、横躺落稳、PBR 渲染和 AI 有限迭代，直接输出 PNG；命令行与网页 `/batch` 共用执行器。`accepted_display` 与旧流程正式验收分开，批量验证结果及限制见进度记录。
+
 ## DeepSeek Harness 与当前进度
 
 本仓库已登记为 DeepSeek Harness 工作区 `scrap-composite`，Harness 直接打开本仓库，不存在需要同步的第二份拷贝。进入该工作区创建会话即可继续。接手顺序：先读 [项目约定](AGENTS.md)、[Harness 交接说明](DEEPSEEK_HANDOFF.md)、[进度记录](WORK_LOG.md)。每次本地提交都要在提交正文和进度记录中说明改动原因及下一步要求。

@@ -1,0 +1,21 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>多背景批量生成</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/static/style.css">
+<style>main{display:block;max-width:960px;margin:30px auto}form{display:grid;grid-template-columns:1fr 1fr;gap:16px}label.wide{grid-column:1/-1}input{width:100%;box-sizing:border-box}pre{white-space:pre-wrap;background:#10191f;padding:20px}a{color:#8bd5b7}.note{color:#acbbc4;line-height:1.7}</style></head>
+<body><header><strong>多背景批量生成</strong><a href="/">返回放置工作台</a></header><main>
+<p class="note">每张图片放置一个横躺物品。程序先选择承托位置，再选择视角并匹配环境。展示合格与待审图片分别保存，支持中断续跑。</p>
+<form id="form"><label class="wide">背景目录<input id="backgrounds" required placeholder="例如 C:/Users/用户名/Desktop/背景图"></label>
+<label>生成任务数<input id="count" type="number" min="1" max="1000" value="100" required></label>
+<label>初稿后的修正轮数<input id="iterations" type="number" min="0" max="10" value="2" required></label>
+<label class="wide">模型编号（留空使用当前全部模型）<input id="assets" placeholder="例如 3,6,10,13,19-1,31"></label>
+<label>随机种子<input id="seed" type="number" min="0" value="20261110"></label>
+<label>渲染设备<select id="device"><option value="OPTIX">NVIDIA OptiX</option><option value="CUDA">NVIDIA CUDA</option><option value="CPU">CPU</option></select></label>
+<button id="start" type="submit">开始批量生成</button><button id="resume" type="button" class="secondary" disabled>继续此批次</button></form>
+<p id="message" role="status"></p><a id="results" hidden target="_blank" rel="noopener">查看效果与验证记录</a><pre id="progress">尚未开始</pre>
+<p class="note">修正达到上限时保存最佳待审版本。没有合适承托位置的任务保留失败原因。背景尺寸与承托关系为估计，不能作为实测数据。</p>
+</main><script>
+const $=id=>document.getElementById(id);let batch=localStorage.getItem('displayBatchId');let timer;
+$('backgrounds').value=localStorage.getItem('displayBackgrounds')||'';
+async function update(){if(!batch)return;try{const r=await fetch('/api/batches/'+batch);const data=await r.json();if(!r.ok)throw Error(data.error);const c=data.counts||{};const stages={asset:'准备模型',scene:'分析背景',review:'复核成图',queued:'等待执行'};const active=(data.active||[]).map(x=>x.id+'：'+(stages[x.stage]||x.stage)).join('\n');$('progress').textContent=['展示合格 '+(c.accepted_display||0)+' 张 · 待审 '+(c.review||0)+' 张 · 失败 '+(c.failed||0)+' 个','排队 '+(c.queued||0)+' 个 · 执行中 '+(c.running||0)+' 个',active,data.run?.error||data.process_error||'',data.run?.seconds?'本次耗时 '+Math.round(data.run.seconds)+' 秒':'','保存位置：'+data.output].filter(Boolean).join('\n\n');$('resume').disabled=!data.resumable;$('start').disabled=data.running;$('results').hidden=!data.has_results;$('results').href='/api/batches/'+batch+'/files/index.html';clearTimeout(timer);if(data.running)timer=setTimeout(update,2500);}catch(e){$('message').textContent=e.message;}}
+$('form').onsubmit=async e=>{e.preventDefault();$('start').disabled=true;$('message').textContent='正在创建批次…';try{const data={backgrounds:$('backgrounds').value.trim(),count:Number($('count').value),max_iterations:Number($('iterations').value),assets:$('assets').value.split(',').map(x=>x.trim()).filter(Boolean),seed:Number($('seed').value),render_device:$('device').value};const r=await fetch('/api/batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const result=await r.json();if(!r.ok)throw Error(result.error);batch=result.id;localStorage.setItem('displayBatchId',batch);localStorage.setItem('displayBackgrounds',data.backgrounds);$('message').textContent='批次已启动';await update();}catch(e){$('message').textContent=e.message;$('start').disabled=false;}};
+$('resume').onclick=async()=>{const r=await fetch('/api/batches/'+batch+'/resume',{method:'POST'});const d=await r.json();$('message').textContent=r.ok?'正在继续批次':d.error;await update();};update();
+</script></body></html>

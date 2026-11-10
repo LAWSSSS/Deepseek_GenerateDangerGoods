@@ -1867,6 +1867,8 @@ async def local_only(request, call_next):
     return await call_next(request)
 
 
+from display_batch.web import routes as batch_display_routes
+routes = batch_display_routes + routes
 app = Starlette(routes=routes, middleware=[Middleware(BaseHTTPMiddleware, dispatch=local_only)])
 
 
