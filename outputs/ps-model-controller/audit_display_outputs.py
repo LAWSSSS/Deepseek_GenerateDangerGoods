@@ -29,8 +29,10 @@ def main(batches,out):
                 draw.polygon([(round(x*(w-1)),round(y*(h-1))) for x,y in poly],fill=1)
             record['protected_changed_pixels']=int((changed&np.asarray(protected)).sum())
             best_index=result.get('best_iteration')
-            if best_index is not None:
-                best=next(r for r in result['iterations'] if r['iteration']==best_index)
+            best=None
+            if best_index is not None:best=next(r for r in result['iterations'] if r['iteration']==best_index)
+            elif result.get('draft_record'):best=json.loads(Path(result['draft_record']).read_text(encoding='utf8'))
+            if best is not None:
                 x,y,r,b=best['edit_bounds'];outside=changed.copy();outside[y:b,x:r]=False
                 record['outside_edit_bounds_changed_pixels']=int(outside.sum())
                 record['best_version_copy_matches']=file_hash(result['image'])==best['image_hash']

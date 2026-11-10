@@ -35,7 +35,7 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/batch_display.py
 }
 ```
 
-服务必须支持图片与 JSON function tool 输出，启动时进行真实图像能力探测。图片先编码为有大小上限的 JPEG。每个逻辑请求最多两次尝试，格式错误只修复一次；鉴权、模型端点和视觉能力错误暂停批次。默认不设置整批 token 上限。只有配置输入、输出单价时才计算费用，否则仅报告供应商返回的 token。
+服务必须支持图片与 JSON function tool 输出，启动时进行真实图像能力探测。图片先编码为有大小上限的 JPEG。每个逻辑请求最多两次尝试，格式错误只修复一次；鉴权、模型端点、视觉能力错误以及一次重试后仍不可用的限流/网络服务故障暂停批次。默认不设置整批 token 上限。只有配置输入、输出单价时才计算费用，否则仅报告供应商返回的 token。
 
 ## 摆放与材质
 
@@ -74,6 +74,8 @@ AI 查看实际 PNG 的全景、局部、当前模型参照与已有候选。返
 
 GPU 渲染进程使用全局独占锁，默认 OptiX；CPU 作业和 AI 请求各最多 2 路。一个常驻 Blender 复用设备，物理缓存和渲染缓存分开。报告分别记录实际 worker 操作、等待、API 与任务阶段耗时；并行任务耗时之和不能当作批次墙钟时间。
 
+昂贵的资产准备失败也按模型、代码/依赖和服务配置缓存，后续任务直接进入待审。修复模型、依赖或相关实现后签名变化会重新准备；若只是希望复试同一失败输入，可在新配置中使用新的 `cache` 目录。复核前保存 `draft-*.json`，包括程序检查与图片散列；后续 API 异常时保留已审最佳图，首稿复核失败则保留未审草稿和完整几何记录。
+
 ## 离线诊断与复现验证
 
 ```powershell
@@ -93,4 +95,6 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/audit_display_as
 work/triposr-env/Scripts/python.exe outputs/ps-model-controller/report_display_batch.py --batches outputs/your-development outputs/your-heldout --out outputs/your-report
 ```
 
-1000 任务故障恢复测试仅模拟队列，不等于生成 1000 张图片。真实评估使用相机 53 的 20 张图开发、相机 36 的 3 张图留出，六类模型共 138 项。完整实际结果与未达标原因见 [WORK_LOG.md](WORK_LOG.md) 最新记录；不得用通过单张预检代替批量合格率。
+1000 任务故障恢复测试仅模拟队列，不等于生成 1000 张图片。真实评估使用相机 53 的 20 张图开发、相机 36 的 3 张图留出，六类模型共 138 项。开发/留出展示合格率分别为 3.3% / 5.6%，没有达到 80% 目标；完整结果、用量与限制见 [验证记录](DISPLAY_BATCH_VALIDATION.md)。不得用通过单张预检代替批量合格率。
+
+旧批次若在后续复核异常时丢失最佳版本元数据，可运行 `recover_display_evidence.py --batches <已完成批次目录>`。它只按已有检查与评分恢复失败任务的最佳已审图，保留原记录及散列；不调用模型、不渲染、不改变失败状态。独立回读入口为 `audit_display_outputs.py --batches <批次目录> --out <报告 JSON>`。

@@ -72,6 +72,8 @@ async def status(request):
         if not lease.acquire():result['running']=True
         else:lease.release()
         if (out/'summary.json').is_file():result.update(json.loads((out/'summary.json').read_text(encoding='utf8')))
+        if result.get('usage_current_run'):
+            result['usage_current_run']={k:v for k,v in result['usage_current_run'].items() if k!='calls'}
         if (out/'jobs.sqlite').is_file():
             store=Store(out/'jobs.sqlite')
             result['counts']=store.counts()

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+from functools import lru_cache
 
 HERE = Path(__file__).resolve().parent.parent
 ROOT = HERE.parents[1]
@@ -39,14 +40,18 @@ def resolve(path):
     return path.resolve() if path.is_absolute() else (ROOT/path).resolve()
 
 
+@lru_cache(maxsize=1)
 def implementation_manifest():
     import importlib.metadata
     files=sorted((HERE/'display_batch').glob('*.py'))+[HERE/'blender_display_worker.py',HERE/'display_collision_worker.py']
+    files += [HERE/name for name in ('blender_worker.py','scene_v2.py','run.py','placement-web/review_viewer.py')]
     versions={}
-    for name in ('numpy','trimesh','coacd','Pillow','opencv-python','pydantic','httpx'):
+    for name in ('numpy','trimesh','coacd','Pillow','opencv-python','pydantic','httpx','torch','transformers'):
         try:versions[name]=importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:versions[name]='unavailable'
-    return {'sources':{str(p.relative_to(HERE)):file_hash(p) for p in files},
+    weights={str(p.relative_to(WEIGHTS)):file_hash(p) for p in
+             (WEIGHTS/'mobile_sam.pt',WEIGHTS/'depth/model.safetensors',WEIGHTS/'matte/birefnet-general-lite.onnx') if p.is_file()}
+    return {'sources':{str(p.relative_to(HERE)):file_hash(p) for p in files},'weight_hashes':weights,
             'dependencies':versions,'blender':'4.5.3','python':sys.version.split()[0]}
 
 

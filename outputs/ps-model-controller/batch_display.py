@@ -37,7 +37,8 @@ def main():
         from display_batch.diagnostics import diagnose
         print(asyncio.run(diagnose(config)));return
     summary=asyncio.run(Pipeline(config).run())
-    print(json.dumps(summary,ensure_ascii=False,indent=2))
+    brief={**summary,'usage_current_run':{k:v for k,v in summary['usage_current_run'].items() if k!='calls'}}
+    print(json.dumps(brief,ensure_ascii=False,indent=2))
 
 
 if __name__=='__main__':main()

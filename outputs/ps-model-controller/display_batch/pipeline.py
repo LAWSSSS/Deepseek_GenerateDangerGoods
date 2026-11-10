@@ -157,7 +157,22 @@ class Pipeline:
     async def prepare_asset(self,k):
         async with self.prepare_lock:
             if k not in self.assets:
-                self.assets[k]=await prepare_asset(self.catalog[k],self.cache,self.blender,self.vision)
+                # Failed expensive preparation is cached too; a thousand jobs must not
+                # run the same doomed decomposition or malformed asset request repeatedly.
+                row=self.catalog[k]
+                key=signature('asset-preparation-failure-v1',row['mesh_hash'],
+                    file_hash(row['board']) if row.get('board') else None,
+                    self.vision.endpoint.model_dump(),implementation_manifest())
+                failure_path=self.cache/'asset-failures'/(key+'.json')
+                if failure_path.is_file():
+                    self.assets[k]=json.loads(failure_path.read_text(encoding='utf8'))
+                else:
+                    try:self.assets[k]=await prepare_asset(row,self.cache,self.blender,self.vision)
+                    except (ProviderUnavailable,RenderUnavailable):raise
+                    except Exception as error:
+                        self.assets[k]={**row,'signature':key,'poses':[],
+                            'reason':f'asset_preparation_failed: {type(error).__name__}: {str(error)[:220]}'}
+                        atomic_json(failure_path,self.assets[k])
             return self.assets[k]
 
     async def render(self,asset,scene,candidate,params,resolution):
@@ -220,6 +235,7 @@ class Pipeline:
         result={'job_id':ident,'asset_id':payload['asset_id'],'background':payload['background'],
                 'group':payload.get('group','batch'),'status':'review','scene_basis':'estimated',
                 'formal_status':'unchanged','iterations':[],'timings':{}}
+        best=None
         try:
             held=getattr(self,'model_review',{}).get(payload['asset_id'])
             if held and held.get('mesh_hash')==payload.get('mesh_hash'):
@@ -283,6 +299,11 @@ class Pipeline:
                 image=folder/f'iteration-{iteration}.png'
                 comp=await asyncio.to_thread(compose,scene,candidate,folder_render,meta,environment,samples,
                                               params,payload['seed'],image)
+                draft={**comp,'iteration':iteration,'params':params.copy(),
+                       'render_cache_hit':hit,'image_hash':file_hash(image)}
+                atomic_json(folder/f'draft-{iteration}.json',draft)
+                self.store.checkpoint(ident,'review_request',{'last_iteration':iteration,
+                    'params':params,'draft':str(folder/f'draft-{iteration}.json')})
                 review=await self.vision.ask('review',Review,REVIEW_PROMPT,
                     {'name':asset['name'],'features':asset['semantic']['key_features'],'params':params,
                      'allowed':{'candidate':[c['id'] for c in candidates], 'material':list(MATERIAL_PROFILES),
@@ -294,8 +315,7 @@ class Pipeline:
                      'estimated_size_mm':asset['semantic']['major_mm'],
                      'checks':comp['checks'],'source_note':'The current reconstructed model preserves user-approved revisions; judge missing geometry against this current model, not the pose of an upright source photo.'},
                      [comp['preview'],comp['crop'],folder_render/'object.png',asset['board'],folder/'alternatives.jpg'])
-                entry={**comp,'iteration':iteration,'params':params.copy(),'render_cache_hit':hit,
-                       'review':review.model_dump(),'image_hash':file_hash(image)}
+                entry={**draft,'review':review.model_dump()}
                 result['iterations'].append(entry)
                 atomic_json(folder/f'iteration-{iteration}.json',entry)
                 self.store.checkpoint(ident,'review',{'last_iteration':iteration,'params':params,'record':str(folder/f'iteration-{iteration}.json')})
@@ -331,14 +351,24 @@ class Pipeline:
         except Exception as error:
             result.update(status='failed',reason=f'{type(error).__name__}: {str(error)[:260]}')
             # Preserve a concrete image even if review/IO later fails. It is never accepted.
-            existing=sorted(folder.glob('iteration-*.png'))
+            existing=sorted(folder.glob('iteration-*.png'),key=lambda p:int(p.stem.rsplit('-',1)[1]))
             if existing:
                 dest=self.out/'review';dest.mkdir(exist_ok=True)
-                final=dest/(ident+'.png');shutil.copy2(existing[-1],final)
+                source=Path(best['image']) if best else existing[-1]
+                final=dest/(ident+'.png');shutil.copy2(source,final)
                 result['image']=str(final)
-                cropped=existing[-1].with_suffix('.crop.jpg')
+                cropped=source.with_suffix('.crop.jpg')
                 if cropped.is_file():
                     crop=dest/(ident+'.crop.jpg');shutil.copy2(cropped,crop);result['crop']=str(crop)
+                if best:
+                    result.update(best_iteration=best['iteration'],checks=best['checks'],
+                                  scores=best['review']['scores'],measured_major_px=best['measured_major_px'])
+                else:
+                    draft_path=folder/('draft-'+source.stem.rsplit('-',1)[1]+'.json')
+                    if draft_path.is_file():
+                        draft=json.loads(draft_path.read_text(encoding='utf8'))
+                        result.update(checks=draft['checks'],draft_record=str(draft_path),unreviewed_draft=True,
+                                      measured_major_px=draft['measured_major_px'])
             return result
         finally:
             result['seconds']=round(time.monotonic()-start,3)

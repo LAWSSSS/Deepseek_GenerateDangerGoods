@@ -48,6 +48,7 @@ def report(batches,out):
         items.sort(key=lambda r:('3','6','10','13','19-1','31').index(r['asset_id']))
         sheet=Image.new('RGB',(1800,490),(23,31,38));draw=ImageDraw.Draw(sheet)
         draw.text((18,14),f'{index:02} · {"留出验收" if group=="heldout" else "开发验证"} · {Path(background).name}',font=small,fill='white')
+        draw.text((18,42),'背景原图 · 网页中点击编号可查看完整合成',font=small,fill=(180,194,202))
         with Image.open(background) as original:
             original.thumbnail((560,390));sheet.paste(original,(18,65))
         for i,r in enumerate(items):

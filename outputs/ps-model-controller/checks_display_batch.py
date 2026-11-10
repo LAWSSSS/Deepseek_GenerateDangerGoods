@@ -21,7 +21,7 @@ from display_batch.compose import match_rgb, linear, srgb, warp
 from display_batch.ai import Vision, ProviderUnavailable
 from display_batch.pipeline import Pipeline, batch_lock, final_resolution
 from display_batch.scene import support_anchors
-from display_batch.common import atomic_json
+from display_batch.common import atomic_json,file_hash
 from display_batch.assets import prepare as prepare_asset
 from display_batch.schema import AssetAnswer
 from display_batch import web as batch_web
@@ -186,6 +186,44 @@ class WebTests(unittest.TestCase):
 
 
 class APITests(unittest.IsolatedAsyncioTestCase):
+    async def test_global_outage_stops_after_one_retry(self):
+        for status in (429,503):
+            with self.subTest(status=status),tempfile.TemporaryDirectory() as d:
+                root=Path(d);provider=root/'provider.json'
+                atomic_json(provider,{'vision':{'url':'http://127.0.0.1:9999/v1/chat/completions','model':'fake','key_env':None}})
+                vision=Vision(BatchConfig(backgrounds=d,output=d,provider_config=str(provider)),root/'cache',root/'usage.json')
+                await vision.http.aclose();vision.http=httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(status)))
+                with self.assertRaises(ProviderUnavailable):await vision.ask('test',Probe,'Test',{})
+                self.assertEqual(len(vision.calls),2);await vision.close()
+
+    async def test_cache_hit_metadata_does_not_cause_new_request(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);provider=root/'provider.json'
+            atomic_json(provider,{'vision':{'url':'http://127.0.0.1:9999/v1/chat/completions','model':'fake','key_env':None}})
+            vision=Vision(BatchConfig(backgrounds=d,output=d,provider_config=str(provider)),root/'cache',root/'usage.json')
+            answer=json.dumps({'image_visible':True,'description':'图像可见'})
+            await vision.http.aclose();vision.http=httpx.AsyncClient(transport=httpx.MockTransport(lambda r:httpx.Response(200,json={
+                'choices':[{'finish_reason':'stop','message':{'tool_calls':[{'type':'function','function':{'name':'inspect_display','arguments':answer}}]}}],
+                'usage':{'prompt_tokens':5,'completion_tokens':5,'total_tokens':10}})))
+            await vision.ask('test',Probe,'Test',{'physics':{'cache_hit':False,'value':.8}})
+            await vision.ask('test',Probe,'Test',{'physics':{'cache_hit':True,'value':.8}})
+            self.assertEqual(len(vision.calls),1)
+            await vision.ask('test',Probe,'Test',{'physics':{'cache_hit':True,'value':.9}})
+            self.assertEqual(len(vision.calls),2);await vision.close()
+
+    async def test_failed_asset_preparation_is_reused_across_instances(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);pipe=Pipeline.__new__(Pipeline);pipe.prepare_lock=asyncio.Lock()
+            pipe.assets={};pipe.cache=root;pipe.blender=None
+            pipe.catalog={'A':{'mesh_hash':'mesh','name':'test'}}
+            endpoint=type('Endpoint',(),{'model_dump':lambda self:{'model':'fake'}})()
+            pipe.vision=type('Vision',(),{'endpoint':endpoint})()
+            with patch('display_batch.pipeline.prepare_asset',side_effect=ValueError('invalid volume')) as prepare:
+                first=await pipe.prepare_asset('A');pipe.assets={}
+                second=await pipe.prepare_asset('A')
+                self.assertEqual(prepare.call_count,1);self.assertEqual(first,second)
+                self.assertEqual(second['poses'],[])
+
     async def test_loose_or_unknown_assembly_never_simulated(self):
         for relationship in ('loose_parts','unknown'):
             with self.subTest(relationship=relationship),tempfile.TemporaryDirectory() as d:
@@ -260,18 +298,22 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             class FakeVision:
                 def __init__(self):self.calls=[]
                 async def ask(self,*args,**kwargs):
-                    i=len(self.calls);self.calls.append({'fake':True});return reviews[min(i,len(reviews)-1)]
+                    i=len(self.calls);self.calls.append({'fake':True});value=reviews[min(i,len(reviews)-1)]
+                    if isinstance(value,Exception):raise value
+                    return value
             pipe.vision=FakeVision()
             async def render(*args):return (root,{},None,None,False)
             pipe.render=render
             candidates=[{'id':'A','target_px':200,'score':1}]
             def compose(*args):
-                path=args[-1];Image.new('RGB',(12,12)).save(path);crop=path.with_suffix('.crop.jpg');Image.new('RGB',(12,12)).save(crop)
+                path=args[-1];Image.new('RGB',(12,12),(40 if args[-3]['tone']=='scene' else 80,0,0)).save(path)
+                crop=path.with_suffix('.crop.jpg');Image.new('RGB',(12,12)).save(crop)
                 return {'checks':{'support':{'status':'pass' if hard_pass else 'fail'}},
                         'image':str(path),'crop':str(crop),'preview':str(crop),'measured_major_px':200}
             with patch('display_batch.pipeline.choose_candidates',return_value=(candidates,[])),patch('display_batch.pipeline.compose',side_effect=compose):
                 result=await pipe.job(job)
             calls=len(pipe.vision.calls);pipe.store.close()
+            if result.get('image'):result['_copied_hash']=file_hash(result['image'])
             return result,calls
 
     async def test_zero_iterations_still_reviews_initial(self):
@@ -294,6 +336,16 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         result,calls=await self.run_loop(2,[review(1,[Action(kind='tone',value='darker')]),
                                           review(2,[Action(kind='tone',value='cooler')]),review(2)])
         self.assertEqual(calls,3);self.assertEqual(len(result['iterations']),3)
+
+    async def test_failed_later_review_preserves_best_reviewed_image(self):
+        result,calls=await self.run_loop(2,[review(2,[Action(kind='tone',value='darker')]),RuntimeError('invalid response')])
+        self.assertEqual(result['status'],'failed');self.assertEqual(result['best_iteration'],0)
+        self.assertEqual(result['_copied_hash'],result['iterations'][0]['image_hash']);self.assertEqual(calls,2)
+
+    async def test_failed_first_review_keeps_program_checks(self):
+        result,calls=await self.run_loop(0,[RuntimeError('invalid response')])
+        self.assertEqual(result['status'],'failed');self.assertTrue(result['unreviewed_draft'])
+        self.assertEqual(result['checks']['support']['status'],'pass');self.assertEqual(calls,1)
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

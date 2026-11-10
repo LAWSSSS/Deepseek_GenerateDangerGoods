@@ -19,6 +19,14 @@ class ProviderUnavailable(RuntimeError):
     pass
 
 
+def semantic_payload(value):
+    """Operational cache metadata must not turn an identical review into a paid request."""
+    if isinstance(value,dict):
+        return {k:semantic_payload(v) for k,v in value.items() if k not in ('cache_hit','render_cache_hit')}
+    if isinstance(value,(list,tuple)):return [semantic_payload(v) for v in value]
+    return value
+
+
 class Vision:
     def __init__(self, config, cache, usage_path):
         raw = json.loads(Path(config.provider_config or HERE/"batch-config.example.json").read_text(encoding="utf8"))
@@ -64,7 +72,7 @@ class Vision:
             previews.append(dest)
         images=tuple(previews)
         key = signature("vision-v1", self.endpoint.model_dump(), schema.model_json_schema(),
-                        role, prompt, payload, [file_hash(p) for p in images])
+                        role, prompt, semantic_payload(payload), [file_hash(p) for p in images])
         path = self.cache/f"{key}.json"
         if cache and path.is_file():
             self.cache_hits += 1
@@ -103,4 +111,6 @@ class Vision:
                                     seconds=round(time.monotonic()-start, 3))
                         self.calls.append(call)
                     atomic_json(self.usage_path, self.usage())
+            if isinstance(last_error,httpx.TransportError) or code in (429,500,502,503,504):
+                raise ProviderUnavailable(f'视觉服务暂不可用：{code or type(last_error).__name__}，已用完一次重试') from None
             raise RuntimeError(f"{role} 两次请求未得到有效结果：{type(last_error).__name__}") from None

@@ -35,7 +35,6 @@ def camera_for(points, elevation):
     up = np.cross(right,forward)
     fov=math.degrees(2*math.atan(1.10*span/distance))
     return {"eye":eye.tolist(),"target":center.tolist(),"fov":fov,
-            "basis":"estimated_distant_camera_local_crop",
             "basis":np.stack([right,up,forward]).tolist()}
 
 

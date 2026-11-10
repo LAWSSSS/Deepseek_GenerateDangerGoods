@@ -1,6 +1,6 @@
 # 废钢监控异物合成
 
-新增[多背景批量展示流程](DISPLAY_BATCH.md)：使用当前 44 个模型条目，按每张背景独立选位、横躺落稳、PBR 渲染和 AI 有限迭代，直接输出 PNG；命令行与网页 `/batch` 共用执行器。`accepted_display` 与旧流程正式验收分开，批量验证结果及限制见进度记录。
+新增[多背景批量展示流程](DISPLAY_BATCH.md)：使用当前 44 个模型条目，按每张背景独立选位、横躺落稳、PBR 渲染和 AI 有限迭代，直接输出 PNG；命令行与网页 `/batch` 共用执行器。`accepted_display` 与旧流程正式验收分开。138 项真实验证输出 41 张 PNG，开发/留出展示合格率为 3.3% / 5.6%，尚未达到批量质量目标；见[验证记录](DISPLAY_BATCH_VALIDATION.md)和[全部效果](outputs/多背景批量-全量验证-20261110/index.html)。
 
 ## DeepSeek Harness 与当前进度
 
