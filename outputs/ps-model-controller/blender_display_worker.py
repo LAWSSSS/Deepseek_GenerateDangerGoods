@@ -413,13 +413,20 @@ def render(request):
 def scene_surface(material, bsdf, request):
     tree=material.node_tree
     metal=bsdf.inputs['Metallic']
-    kind=material_kind(material.name,metal.default_value,metal.is_linked,request.get('material_classes',[]))
+    kind=material.get('display_surface_kind')
+    if kind is None:
+        kind=material_kind(material.name,metal.default_value,metal.is_linked,request.get('material_classes',[]))
+        material['display_surface_kind']=kind
     maximum=SURFACE_DUST.get(kind,0.)
+    native=request.get('appearance')=='native'
+    if native:
+        maximum={'metal':.35,'paint':.30,'rust':.13,'polymer':.15,'mixed':.23}.get(kind,0.)
     if not maximum:
         return
     strength=tree.nodes.get('scene dust amount')
     tint=tree.nodes.get('scene dust tint')
     rough=tree.nodes.get('scene roughness')
+    deposit_color=tree.nodes.get('photographed deposit tint')
     if strength is None:
         geometry=tree.nodes.new('ShaderNodeNewGeometry')
         upward=tree.nodes.new('ShaderNodeVectorMath');upward.operation='DOT_PRODUCT'
@@ -436,8 +443,14 @@ def scene_surface(material, bsdf, request):
         tree.links.new(occlusion.outputs['AO'],cover.inputs[0])
         tree.links.new(exposed.outputs[0],cover.inputs[1])
         variation=tree.nodes.new('ShaderNodeTexNoise')
-        variation.inputs['Scale'].default_value=18
+        variation.inputs['Scale'].default_value=26 if native else 18
         variation.inputs['Detail'].default_value=2
+        if native:
+            coords=tree.nodes.new('ShaderNodeTexCoord')
+            tree.links.new(coords.outputs['Object'],variation.inputs['Vector'])
+            grain=tree.nodes.new('ShaderNodeTexNoise')
+            grain.inputs['Scale'].default_value=110;grain.inputs['Detail'].default_value=2
+            tree.links.new(coords.outputs['Object'],grain.inputs['Vector'])
         mottling=tree.nodes.new('ShaderNodeMapRange')
         mottling.inputs['To Min'].default_value=.15
         mottling.inputs['To Max'].default_value=1.
@@ -451,17 +464,66 @@ def scene_surface(material, bsdf, request):
         if base.is_linked:tree.links.new(base.links[0].from_socket,tint.inputs[1])
         else:tint.inputs[1].default_value=base.default_value
         tree.links.new(strength.outputs[0],tint.inputs[0]);tree.links.new(tint.outputs[0],base)
+        if native:
+            # A 3D deposit layer has irregular shade and micro-normal variation,
+            # independent of pixel coordinates or frame crop.
+            grain_value=tree.nodes.new('ShaderNodeMapRange')
+            grain_value.inputs['From Min'].default_value=.28
+            grain_value.inputs['From Max'].default_value=.72
+            grain_value.inputs['To Min'].default_value=.35
+            grain_value.inputs['To Max'].default_value=1.25
+            tree.links.new(grain.outputs['Fac'],grain_value.inputs[0])
+            deposit_color=tree.nodes.new('ShaderNodeMixRGB')
+            deposit_color.name='photographed deposit tint';deposit_color.blend_type='MULTIPLY'
+            deposit_color.inputs[0].default_value=1.
+            tree.links.new(grain_value.outputs[0],deposit_color.inputs[2])
+            tree.links.new(deposit_color.outputs[0],tint.inputs[2])
+            micro=tree.nodes.new('ShaderNodeBump')
+            micro.inputs['Distance'].default_value=.0012
+            bump_weight=tree.nodes.new('ShaderNodeMath');bump_weight.operation='MULTIPLY'
+            bump_weight.inputs[1].default_value=.40 if kind=='polymer' else 1.1
+            tree.links.new(strength.outputs[0],bump_weight.inputs[0])
+            tree.links.new(bump_weight.outputs[0],micro.inputs['Strength'])
+            tree.links.new(grain.outputs['Fac'],micro.inputs['Height'])
+            if bsdf.inputs['Normal'].is_linked:
+                tree.links.new(bsdf.inputs['Normal'].links[0].from_socket,micro.inputs['Normal'])
+            tree.links.new(micro.outputs[0],bsdf.inputs['Normal'])
         rough=tree.nodes.new('ShaderNodeMath');rough.name='scene roughness';rough.operation='ADD';rough.use_clamp=True
         original=bsdf.inputs['Roughness']
         if original.is_linked:tree.links.new(original.links[0].from_socket,rough.inputs[0])
         else:rough.inputs[0].default_value=original.default_value
         tree.links.new(rough.outputs[0],original)
+        if native and kind=='metal':
+            # Irregular oxide/dust broadens the lobe. Keep linked material values underneath.
+            oxide=tree.nodes.new('ShaderNodeMath');oxide.name='oxide roughness'
+            oxide.operation='MULTIPLY_ADD'
+            oxide.inputs[1].default_value=.14
+            tree.links.new(mottling.outputs[0],oxide.inputs[0])
+            tree.links.new(oxide.outputs[0],rough.inputs[1])
+            deposit=tree.nodes.new('ShaderNodeMath');deposit.operation='MULTIPLY_ADD'
+            deposit.inputs[1].default_value=-.7;deposit.inputs[2].default_value=1.
+            tree.links.new(strength.outputs[0],deposit.inputs[0])
+            layer=tree.nodes.new('ShaderNodeMath');layer.operation='MULTIPLY'
+            if metal.is_linked:tree.links.new(metal.links[0].from_socket,layer.inputs[0])
+            else:layer.inputs[0].default_value=metal.default_value
+            tree.links.new(deposit.outputs[0],layer.inputs[1])
+            tree.links.new(layer.outputs[0],metal)
     environment=request['environment']
     dust=request.get('dust_gain',1.)*request.get('dust_control',1.)
+    if native:
+        dust*=float(np.clip(.75+environment['sensor']['surface_detail_rms']*14,.80,1.35))
     strength.inputs[1].default_value=min(maximum*1.8,maximum*(.7+environment.get('haze',0))*dust)
-    tint.inputs[2].default_value=(*environment['dust_color'],1)
+    if deposit_color is None:
+        tint.inputs[2].default_value=(*environment['dust_color'],1)
+    else:
+        deposit_color.inputs[1].default_value=(*environment['dust_color'],1)
     delta=request.get('roughness_delta',0)
-    rough.inputs[1].default_value=max(-.035,min(.045,delta))*(.25 if kind=='polymer' else 1.)
+    adjustment=max(-.035,min(.045,delta))*(.25 if kind=='polymer' else 1.)
+    oxide=tree.nodes.get('oxide roughness')
+    if oxide is not None:
+        oxide.inputs[2].default_value=.02+adjustment
+    else:
+        rough.inputs[1].default_value=adjustment
 
 
 def scene_lighting(state, camera, environment, gain, reference):
@@ -485,6 +547,7 @@ def scene_lighting(state, camera, environment, gain, reference):
     yy,xx=np.mgrid[0:128,0:256]
     direction=environment.get('key_direction')
     color=np.asarray(environment['world_color'])
+    probe=environment.get('reflection_probe')
     if reference:
         sky=.12+.55*(yy/128)**2
         reflection=np.exp(-((xx/256-.24)/.035)**2-((yy/128-.60)/.23)**2)
@@ -505,8 +568,15 @@ def scene_lighting(state, camera, environment, gain, reference):
             lights=[(offset,210*light*gain,4.6+2*(1-spread)),((0,2.5,2.8),70*light,6.5)]
         else:
             lights=[((0,-.4,4.6),155*light*gain,7.5),((0,2.2,2.7),62*light,6.8)]
+        if probe is not None:
+            # The observed surroundings dominate reflections. These broad area
+            # lights provide modest soft shadows where the sky is unobserved.
+            lights=[(offset,power*.46,size*1.28) for offset,power,size in lights]
     pixels=np.ones((128,256,4),np.float32)
-    pixels[:,:,:3]=sky[:,:,None]*color
+    if probe is not None:
+        pixels[:,:,:3]=np.repeat(np.repeat(np.asarray(probe,np.float32),2,axis=0),2,axis=1)
+    else:
+        pixels[:,:,:3]=sky[:,:,None]*color
     image=state['world_image'];image.pixels.foreach_set(pixels.ravel());image.update()
     for obj,(offset,power,size) in zip(state['lights'],lights):
         obj.location=target+Vector(offset)

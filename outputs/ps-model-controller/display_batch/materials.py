@@ -14,7 +14,7 @@ def material_kind(name, metallic, metallic_linked, classes):
         return 'paint'
     if 'rust' in name:
         return 'rust'
-    if re.search(r'steel|chrome|machined|brass|bronze|zerk', name) or (not metallic_linked and metallic >= .65):
+    if re.search(r'steel|stainless|chrome|machined|brass|bronze|zerk', name) or (not metallic_linked and metallic >= .65):
         return 'metal'
     if classes and set(classes) <= {'rubber', 'plastic'}:
         return 'polymer'

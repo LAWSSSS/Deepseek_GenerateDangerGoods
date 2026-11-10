@@ -13,6 +13,7 @@ from .schema import TONE_PROFILES
 from .photography import match_linear, sensor_statistics
 from .pile import depth_order
 from .framing import edit_bounds
+from .fusion import camera_psf, camera_tones, contact_darkening, optical_layer, reflection_probe
 
 
 def linear(rgb):
@@ -25,7 +26,7 @@ def srgb(rgb):
     return np.where(rgb<=.0031308,rgb*12.92,1.055*rgb**(1/2.4)-.055)
 
 
-def sample_environment(scene, candidate, *, scene_lighting=False):
+def sample_environment(scene, candidate, *, scene_lighting=False, native=False):
     site=next(s for s in scene['supports'] if s['id']==candidate['site_id'])
     w,h=scene['size'];x,y,r,b=candidate['bounds'];pad=round(max(r-x,b-y)*.8)
     l,t,rr,bb=max(0,x-pad),max(0,y-pad),min(w,r+pad),min(h,b+pad)
@@ -64,6 +65,13 @@ def sample_environment(scene, candidate, *, scene_lighting=False):
                            light_level=float(np.clip(luminance/130,.65,1.35)),
                            light_confidence=answer['light_confidence'],
                            lighting_basis='broad_direction_estimate' if environment['key_direction'] else 'soft_dome_estimate')
+    if native:
+        # The projection supplies only a local reflection estimate, not measured HDR.
+        valid=scene['allowed']&~scene['protected']
+        probe,fraction=reflection_probe(rgb,valid,candidate,environment)
+        environment.update(reflection_probe=probe,reflection_coverage=fraction,
+                           lighting_basis='local_ground_reflection_estimate',
+                           camera_psf=camera_psf(rgb[t:bb,l:rr],valid[t:bb,l:rr]))
     return environment,sample
 
 
@@ -196,8 +204,10 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             channels[name]=warp(value,full,offset,bounds,window=window)/np.maximum(color_alpha,1e-6)
     photo_environment={**environment,'material_classes':candidate.get('material_classes',[])}
     reference=params.get('photo_model','reference')=='reference'
-    rgb,photo=match_linear(raw,alpha,np.asarray(scene['frame'])[samples],highlight,params,seed,photo_environment,
-                           reference=reference,**channels)
+    native=params.get('photo_model')=='native'
+    reference_pixels=np.asarray(scene['frame'])[samples]
+    rgb,photo=match_linear(raw,alpha,reference_pixels,highlight,params,seed,photo_environment,
+                           reference=reference,camera_capture=not native,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     site=next(s for s in scene['supports'] if s['id']==candidate['site_id'])
     support=np.logical_or.reduce([s['mask'][y:b,x:r] for s in scene['supports']
@@ -212,6 +222,12 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     else:foreground=(scene['depth_native'][y:b,x:r]>site['depth']+.10)&~support
     foreground &= ~protected
     visible_alpha=alpha*((~foreground)&(~protected))
+    occlusion_fraction=float(1-visible_alpha.sum()/max(alpha.sum(),1e-6))
+    foot=np.zeros((b-y,r-x),np.uint8)
+    for poly in render_meta['contact_polygons']:
+        coords=(np.asarray(poly)*full+offset-[x,y])*16
+        cv2.fillConvexPoly(foot,np.rint(coords).astype(np.int32),255,shift=4)
+    cover=contact_support(foot,support)
     shadow_dir=Path(candidate.get('fixed_shadow_dir',render_dir))
     parts={} if candidate.get('fixed_shadow_dir') else render_meta.get('part_paths',{})
     with_path=Path(parts.get('with_shadow',shadow_dir))/'with-shadow-linear0001.exr'
@@ -235,11 +251,45 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         # Fade its cutoff inside the support without adding shadow to unsupported pixels.
         receiver=warp(np.float32(base>=.015),full,offset,bounds,window=shadow_window)>.6
         loss=taper_shadow(loss,max(5,min(28,round(candidate['target_px']*.036))),receiver&support)
-    loss[loss<1/512]=0
     base_rgb=np.asarray(scene['frame']).copy();crop=base_rgb[y:b,x:r].astype(np.float32)/255
+    if native:
+        physics=candidate.get('terrain_physics',{})
+        supported=bool(cover and min(cover)>=.9 and physics.get('stable') and physics.get('status')=='pass')
+        contact=contact_darkening(foot,support,foreground|protected,candidate['target_px'],supported)
+        loss=np.maximum(loss,contact)
+        rgb,local_tones=camera_tones(rgb,alpha,reference_pixels,channels.get('metallic'),photo['polymer_preservation'])
+        photo['after_luma']=float(np.median((rgb@np.float32([.2126,.7152,.0722]))[alpha>.85])*255)
+        if foreground.any() and order.get('confidence')=='estimated' and (foreground&(alpha>.5)).any():
+            # A nearby foreground face screens a small amount of diffuse light.
+            distance=cv2.distanceTransform((~foreground).astype(np.uint8),cv2.DIST_L2,cv2.DIST_MASK_PRECISE)
+            rgb*=1-.07*np.exp(-distance[...,None]/max(2.,min(7.,candidate['target_px']*.012)))
+        psf=environment['camera_psf']
+        from .schema import PHOTO_CONTROLS
+        sharpness=PHOTO_CONTROLS['sharpness'][params.get('sharpness','auto')]
+        premult,optical_alpha,sigma,overlap=optical_layer(rgb,alpha,psf['sigma_px'],sharpness)
+        write=(~foreground)&(~protected)&(scene['allowed'][y:b,x:r] | (alpha>0))
+        optical_alpha=optical_alpha*write
+        premult=premult*write[...,None]
+        photo.update(local_tones=local_tones,lighting_basis=environment['lighting_basis'],
+                     reflection_coverage=environment['reflection_coverage'],camera_psf=psf,
+                     blur_sigma=sigma,optical_iou=overlap,contact_ambient_loss=float(contact.max()))
+        for label,value in PHOTO_CONTROLS['sharpness'].items():
+            nominal=math.sqrt(max(psf['sigma_px']**2-.38**2,0))/value
+            photo['effective_controls'][label]['sharpness']=nominal if nominal>.18 else 0.
+    else:
+        optical_alpha=visible_alpha
+        premult=linear(rgb)*visible_alpha[...,None]
+    loss[loss<1/512]=0
+    if native:
+        photo['visible_shadow_pixels']=int(((loss>.025)&(optical_alpha<.10)).sum())
     shaded=linear(crop)*(1-loss[:,:,None])
-    result=srgb(shaded*(1-visible_alpha[:,:,None])+linear(rgb)*visible_alpha[:,:,None])
-    edited=(visible_alpha>0)|(loss>0)
+    result=srgb(shaded*(1-optical_alpha[:,:,None])+premult)
+    if native:
+        noise=float(np.clip(environment['sensor']['noise_sigma'],0,.012))
+        residual=np.random.default_rng(seed).normal(0,noise,optical_alpha.shape).astype(np.float32)
+        result+=residual[...,None]*optical_alpha[...,None]
+        photo['added_noise_sigma']=noise
+    edited=(optical_alpha>0)|(loss>0)
     crop_out=np.uint8(np.rint(np.clip(result,0,1)*255))
     original=base_rgb[y:b,x:r].copy()
     base_rgb[y:b,x:r][edited]=crop_out[edited]
@@ -253,11 +303,6 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     outside_count=int((changed&~permitted).sum())
     protected_count=int((changed&scene['protected']).sum())
     foreground_changes=int(np.any(exported[y:b,x:r]!=original_full[y:b,x:r],axis=2)[foreground].sum())
-    foot=np.zeros((b-y,r-x),np.uint8)
-    for poly in render_meta['contact_polygons']:
-        coords=(np.asarray(poly)*candidate['full_px']+offset-[x,y])*16
-        cv2.fillConvexPoly(foot,np.rint(coords).astype(np.int32),255,shift=4)
-    cover=contact_support(foot,support)
     hidden_contacts=float(((foot>0)&foreground).sum()/max(1,(foot>0).sum()))
     anchor_error=float(np.linalg.norm(offset+np.asarray(render_meta['anchor_uv'])*candidate['full_px']-candidate['anchor_px']))
     expected_offset=np.asarray(candidate['offset'])
@@ -281,7 +326,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
                  'risks':candidate.get('camera_risks',[]),'elevation_interval':candidate['elevation_interval'],'basis':'interval_projection'},
       'physics':{'status':physics.get('status','pass' if physics.get('stable') else 'unknown'),'evidence':physics,
                  'basis':'estimated_plane_not_measured_irregular_pile'},
-      'occlusion':{'status':'fail' if foreground_changes else 'unknown' if
+      'occlusion':{'status':'fail' if foreground_changes or (native and occlusion_fraction>.45) else 'unknown' if
                    (order.get('confidence')=='unknown' and order.get('occluded_fraction',0)>.02)
                    or order.get('ambiguous_fraction',0)>.25 or order.get('depth_unresolved_fraction',0)>.02 else 'pass',
                    'foreground_changed_pixels':foreground_changes,'depth_evidence':order},
@@ -303,8 +348,12 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         overlay[foreground]=np.uint8(overlay[foreground]*.5+np.array([65,140,255])*.5)
         overlay[foot>0]=[255,170,40]
         Image.fromarray(overlay).save(Path(out).with_suffix('.occlusion.png'))
+    placement=candidate.get('placement','surface')
+    if native:
+        # Report the observed final coverage after local settling, not the rough shortlist label.
+        placement='embedded' if .08<=occlusion_fraction<=.40 else ('combined' if len(candidate.get('support_ids',[]))>1 else 'surface')
     return {'checks':checks,'photo':photo,'measured_major_px':major,'edit_bounds':bounds,
-            'placement':candidate.get('placement','surface'),'support_ids':candidate.get('support_ids',[site['id']]),
+            'placement':placement,'support_ids':candidate.get('support_ids',[site['id']]),
             'evidence_confidence':candidate.get('evidence_confidence','estimated'),
             'uncertainties':candidate.get('uncertainties',[]),'depth_order':order,'shadow_basis':shadow_basis,
             'alpha_hash':hashlib.sha256(alpha.tobytes()).hexdigest(),
@@ -312,6 +361,6 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             'foreground_mask_hash':hashlib.sha256(np.packbits(foreground)).hexdigest(),
             'shadow_hash':hashlib.sha256(loss.tobytes()).hexdigest(),
             'scene_basis':'estimated','alpha_pixels':int((visible_alpha>.5).sum()),
-            'occlusion_fraction':float(1-visible_alpha.sum()/max(alpha.sum(),1e-6)),
+            'occlusion_fraction':occlusion_fraction,
             'image':str(out),'crop':str(Path(out).with_suffix('.crop.jpg')),
             'preview':str(Path(out).with_suffix('.full.jpg'))}

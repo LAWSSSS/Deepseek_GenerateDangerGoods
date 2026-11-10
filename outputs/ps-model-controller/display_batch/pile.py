@@ -134,9 +134,9 @@ def local_scale(scene,site,anchor,major_mm):
                        'anchor_px':anchor,'assumption':'display estimate, not measured scene dimensions'}
 
 
-def receiver_mesh(scene,candidate):
+def receiver_mesh(scene,candidate,*,bounds=None):
     """Separate finite patches; holes and gaps are absent from the collision receiver."""
-    bounds=candidate['bounds'];x,y,r,b=bounds
+    x,y,r,b=bounds or candidate['bounds']
     camera=candidate['camera'];offset=candidate['offset'];full=candidate['full_px']
     patches=[]
     for site in scene['supports']:
@@ -166,6 +166,31 @@ def receiver_mesh(scene,candidate):
     return {'patches':patches,'basis':'finite_coplanar_support_patches_estimated_from_image',
             'height_confidence':'estimated_coplanar' if coplanar else 'unknown',
             'hidden_heights':'unknown','signature':signature(VERSION,patches,coplanar)}
+
+
+def anchors_near_foreground(scene,site,support,anchors):
+    """Sample existing support next to a separately observed foreground surface."""
+    closer=[s['mask'] for s in scene['supports'] if s['id']!=site['id'] and s['depth']>site['depth']+.045]
+    if not closer:
+        return []
+    front=np.logical_or.reduce(closer)&~support
+    if not front.any():
+        return []
+    interior=cv2.distanceTransform(support.astype(np.uint8),cv2.DIST_L2,5)
+    distance=cv2.distanceTransform((~front).astype(np.uint8),cv2.DIST_L2,5)
+    margin=max(2.,float(interior.max())*.22)
+    radius=max(8.,float(interior.max()))
+    score=np.where((interior>=margin)&(distance<2*radius),
+                   np.minimum(interior/radius,1)*np.exp(-distance/radius),0).astype(np.float32)
+    for x,y in anchors:
+        cv2.circle(score,(round(x),round(y)),max(6,round(radius*.55)),0,-1)
+    found=[]
+    for _ in range(2):
+        _,peak,_,point=cv2.minMaxLoc(score)
+        if peak<.06:break
+        found.append(list(point))
+        cv2.circle(score,point,max(6,round(radius*.80)),0,-1)
+    return found
 
 
 def diagnostic(scene,candidate,out):
@@ -227,6 +252,7 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
     from .geometry import terrain_matrix,horizontal_angle
     from .schema import BatchConfig
     config=config or BatchConfig(backgrounds='unused',output='unused')
+    native=config.appearance=='native'
     data=np.load(asset['geometry']);vertices=data['vertices'];faces=data['faces']
     midpoint=sum(scene['answer']['elevation'])/2;records=[];reject=[];seen=set();geometries={}
     rng=np.random.default_rng(seed);diagonal=np.linalg.norm(scene['size'])
@@ -249,6 +275,8 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
             ids=[s['id'] for s in group];union=support_union(scene,ids)
             anchor_site={**site,'mask':union}
             anchors=support_anchors(anchor_site)
+            if native and config.placement_mode in ('auto','embedded'):
+                anchors+=anchors_near_foreground(scene,site,union,anchors)
             for anchor_index,anchor in enumerate(anchors):
                 interval,evidence=local_scale(scene,site,anchor,asset['semantic']['major_mm'])
                 if evidence['status']=='unknown' and config.uncertain_policy=='skip':
@@ -348,9 +376,18 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
         if depth_info['confidence']=='unknown' or depth_info['ambiguous_fraction']>.25:
             row['uncertainties'].append('occlusion_order_uncertain')
         if config.uncertain_policy=='skip' and row['uncertainties']:continue
-        if any(q['site_id']==row['site_id'] and q['placement']==row['placement'] for q in chosen):continue
+        if native and depth_info['confidence']=='estimated' and depth_info['ambiguous_fraction']<=.25:
+            # Prefer actual partial cover only among comparably supported placements.
+            row['integration_bonus']=.24*max(0,1-abs(fraction-.21)/.17)
+            row['score']+=row['integration_bonus']
+        if not native and any(q['site_id']==row['site_id'] and q['placement']==row['placement'] for q in chosen):continue
         row['receiver']=receiver_mesh(scene,row)
         row['evidence_confidence']='unknown' if row['uncertainties'] else 'estimated'
         chosen.append(row)
-        if len(chosen)==limit:break
+        if not native and len(chosen)==limit:break
+    if native:
+        selected={}
+        for row in sorted(chosen,key=lambda r:(len(set(r['uncertainties'])),-r['score'])):
+            selected.setdefault((row['site_id'],row['placement']),row)
+        chosen=list(selected.values())[:limit]
     return chosen,reject

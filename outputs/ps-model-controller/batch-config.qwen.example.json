@@ -1,0 +1,9 @@
+{
+  "vision": {
+    "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    "model": "qwen3.7-plus",
+    "key_env": "DASHSCOPE_API_KEY",
+    "response_protocol": "qwen-json",
+    "token_field": "max_completion_tokens"
+  }
+}

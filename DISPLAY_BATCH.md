@@ -4,7 +4,7 @@
 
 `accepted_display` 是新流程的展示状态，不改变已有 `manual_only`、模型人工确认或正式场景验收状态。已有 10 号去独立操作杆、13 号单罐、19 号拆瓶、31 号封闭缸壁修订继续由当前模型目录提供。
 
-最新实测见[材质摄影和按需渲染小样验证](DISPLAY_COST_VALIDATION.md)。上一轮 138 项实测和完整证据见[摄影融合与废钢堆验证](DISPLAY_FUSION_VALIDATION.md)。
+最新无人值守实测见[场景融合验证](#场景融合验证)。历史结果见[材质摄影和按需渲染小样验证](DISPLAY_COST_VALIDATION.md)及[摄影融合与废钢堆验证](DISPLAY_FUSION_VALIDATION.md)。
 
 ## 使用
 
@@ -17,7 +17,9 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/batch_display.py
 
 复制示例 JSON 后修改 `backgrounds` 与 `output`。默认 100 个任务、初稿之后最多修正 2 轮；`count` 允许 1–1000，`max_iterations` 允许 0–10。小于 100 的任务数用于诊断。`assets` 留空使用当前全部 44 个条目；可指定 `['3','6','10','13','19-1','31']` 对应的 JSON 字符串数组。每个任务只有一个物品。
 
-本轮新增三个默认选项，旧配置缺少时也采用这些值：
+网页和命令行示例采用 `appearance: "native"`。该模式从现场估计反射环境、接触阴影和边缘成像，增加插入痕迹判断。旧配置省略 `appearance` 时继续使用 `reference`。网页的“融合方式”可切换两者。
+
+以下选项同样适用于旧配置。
 
 | 字段 | 默认 | 其他值 |
 |---|---|---|
@@ -45,7 +47,9 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/batch_display.py
 }
 ```
 
-服务必须支持图片与 JSON function tool 输出，启动时进行真实图像能力探测。图片先编码为有大小上限的 JPEG。每个逻辑请求最多两次尝试，格式错误只修复一次；鉴权、模型端点、视觉能力错误以及一次重试后仍不可用的限流/网络服务故障暂停批次。默认不设置整批 token 上限。只有配置输入、输出单价时才计算费用，否则仅报告供应商返回的 token。
+启动时探测真实图片输入与当前配置的结构化输出能力。`native` 的探测和成图复核使用 JSON 对象输出，旧模式默认使用 JSON function tool。图片先编码为有大小上限的 JPEG。每个逻辑请求最多两次尝试。鉴权、模型端点、视觉能力错误以及一次重试后仍不可用的限流或网络故障暂停批次。默认不设置整批 token 上限。只有配置输入、输出单价时才计算费用，否则仅报告供应商返回的 token。
+
+百炼 `qwen3.7-plus` 可将 `provider_config` 设为 `"outputs/ps-model-controller/batch-config.qwen.example.json"`，在进程环境中配置标准百炼 API 凭据 `DASHSCOPE_API_KEY`。该配置通过模拟 HTTP 校验图片、JSON 请求和响应，启动探测会验证实际账户的模型访问。Token Plan 面向交互式工具，套餐端点和套餐凭据不用于批量任务。 [百炼服务地址](https://help.aliyun.com/zh/model-studio/base-url) · [Token Plan 使用规则](https://help.aliyun.com/zh/model-studio/token-plan-personal-faq)
 
 ## 摆放与材质
 
@@ -66,7 +70,9 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/batch_display.py
 
 AI 查看实际 PNG 的全景、局部和当前模型参照。完整复核同时提供无遮挡物体视图，换位时可附几何诊断。返回原五项评分、材质和关键结构评分、缺陷位置、严重度和证据，以及最多三项动作。程序检查动作是否符合缺陷和生效条件，同轮优先修正同一类原因。
 
-展示合格要求原五项各 ≥3、合计 ≥16，材质与结构各 ≥3，无严重缺陷，并且所有程序检查通过，未知不能被 AI 高分覆盖。参数重复、实际像素不变、无有效动作、连续不改善或轮数用完时停止；先比较失败/未知/通过，再比较严重缺陷和评分。
+展示合格要求原五项各 ≥3、合计 ≥16，材质与结构各 ≥3，无严重缺陷，并且所有程序检查通过。参数重复、实际像素不变、无有效动作、连续不改善或轮数用完时停止。
+
+在 `native` 模式，视觉服务报告插入痕迹、评分和可见缺陷，程序按规则决定换位、调整照明或摄影参数。只有痕迹判断为 `none` 且既有视觉和程序门槛均通过，才归入 `accepted_display`。`visible` 与 `uncertain` 的成图进入 `review`，汇总单独显示三类痕迹计数。
 
 结构复核区分可见、被遮挡、不可判断。单张图的疑点不会立即隔离模型；只有独立无遮挡渲染对照确认可见的真实损坏才进入模型级待审，该确认按模型缓存。摄影动作新增 `chroma/dust/contrast/haze/sharpness` 的 `auto/less/more` 档位，`more chroma` 表示更强降色度；摄影动作复用渲染通道。
 
@@ -89,6 +95,20 @@ AI 查看实际 PNG 的全景、局部和当前模型参照。完整复核同时
 GPU 渲染进程使用全局独占锁，默认 OptiX；CPU 作业和 AI 请求各最多 2 路。一个常驻 Blender 复用设备，物理缓存和渲染缓存分开。报告分别记录实际 worker 操作、等待、API 与任务阶段耗时；并行任务耗时之和不能当作批次墙钟时间。
 
 昂贵的资产准备失败也按模型、代码、依赖和服务配置缓存，后续任务进入待审。修复后签名变化会重新准备。复核前保存 `draft-*.json`，记录程序检查与图片散列。首稿复核失败的未审草稿保存在 `jobs/`，后续修正失败时保留最佳已审图。
+
+## 场景融合验证
+
+固定清单覆盖两张背景和三类材质（06 不锈钢罐、13 塑料罐、31 液压缸）。正式 CLI 自动完成选位、物理复验、合成、视觉复核和最多一次修正。选位和修正均由程序执行。实测使用已有 DeepSeek 视觉配置。
+
+| 检查 | 实测 |
+|---|---|
+| 出图和质量 | 6 张 3840×2160 PNG，6 待审，0 展示合格，0 执行失败。5 张有明显痕迹，1 张无法确认 |
+| 证据和像素 | 1 项程序证据通过，5 项未知。6/6 PNG 独立回读通过，保护区、前景和编辑范围外的像素检查通过。44/44 源模型散列相同 |
+| 离线复跑 | 新目录重放 6 项，PNG 散列、结果状态和修正记录全部相同，52.047 秒，0 新 API 调用，0 新 GPU 渲染 |
+| 本批开销 | 墙钟 145.969 秒，GPU worker 操作 97.469 秒，12 次 API，35,782 已报告 token |
+| 本轮累计开销 | 计入前序格式与合成故障试跑，共 39 次 API，138,097 已报告 token |
+
+接触暗部偏弱、表面过平和遮挡层次不足仍影响融合。六个最终位置均为表面放置，本次结果未验证真实批次的嵌入效果。查看[六项完整结果](outputs/scene-native-auto-v4-20261110/index.html)、[像素回读](outputs/scene-native-auto-v4-20261110/png-audit.json)与[离线复跑校验](outputs/scene-native-auto-repeat-20261110/comparison.json)。
 
 ## 分阶段验证
 

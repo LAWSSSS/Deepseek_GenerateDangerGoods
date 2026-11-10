@@ -35,7 +35,7 @@ class BatchConfig(Strict):
     price_input_per_million: float | None = Field(default=None, ge=0)
     price_output_per_million: float | None = Field(default=None, ge=0)
     # New photographic profiles are promoted after staged evaluation.
-    appearance: Literal['reference','camera','materials','scene'] = 'reference'
+    appearance: Literal['reference','camera','materials','scene','native'] = 'reference'
     review_format: Literal['full','compact'] = 'full'
 
 
@@ -106,9 +106,12 @@ class Scores(Strict):
         return min(old) >= 3 and sum(old) >= 16 and min(self.material, self.structure) >= 3
 
 
+DefectCode = Literal["upright", "floating", "penetration", "occlusion", "scale", "camera",
+                     "material", "lighting", "color", "shadow", "edge", "texture", "structure"]
+
+
 class Defect(Strict):
-    code: Literal["upright", "floating", "penetration", "occlusion", "scale", "camera",
-                  "material", "lighting", "color", "shadow", "edge", "texture", "structure"]
+    code: DefectCode
     severity: Literal["minor", "major", "fatal"]
     region: tuple[Unit, Unit, Unit, Unit]
     evidence: str = Field(max_length=160)
@@ -133,6 +136,32 @@ class Review(Strict):
         return min(self.scores.lighting,self.scores.material,self.scores.texture)>=3 and not any(
             d.severity in ('major','fatal') and d.code in ('color','lighting','material','texture')
             for d in self.defects)
+
+
+class FusionReview(Review):
+    trace: Literal['none','uncertain','visible']
+    actions: list[Action] = Field(default_factory=list,max_length=0)
+
+    def passes(self):
+        return self.trace=='none' and super().passes()
+
+
+class FusionCue(Strict):
+    code: DefectCode
+    severity: Literal['minor','major','fatal']
+    evidence: str = Field(max_length=160)
+
+
+class FusionObservation(Strict):
+    trace: Literal['none','uncertain','visible']
+    scores: Scores
+    defects: list[FusionCue] = Field(max_length=6)
+    evidence: str = Field(max_length=240)
+
+    def review(self):
+        # Recognition describes visible image cues. Asset quarantine remains a separate check.
+        return FusionReview(trace=self.trace,scores=self.scores,evidence=self.evidence,
+                            defects=[Defect(**d.model_dump(),region=(0,0,1,1)) for d in self.defects])
 
 
 class Probe(Strict):

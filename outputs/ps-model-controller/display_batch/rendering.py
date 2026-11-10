@@ -58,14 +58,15 @@ def render_dependencies():
 
 def part_keys(request, device, dependencies):
     windows=request['windows']
-    fields=('world_color','light_color','key_direction','light_level','light_spread')
+    fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe')
     environment=request['environment']
     light={k:environment[k] for k in fields if k in environment}
     shared=(RENDER_VERSION,dependencies,device,request['appearance'],request['camera'],
             request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'])
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
              request['dust_gain'],request['dust_control'],request['material_classes'],
-             environment.get('dust_color'),environment.get('haze'))
+             environment.get('dust_color'),environment.get('haze'),
+             environment.get('sensor',{}).get('surface_detail_rms') if request['appearance']=='native' else None)
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),
@@ -101,7 +102,7 @@ class RenderCache:
         windows=render_windows(candidate,size,resolution,full_frame=full_frame)
         request.update(mesh_hash=asset['mesh_hash'],appearance=appearance,windows=windows,
                        material_classes=asset['semantic']['material_classes'],
-                       dust_control=PHOTO_CONTROLS['dust'][params.get('dust','auto')] if appearance=='scene' else 1.)
+                       dust_control=PHOTO_CONTROLS['dust'][params.get('dust','auto')] if appearance in ('scene','native') else 1.)
         keys=part_keys(request,self.worker.device,render_dependencies())
         queued=time.monotonic()
         async with self.lock:

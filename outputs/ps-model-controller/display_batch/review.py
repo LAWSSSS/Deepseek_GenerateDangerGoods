@@ -1,7 +1,7 @@
 """Review the exported PNG and spend corrections on defects they can address."""
 import math
 
-from .schema import LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS, TONE_PROFILES, Review, apply_actions
+from .schema import Action, LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS, TONE_PROFILES, Review, FusionObservation, apply_actions
 
 
 COMPACT_PROMPT = """Inspect this exported scrap-hopper composite: panorama, crop, current model reference.
@@ -13,6 +13,19 @@ unassessable; reserve asset scope for visible intrinsic damage. Respect intentio
 Use major/fatal only for concrete defects that compromise display. Judge the actual image.
 Offer up to three effective actions from allowed values for a single cause, or none.
 Candidate IDs identify geometric alternatives. More chroma means more desaturation."""
+
+FUSION_PROMPT = """Judge whether the inserted part belongs to the photographed scrap pile.
+The first image is the delivered panorama and the second is its crop. Subsequent images are
+references for identity and structure. Evaluate seams on the delivered photograph only.
+Look for a halo or cutout edge, clean studio reflections, conflicting color or sensor texture,
+an inconsistent contact shadow, floating, implausible scale or depth order. A recognizable object,
+clean plastic, and real metal glints can occur naturally. Require concrete visible evidence for a defect.
+Set trace to none when edge, light, contact and camera response give no visible insertion clue,
+uncertain when evidence is insufficient, and visible when a clue remains. Identify the most
+noticeable clue in evidence. Check material, structure and the original five scores on the same
+0–4 scale, with 3 usable and 4 convincing. Respect occlusion and intentional model revisions.
+Give only visible image defects. Each defect must describe the cue and where it appears.
+Return JSON with trace, scores, defects and evidence. Each defect has only code, severity and evidence."""
 
 PLACEMENT_DEFECTS={'upright','floating','penetration','occlusion','scale','camera','shadow','structure'}
 ACTION_CAUSES={
@@ -39,7 +52,7 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
     photo=comp.get('photo',{})
     options={'candidate':candidate_ids,'material':list(MATERIAL_PROFILES),'light':list(LIGHT_PROFILES),
              'tone':list(TONE_PROFILES),**{k:list(v) for k,v in PHOTO_CONTROLS.items()}}
-    if render_style=='scene' and not adjustable:
+    if render_style in ('scene','native') and not adjustable:
         options.pop('material');options.pop('dust')
     elif params['photo_model']=='camera' and render_style=='reference':
         options.pop('dust')
@@ -58,7 +71,36 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
     return options
 
 
-def repair(params, review, allowed, candidate_ids, seen, *, dust_in_shader=False):
+def fusion_actions(review, comp, allowed):
+    """Select the repair in the program, using the recognizer's visible evidence."""
+    defects={d.code for d in review.defects if d.visibility=='visible' and d.scope=='image'}
+    severe={d.code for d in review.defects if d.visibility=='visible' and d.scope=='image'
+            and d.severity in ('major','fatal')}
+    issues=severe or defects
+    photo=comp['photo']
+    options=[]
+    if issues&{'floating','penetration','occlusion','scale','camera','upright'} and allowed.get('candidate'):
+        options.append(('candidate',allowed['candidate'][0]))
+    if issues&{'lighting','material'} and photo.get('local_tones',{}).get('bright_band_fraction',0)>.12:
+        options.append(('light','softer'))
+    if issues&{'material','texture'}:
+        options.append(('material','weathered'))
+    if 'color' in issues and photo.get('after_chroma',0)>photo.get('scene_chroma',0)+3:
+        options.append(('chroma','more'))
+    if 'lighting' in issues:
+        difference=photo.get('after_luma',0)-photo.get('target_luma',0)
+        if abs(difference)>10:options.append(('tone','darker' if difference>0 else 'brighter'))
+    if 'shadow' in issues and comp['checks'].get('physics',{}).get('status')=='pass':
+        options.append(('light','defined'))
+    if 'edge' in issues:
+        options.append(('sharpness','less'))
+    for kind,value in options:
+        if value in allowed.get(kind,()):
+            return [Action(kind=kind,value=value)]
+    return []
+
+
+def repair(params, review, allowed, candidate_ids, seen, *, dust_in_shader=False, suggestions=None):
     """Select one cause and one dependency stage. Rejected actions remain auditable."""
     severe={d.code for d in review.defects if d.severity in ('major','fatal') and d.visibility=='visible'}
     visible={d.code for d in review.defects if d.visibility=='visible'}
@@ -68,7 +110,7 @@ def repair(params, review, allowed, candidate_ids, seen, *, dust_in_shader=False
         # The five original scores may still sum to 15 even when each is usable.
         limiting={'lighting','texture','edge'} if not review.scores.passes() else set()
     selected=[];log=[];selected_causes=None;stage=None
-    for action in review.actions:
+    for action in review.actions if suggestions is None else suggestions:
         kind,value=action.kind,action.value
         dependency='placement' if kind=='candidate' else 'lighting' if kind=='light' else (
             'material' if kind=='material' or (kind=='dust' and dust_in_shader) else 'photography')
@@ -100,6 +142,15 @@ async def inspect(vision,prompt,asset,comp,params,allowed,render_dir,*,compact=F
     payload={'name':asset['name'],'features':asset['semantic']['key_features'],'params':params,
              'allowed':allowed,'placement_options':list(candidate_evidence)}
     images=[comp['preview'],comp['crop'],asset['board']]
+    native=params.get('photo_model')=='native'
+    if native:
+        # Keep the full set of visual references. The model only recognizes, so
+        # physics histories and the allowed repair graph are unnecessary.
+        images.insert(2,render_dir/'object.png')
+        answer=await vision.ask('fusion-recognition',FusionObservation,FUSION_PROMPT,
+            {'name':asset['name'],'features':asset['semantic']['key_features'],
+             'material_classes':asset['semantic'].get('material_classes',[])},images,plain_json=True)
+        return answer.review()
     if compact:
         fields=('status','measurement_px','expected_px','measurement_deg','measurements','projection_error_px')
         payload['checks']={k:{f:c[f] for f in fields if f in c} for k,c in checks.items()}

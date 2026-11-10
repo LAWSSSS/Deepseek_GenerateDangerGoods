@@ -205,25 +205,31 @@ class ModelClient:
     def __init__(self, http, report):
         self.http, self.report = http, report
 
-    async def ask(self, endpoint, role, schema, system, payload, previews=(), *, tool=None, detail=None):
+    async def ask(self, endpoint, role, schema, system, payload, previews=(), *, tool=None, detail=None,
+                  qwen_json=False,plain_json=False):
         key = os.environ.get(endpoint.key_env) if endpoint.key_env else None
         if endpoint.key_env and not key:
             raise ValueError(f"missing environment variable {endpoint.key_env}")
         headers = {"Authorization": "Bearer " + key} if key else {}
+        if plain_json or qwen_json:
+            payload={**payload,'response_JSON_schema':schema.model_json_schema()}
         content = compact(payload)
         if previews:
             content = [{"type": "text", "text": content}, *(image_part(path,detail) for path in previews)]
         request = {"model": endpoint.model, endpoint.token_field: endpoint.max_output_tokens,
                    "messages": [{"role": "system", "content": system},
                                 {"role": "user", "content": content}]}
-        if endpoint.reasoning_effort is not None:
+        if endpoint.reasoning_effort is not None and not qwen_json:
             request["reasoning_effort"] = endpoint.reasoning_effort
-        if tool:
+        if qwen_json:
+            request['response_format']={'type':'json_object'}
+            request['thinking_budget']=768
+        elif tool:
             name={"name":tool}
             request["thinking"]={"type":"disabled"}
             request["tools"]=[{"type":"function","function":{**name,"parameters":schema.model_json_schema()}}]
             request["tool_choice"]={"type":"function","function":name}
-        elif endpoint.json_mode:
+        elif endpoint.json_mode or plain_json:
             request["response_format"] = {"type": "json_object"}
         log = {"role": role, "model": endpoint.model, "output_token_limit": endpoint.max_output_tokens}
         if tool:
@@ -253,6 +259,7 @@ class ModelClient:
                 selected=message.get("tool_calls") or []
                 if (len(selected)!=1 or selected[0].get("type")!="function"
                         or selected[0]["function"]["name"]!=tool):
+                    log['format_issue']='missing_or_unexpected_tool'
                     raise ValueError("unexpected tool call")
                 raw=selected[0]["function"]["arguments"]
             else:

@@ -18,7 +18,7 @@ from display_batch.store import Store
 from display_batch.geometry import (camera_for, project, contact_geometry, contact_support,
                                      horizontal_angle, scale_from_reference,contact_world,align_up,material_detail_allowed)
 from display_batch.compose import match_rgb, linear, srgb, warp
-from display_batch.ai import Vision, ProviderUnavailable
+from display_batch.ai import Vision, VisionEndpoint, ProviderUnavailable
 from display_batch.pipeline import Pipeline, batch_lock, final_resolution
 from display_batch.framing import render_windows
 from display_batch.rendering import part_keys
@@ -221,6 +221,41 @@ class WebTests(unittest.TestCase):
 
 
 class APITests(unittest.IsolatedAsyncioTestCase):
+    async def test_qwen_vision_reads_json_without_forced_tools(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            endpoint=root/'provider.json'
+            image=root/'test.jpg'
+            Image.new('RGB',(64,32),'gray').save(image)
+            atomic_json(endpoint,{'vision':{'url':'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+                'model':'qwen3.7-plus','response_protocol':'qwen-json','token_field':'max_completion_tokens'}})
+            config=BatchConfig(backgrounds=d,output=d,provider_config=str(endpoint))
+            vision=Vision(config,root/'cache',root/'usage.json')
+            async def respond(request):
+                body=json.loads(request.content)
+                self.assertEqual(body['response_format'],{'type':'json_object'})
+                self.assertNotIn('tool_choice',body)
+                self.assertNotIn('enable_thinking',body)
+                content=body['messages'][1]['content']
+                self.assertIn('response_JSON_schema',json.loads(content[0]['text']))
+                self.assertTrue(content[1]['image_url']['url'].startswith('data:image/jpeg;base64,'))
+                return httpx.Response(200,json={'choices':[{'finish_reason':'stop','message':{
+                    'content':'{"image_visible":true,"description":"灰色图像"}'}}],
+                    'usage':{'prompt_tokens':12,'completion_tokens':8,'total_tokens':20}})
+            await vision.http.aclose()
+            vision.http=httpx.AsyncClient(transport=httpx.MockTransport(respond))
+            try:
+                result=await vision.ask('test',Probe,'Inspect the image',{},[image])
+                self.assertTrue(result.image_visible)
+                self.assertEqual(vision.usage()['reported_tokens'],20)
+            finally:
+                await vision.close()
+
+    def test_token_plan_endpoint_cannot_run_batch(self):
+        with self.assertRaisesRegex(ValueError,'套餐端点'):
+            VisionEndpoint(url='https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions',
+                           model='qwen3.7-plus')
+
     async def test_wrapped_transport_error_pauses_after_one_retry(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);provider=root/'provider.json'

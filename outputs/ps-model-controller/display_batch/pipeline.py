@@ -19,14 +19,14 @@ from .assets import prepare as prepare_asset
 from .common import ROOT, HERE, atomic_json, file_hash, load_catalog, resolve, signature, implementation_manifest
 from .compose import compose, sample_environment
 from .scene import Scenes, choose_candidates, projection_geometry, fitted_masks, fit_checks
-from .schema import (Review, Probe, PHOTO_CONTROLS, StructureConfirmation, version_rank)
-from .pile import support_union, diagnostic
+from .schema import (Review, FusionReview, Probe, PHOTO_CONTROLS, StructureConfirmation, version_rank)
+from .pile import support_union, diagnostic, receiver_mesh
 from .geometry import contact_support
 from .store import Store
 from .worker import Blender, RenderUnavailable
-from .framing import final_resolution
+from .framing import edit_bounds, final_resolution
 from .rendering import RenderCache, RENDER_VERSION
-from .review import allowed_actions, evidence_status, inspect, repair, PLACEMENT_DEFECTS
+from .review import allowed_actions, evidence_status, fusion_actions, inspect, repair, PLACEMENT_DEFECTS
 from .materials import material_kind, SURFACE_DUST
 
 COMPOSE_VERSION='scrap-gray-pile-v6-window'
@@ -142,13 +142,17 @@ def write_summary(out,store,usage=None,run=None):
              'photo_pass':sum(r.get('photo_status')=='pass' for r in records),
              'visual_pass':sum(r.get('visual_status')=='pass' for r in records),
              'image_rate':sum(bool(r.get('image')) for r in records)/max(1,len(rows))}
+    if any('insertion_trace' in r for r in records):
+        summary['insertion_traces']={status:sum(r.get('insertion_trace')==status for r in records)
+                                     for status in ('none','uncertain','visible')}
     atomic_json(out/'summary.json',summary)
     sections=[]
     for r in records:
         image=Path(r['image']).relative_to(out).as_posix() if r.get('image') else None
         crop=Path(r['crop']).relative_to(out).as_posix() if r.get('crop') else None
         name=f"{r['job_id']} · {r['asset_id']} · {r['status']}"
-        sections.append('<section><h2>'+html.escape(name)+'</h2><p>'+html.escape(r.get('reason',''))+'</p>'+
+        trace={'none':'未见插入痕迹','uncertain':'插入痕迹不确定','visible':'可见插入痕迹'}.get(r.get('insertion_trace'),'')
+        sections.append('<section><h2>'+html.escape(name)+'</h2><p>'+html.escape(' · '.join(x for x in (trace,r.get('reason','')) if x))+'</p>'+
                         (f'<a href="{image}"><img src="{image}" loading="lazy"></a>' if image else '')+
                         (f'<img class="crop" src="{crop}" loading="lazy">' if crop else '')+'</section>')
     page='<!doctype html><meta charset="utf-8"><title>多背景批量结果</title><style>body{background:#172128;color:#eee;font:15px sans-serif;margin:30px}section{border-top:1px solid #456;padding:15px}img{max-width:55%;max-height:440px}.crop{max-width:40%}h2{font-size:16px}</style><h1>多背景批量展示结果</h1><p>场景依据为估计；展示合格不等于旧流程正式验收。</p><pre>'+html.escape(json.dumps(summary['counts'],ensure_ascii=False))+'</pre>'+''.join(sections)
@@ -196,13 +200,21 @@ class Pipeline:
 
     async def render(self,asset,scene,candidate,params,resolution):
         style=self.render_style
-        environment,samples=await asyncio.to_thread(sample_environment,scene,candidate,scene_lighting=style=='scene')
-        folder,meta,hit=await self.renders.get(asset,candidate,params,environment,scene['size'],resolution,
+        environment,samples=await asyncio.to_thread(sample_environment,scene,candidate,
+            scene_lighting=style in ('scene','native'),native=style=='native')
+        render_candidate=candidate
+        if style=='native':
+            # Cast onto the visible neighboring support as well. Physics retains
+            # its original finite contact receiver and its separate evidence.
+            receiver=await asyncio.to_thread(receiver_mesh,scene,candidate,bounds=edit_bounds(candidate,scene['size']))
+            render_candidate={**candidate,'receiver':receiver}
+        folder,meta,hit=await self.renders.get(asset,render_candidate,params,environment,scene['size'],resolution,
                                              appearance=style)
         return folder,meta,environment,samples,hit
 
     @property
     def render_style(self):
+        if self.config.appearance=='native':return 'native'
         return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
 
     async def validate_local_pose(self,asset,scene,candidate):
@@ -331,8 +343,8 @@ class Pipeline:
         atomic_json(answer_path,answer.model_dump());return answer
 
     def default_params(self,candidate):
-        return {'candidate':candidate,'material':'original','light':'scene','tone':'scene',
-                'photo_model':'camera' if self.config.appearance in ('camera','scene') else 'reference',
+        photo_model={'native':'native','camera':'camera','scene':'camera'}.get(self.config.appearance,'reference')
+        return {'candidate':candidate,'material':'original','light':'scene','tone':'scene','photo_model':photo_model,
                 'photo_style':self.config.photo_style,**{k:'auto' for k in PHOTO_CONTROLS}}
 
     @staticmethod
@@ -341,7 +353,8 @@ class Pipeline:
         dest.mkdir(parents=True,exist_ok=True)
         final=dest/(ident+'.png');shutil.copy2(best['image'],final)
         crop=dest/(ident+'.crop.jpg');shutil.copy2(best['crop'],crop)
-        review=Review.model_validate(best['review'])
+        review_type=FusionReview if 'trace' in best['review'] else Review
+        review=review_type.model_validate(best['review'])
         result.update(image=str(final),crop=str(crop),best_iteration=best['iteration'],
                       checks=best['checks'],scores=best['review']['scores'],
                       measured_major_px=best['measured_major_px'],
@@ -351,6 +364,7 @@ class Pipeline:
                       evidence_status=evidence_status(best['checks']),
                       photo_status='pass' if review.photo_passes() else 'fail',
                       visual_status='pass' if review.passes() else 'fail')
+        if isinstance(review,FusionReview):result['insertion_trace']=review.trace
 
     async def job(self,job):
         ident=job['id'];payload=job['payload'];start=time.monotonic()
@@ -393,8 +407,10 @@ class Pipeline:
                 result['reason']='no_geometric_candidate';return result
             params=self.default_params(candidates[0]['id'])
             seen=set();seen_images=set();best_rank=None;no_gain=0;reason='iterations_exhausted'
+            adjusted_classes=set(SURFACE_DUST)
+            if self.render_style=='native':adjusted_classes.add('mixed')
             adjustable=any(material_kind(m['name'],m['metallic'] or 0.,m['metallic_linked'],
-                           asset['semantic'].get('material_classes',[])) in SURFACE_DUST
+                           asset['semantic'].get('material_classes',[])) in adjusted_classes
                            for m in asset.get('inspection',{}).get('materials',[]))
             iteration=0;previous_candidate=None;rendered_parts={}
             while iteration<=self.config.max_iterations:
@@ -417,7 +433,7 @@ class Pipeline:
                 if cid not in invalid:
                     candidate=ready[cid]
                     render_fields=['candidate','material','light']
-                    if self.render_style=='scene':render_fields.append('dust')
+                    if self.render_style in ('scene','native'):render_fields.append('dust')
                     rkey=tuple(params[k] for k in render_fields)
                     if rkey not in rendered_parts:
                         before=time.monotonic()
@@ -481,6 +497,9 @@ class Pipeline:
                 atomic_json(folder/f'iteration-{iteration}.json',entry)
                 self.store.checkpoint(ident,'review',{'last_iteration':iteration,'params':params,'record':str(folder/f'iteration-{iteration}.json')})
                 rank=version_rank(comp['checks'],review)
+                if isinstance(review,FusionReview):
+                    trace_rank={'none':2,'uncertain':1,'visible':0}[review.trace]
+                    rank=(*rank[:3],trace_rank,*rank[3:])
                 if best_rank is None or rank>best_rank:
                     best,best_rank=entry,rank;no_gain=0
                 else:no_gain+=1
@@ -501,7 +520,8 @@ class Pipeline:
                             'defects':[d.model_dump() for d in suspects]}
                         atomic_json(self.out/'model-review.json',self.model_review)
                         reason='asset_structure_requires_review';break
-                if evidence_status(comp['checks'])=='unknown' and review.photo_passes() and review.scores.edge>=3:
+                if (evidence_status(comp['checks'])=='unknown' and review.photo_passes() and review.scores.edge>=3
+                    and (not isinstance(review,FusionReview) or review.trace=='none')):
                     unresolved=[d for d in review.defects if d.visibility=='visible' and d.severity in ('major','fatal')]
                     repairable=any(d.code in PLACEMENT_DEFECTS for d in unresolved) and any(v!=cid for v in ids)
                     structure_ok=review.scores.structure>=3 or any(
@@ -510,9 +530,10 @@ class Pipeline:
                         reason='visual_ok_evidence_unresolved';break
                 if iteration>=self.config.max_iterations:break
                 if no_gain>=2:reason='no_improvement';break
-                if not review.actions:reason='no_valid_action';break
+                suggestions=fusion_actions(review,comp,allowed) if isinstance(review,FusionReview) else review.actions
+                if not suggestions:reason='no_valid_action';break
                 updated,actions=repair(params,review,allowed,ids,lambda p:signature(p) in seen,
-                                       dust_in_shader=self.render_style=='scene')
+                                       dust_in_shader=self.render_style in ('scene','native'),suggestions=suggestions)
                 result['actions'].append({'iteration':iteration,'decisions':actions})
                 if updated is None:
                     reason='repeated_parameters' if all(a['disposition']=='repeated_parameters' for a in actions) else 'no_effective_action'
@@ -548,7 +569,8 @@ class Pipeline:
         source_manifest=json.loads((source/'implementation.json').read_text(encoding='utf8'))
         source_config=json.loads((source/'config.json').read_text(encoding='utf8'))
         exclude={'output','manifest','count','offline'}
-        if signature(source_manifest)!=signature(implementation) or {
+        source_vision=json.loads((source/'vision-signature.json').read_text(encoding='utf8'))
+        if source_vision['signature']!=signature(self.vision.endpoint.model_dump()) or signature(source_manifest)!=signature(implementation) or {
             k:v for k,v in source_config.items() if k not in exclude
         }!=self.config.model_dump(exclude=exclude):
             raise ValueError('pilot was produced with different code or settings')
@@ -575,20 +597,22 @@ class Pipeline:
         jobs=make_jobs(self.config,self.catalog)
         implementation=implementation_manifest()
         config_signature=signature(VERSION,self.config.model_dump(exclude={'offline'}),jobs,
-                                    RENDER_VERSION,COMPOSE_VERSION,implementation)
+                                    RENDER_VERSION,COMPOSE_VERSION,implementation,self.vision.endpoint.model_dump())
         with batch_lock(self.out):
             self.store.initialize(config_signature,jobs);self.store.recover()
             atomic_json(self.out/'config.json',self.config.model_dump())
             atomic_json(self.out/'catalog-preflight.json',catalog_preflight(self.catalog))
             atomic_json(self.out/'inputs.json',jobs)
             atomic_json(self.out/'implementation.json',implementation)
+            atomic_json(self.out/'vision-signature.json',{'signature':signature(self.vision.endpoint.model_dump())})
             try:
                 if reuse_from:self.reuse_completed(reuse_from,implementation)
                 if not self.config.offline and self.store.counts().get('queued'):
                     probe_path=self.out/'capability-probe.jpg'
                     with Image.open(jobs[0]['background']) as im:
                         im=im.convert('RGB');im.thumbnail((512,512));im.save(probe_path,quality=80)
-                    probe=await self.vision.ask('capability',Probe,'Confirm the supplied image is visible; describe it briefly.',{},[probe_path])
+                    probe=await self.vision.ask('capability',Probe,'Confirm the supplied image is visible; describe it briefly.',{},[probe_path],
+                                                plain_json=self.config.appearance=='native')
                     if not probe.image_visible:raise ProviderUnavailable('视觉服务未确认图像可见')
                 stop=asyncio.Event()
                 async def consumer():

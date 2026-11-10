@@ -10,11 +10,67 @@ from PIL import Image
 from display_batch.photography import match_linear,display,sensor_statistics
 from display_batch.compose import taper_shadow
 from display_batch.geometry import camera_for,project
-from display_batch.pile import zbuffer,mesh_raster,receiver_mesh,depth_order,local_scale
-from display_batch.schema import BatchConfig,Action,apply_actions,version_rank
+from display_batch.pile import anchors_near_foreground,zbuffer,mesh_raster,receiver_mesh,depth_order,local_scale
+from display_batch.schema import BatchConfig,Action,FusionObservation,FusionReview,apply_actions,version_rank
+from display_batch.review import fusion_actions
+from display_batch.fusion import camera_psf, camera_tones, contact_darkening, optical_layer, topology
+from display_batch.materials import material_kind
 
 
 class PhotoTests(unittest.TestCase):
+    def test_camera_tone_reduces_broad_glare_without_flattening_detail(self):
+        alpha=np.ones((60,70),np.float32)
+        rgb=np.full((60,70,3),.87,np.float32);rgb[26:30,25:45]=.96
+        scene=np.full((250,3),139,np.uint8)
+        output,info=camera_tones(rgb,alpha,scene,alpha,False)
+        self.assertLess(float(output.mean()),.80)
+        self.assertGreater(float(output[27,30,0]-output[17,30,0]),8/255)
+        self.assertGreater(info['bright_band_fraction'],.75)
+
+    def test_measured_camera_blur_preserves_the_optical_hole(self):
+        source=np.full((96,128),75,np.uint8)
+        source[:,64:]=180
+        source=cv2.GaussianBlur(source,(0,0),.85)
+        optics=camera_psf(np.repeat(source[...,None],3,axis=2),np.ones_like(source,bool))
+        self.assertGreaterEqual(optics['edge_samples'],12)
+        self.assertGreater(optics['sigma_px'],.6)
+        alpha=np.zeros((96,128),np.float32)
+        alpha[16:78,25:105]=1.
+        alpha[32:61,49:81]=0.
+        rgb=np.full((*alpha.shape,3),.65,np.float32)
+        light,cover,sigma,iou=optical_layer(rgb,alpha,optics['sigma_px'],1.)
+        self.assertGreater(sigma,.2)
+        self.assertGreaterEqual(iou,.995)
+        self.assertEqual(topology(cover>.5),(1,1))
+        self.assertFalse(light[45,65].any())
+
+    def test_contact_darkening_stays_on_evidenced_support(self):
+        support=np.zeros((40,50),bool);support[20:35,9:42]=True
+        foreground=np.zeros_like(support);foreground[:,24:29]=True
+        foot=np.zeros_like(support,np.uint8);foot[22:26,15:31]=255
+        loss=contact_darkening(foot,support,foreground,350,True)
+        self.assertGreater(loss[23,19],.2)
+        self.assertEqual(float(loss[23,25]),0)
+        self.assertFalse(loss[~support].any())
+        self.assertFalse(contact_darkening(foot,support,foreground,350,False).any())
+
+    def test_insertion_trace_cannot_pass_with_high_scores(self):
+        scores={key:4 for key in ('support','occlusion','lighting','edge','texture','material','structure')}
+        draft=FusionReview(scores=scores,defects=[],actions=[],evidence='边缘痕迹',trace='visible')
+        self.assertFalse(draft.passes())
+        self.assertFalse(draft.model_copy(update={'trace':'uncertain'}).passes())
+        self.assertTrue(draft.model_copy(update={'trace':'none'}).passes())
+
+    def test_recognition_drives_a_bounded_shadow_repair_without_repositioning(self):
+        scores={key:3 for key in ('support','occlusion','lighting','edge','texture','material','structure')}
+        observation=FusionObservation(trace='visible',scores=scores,evidence='接触阴影不足',
+            defects=[{'code':'shadow','severity':'major','evidence':'支脚旁的承托面不够暗'}])
+        comp={'photo':{},'checks':{'physics':{'status':'pass'}}}
+        allowed={'candidate':['B'],'light':['defined']}
+        self.assertEqual(fusion_actions(observation.review(),comp,allowed),[Action(kind='light',value='defined')])
+        comp['checks']['physics']['status']='unknown'
+        self.assertEqual(fusion_actions(observation.review(),comp,allowed),[])
+
     def test_estimated_receiver_edge_is_softened_inside_its_mask(self):
         receiver=np.zeros((60,80),bool);receiver[8:50,9:70]=True
         loss=np.float32(receiver)*.45
@@ -47,6 +103,9 @@ class PhotoTests(unittest.TestCase):
         self.assertGreater(matched[:,41:47].mean(),matched[:,3:12].mean()+.1)
         self.assertTrue(info['specular_protection'])
 
+    def test_stainless_with_a_linked_metallic_map_is_treated_as_metal(self):
+        self.assertEqual(material_kind('brushed stainless',0.,True,['steel','rubber']),'metal')
+
     def test_sensor_noise_is_not_scene_contrast(self):
         ramp=np.tile(np.linspace(20,220,128,dtype=np.float32),(128,1))
         frame=np.repeat(ramp[:,:,None],3,axis=2).astype(np.uint8)
@@ -69,6 +128,17 @@ class PhotoTests(unittest.TestCase):
 
 
 class PileTests(unittest.TestCase):
+    def test_foreground_anchors_are_still_inside_the_observed_support(self):
+        support=np.zeros((96,120),bool);support[30:80,20:85]=True
+        close=np.zeros_like(support);close[16:31,25:80]=True
+        site={'id':'base','depth':.35,'mask':support}
+        scene={'supports':[site,{'id':'bar','depth':.55,'mask':close}]}
+        anchors=anchors_near_foreground(scene,site,support,[[52,55]])
+        self.assertTrue(anchors)
+        self.assertTrue(all(support[y,x] and y<55 for x,y in anchors))
+        scene['supports'][1]['depth']=.36
+        self.assertEqual(anchors_near_foreground(scene,site,support,[[52,55]]),[])
+
     def fixture(self):
         w=h=100;mask=np.zeros((h,w),bool);mask[55:90,10:30]=True;mask[55:90,70:90]=True
         sites=[]

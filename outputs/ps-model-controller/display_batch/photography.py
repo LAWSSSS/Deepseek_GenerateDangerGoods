@@ -66,7 +66,7 @@ def control(params,name):
 
 
 def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metallic=None,upward=None,
-                 *,reference=False):
+                 *,reference=False,camera_capture=True):
     classes=set(environment.get('material_classes',[]))
     polymer=bool(classes) and classes.issubset({'plastic','rubber'})
     core=alpha>.85
@@ -167,7 +167,7 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     reference_edge=float(stats.get('edge_energy',.06))
     base_blur=float(np.clip((edge/max(reference_edge,.008)-1)*.20,0,.75 if reference else .46))
     blur_sigma=base_blur/control(params,'sharpness')
-    if blur_sigma>.05:
+    if camera_capture and blur_sigma>.05:
         soft=normalized_blur(rgb,alpha,blur_sigma)
         weight=(1-.7*protected)*.65
         rgb=rgb*(1-weight[...,None])+soft*weight[...,None]
@@ -177,7 +177,7 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         flat=interior&(grad<=np.percentile(grad[interior],35))
     residual=(gray-cv2.GaussianBlur(gray,(0,0),.8))[flat]
     existing=float(np.median(abs(residual))*1.4826) if len(residual) else 0
-    added=math.sqrt(max(0,noise**2-min(existing,noise)**2))
+    added=math.sqrt(max(0,noise**2-min(existing,noise)**2)) if camera_capture else 0.
     noise_field=rng.normal(0,added,alpha.shape).astype(np.float32)
     rgb+=np.clip(noise_field,-3*noise,3*noise)[...,None]*(1-.45*protected[...,None])
     rgb=np.clip(rgb,0,1).astype(np.float32)

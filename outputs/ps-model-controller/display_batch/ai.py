@@ -2,10 +2,13 @@ import asyncio
 import json
 import time
 import io
+import os
 from pathlib import Path
+from typing import Literal
+from urllib.parse import urlsplit
 
 import httpx
-from pydantic import Field
+from pydantic import Field, model_validator
 from PIL import Image, ImageOps
 from run import Endpoint, ModelClient, token_summary
 from .common import HERE, atomic_json, configure_credential, file_hash, signature
@@ -13,6 +16,14 @@ from .common import HERE, atomic_json, configure_credential, file_hash, signatur
 
 class VisionEndpoint(Endpoint):
     max_output_tokens: int = Field(default=2048, ge=128, le=4096)
+    response_protocol: Literal['tools','qwen-json'] = 'tools'
+
+    @model_validator(mode='after')
+    def batch_endpoint(self):
+        host=urlsplit(self.url).hostname or ''
+        if host.startswith('token-plan.') or host=='coding.dashscope.aliyuncs.com':
+            raise ValueError('套餐端点仅供交互式工具使用。批处理请使用独立的视觉 API。')
+        return self
 
 
 class ProviderUnavailable(RuntimeError):
@@ -38,8 +49,10 @@ class Vision:
         self.cache.mkdir(parents=True, exist_ok=True)
         self.calls = []
         self.semaphore = asyncio.Semaphore(config.ai_concurrency)
-        self.http = httpx.AsyncClient()
         self.configured = configure_credential(self.endpoint.key_env)
+        if self.endpoint.response_protocol=='qwen-json' and os.environ.get(self.endpoint.key_env or '', '').startswith('sk-sp-'):
+            raise ValueError('百炼批处理需要独立 API 凭据，不能使用套餐密钥')
+        self.http = httpx.AsyncClient()
         self.cache_hits = 0
 
     async def close(self):
@@ -56,7 +69,7 @@ class Vision:
         return result
 
     async def ask(self, role, schema, prompt, payload, images=(), *, cache=True,
-                  image_limits=None,max_output_tokens=None):
+                  image_limits=None,max_output_tokens=None,plain_json=False):
         previews=[]
         endpoint=self.endpoint if max_output_tokens is None else self.endpoint.model_copy(
             update={'max_output_tokens':max_output_tokens})
@@ -77,7 +90,10 @@ class Vision:
                     dest.write_bytes(data.getvalue())
             previews.append(dest)
         images=tuple(previews)
-        key = signature("vision-v1", endpoint.model_dump(), schema.model_json_schema(),
+        qwen=endpoint.response_protocol=='qwen-json'
+        use_json=qwen or plain_json
+        endpoint_key=endpoint.model_dump(exclude={'response_protocol'} if not qwen else None)
+        key = signature("vision-json-v1" if use_json else "vision-v1", endpoint_key, schema.model_json_schema(),
                         role, prompt, semantic_payload(payload), [file_hash(p) for p in images])
         path = self.cache/f"{key}.json"
         if cache and path.is_file():
@@ -94,10 +110,12 @@ class Vision:
                 report = {"calls": []}
                 start = time.monotonic()
                 try:
+                    mode = " Return one JSON object matching the supplied schema." if use_json else " Return only the requested JSON tool arguments."
                     answer = await ModelClient(self.http, report).ask(endpoint, role, schema,
-                        prompt + " Return only the requested JSON tool arguments. Coordinates are normalized [0,1]."
+                        prompt + mode + " Coordinates are normalized [0,1]."
                         " Write evidence in concise Chinese, at most 60 Chinese characters. Respect all schema string limits.",
-                        retry_payload, images, tool="inspect_display", detail="high")
+                        retry_payload, images, tool=None if use_json else "inspect_display",
+                        detail=None if qwen else "high",qwen_json=qwen,plain_json=use_json)
                     if cache:
                         atomic_json(path, answer.model_dump())
                     return answer
