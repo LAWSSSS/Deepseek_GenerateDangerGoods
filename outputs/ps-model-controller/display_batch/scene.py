@@ -16,7 +16,7 @@ from .schema import SceneAnswer
 from .geometry import (camera_for, contact_geometry, contact_world, pose_points, project, contact_support,
                        scale_from_reference, terrain_matrix, horizontal_angle, transformed)
 
-SCENE_VERSION='independent-scene-v3'
+SCENE_VERSION='independent-scene-v4-pile'
 SCENE_PROMPT='''Analyze this particular scrap hopper photograph, independently of any other image.
 Identify only the interior load region as hopper. Exclude walls, outside ground, walkways and empty air.
 Protect timestamp/logo/camera text polygons. Propose up to eight spatially distributed LOW supporting surfaces:
@@ -28,6 +28,10 @@ Infer camera elevation above horizontal as a bounded interval. light_direction i
 towards the illuminating region, or null if insufficient evidence. haze is 0..0.35.
 Do not put supports on walls. All polygons and anchors use normalized x,y 0..1. A surface can be absent.
 Return concise physical evidence, not assurances of success.'''
+PILE_PROMPT=SCENE_PROMPT.replace('a contiguous floor patch or one broad steel face, never a polygon bridging unrelated bars or gaps.',
+    'a floor patch OR the top face of steel within the pile. Include distributed pile interiors and overlapping steel, '
+    'not only empty floor. Each polygon is one visible surface; separate pieces will be combined by geometry. '
+    'A surface may be partially hidden by foreground bars. Never treat a gap as solid support.')
 
 
 def polygon_mask(polygons, size):
@@ -39,10 +43,11 @@ def polygon_mask(polygons, size):
 
 
 class Scenes:
-    def __init__(self, root, vision):
+    def __init__(self, root, vision, legacy=False):
         self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True)
         self.vision=vision;self.engine=None;self.engine_lock=asyncio.Lock()
         self.loaded={};self.locks={}
+        self.legacy=legacy
 
     async def prepare(self, path):
         key=file_hash(path)
@@ -50,14 +55,14 @@ class Scenes:
         async with lock:return await self._prepare(path)
 
     async def _prepare(self, path):
-        key=signature(SCENE_VERSION,file_hash(path))
+        key=signature('independent-scene-v3' if self.legacy else SCENE_VERSION,file_hash(path))
         if key in self.loaded:return self.loaded[key]
         start=time.monotonic();folder=self.root/'scenes'/key;folder.mkdir(parents=True,exist_ok=True)
         with Image.open(path) as im:frame=ImageOps.exif_transpose(im).convert('RGB')
         preview=folder/'background.jpg'
         if not preview.is_file():
             thumb=frame.copy();thumb.thumbnail((1536,1024));thumb.save(preview,quality=88)
-        answer=await self.vision.ask('scene',SceneAnswer,SCENE_PROMPT,{},[preview])
+        answer=await self.vision.ask('scene',SceneAnswer,SCENE_PROMPT if self.legacy else PILE_PROMPT,{},[preview])
         atomic_json(folder/'analysis.json',answer.model_dump())
         async with self.engine_lock:
             if self.engine is None:self.engine=Perception(WEIGHTS,self.root)
@@ -84,15 +89,38 @@ class Scenes:
             design=np.column_stack([xx/depth.shape[1],yy/depth.shape[0],np.ones(len(xx))])
             coeff=np.linalg.lstsq(design,depth[yy,xx],rcond=None)[0]
             residual=float(np.median(abs(design@coeff-depth[yy,xx])))
-            if residual>.065:continue
+            if residual>.065 and self.legacy:continue
             direction=np.array([coeff[0],-coeff[1]/max(.2,math.sin(math.radians(sum(answer.elevation)/2)))])
             if np.linalg.norm(direction)<1e-5:direction=np.array([0.,-1.])
             direction/=np.linalg.norm(direction);angle=math.radians(raw.slope_deg)
             normal=np.r_[-direction*math.sin(angle),math.cos(angle)]
             surface.update(mask=mask,anchor_px=[int(x),int(y)],depth=float(depth[sy,sx]))
             surface.update(plane_normal=normal.tolist(),plane_residual=residual,
-                           plane_basis='uncalibrated_depth_gradient_and_visual_slope_estimate')
+                           plane_basis='uncalibrated_depth_gradient_and_visual_slope_estimate',
+                           evidence_status='unknown' if residual>.065 else 'estimated')
             supports.append(surface)
+        if not self.legacy:
+            # Segmented steel inside the hopper supplies additional finite faces, not a filled hull.
+            allowed_small=cv2.resize(allowed.astype(np.uint8),(depth.shape[1],depth.shape[0]),interpolation=cv2.INTER_NEAREST)>0
+            derived=[]
+            for seg in masks:
+                valid=seg&allowed_small
+                if valid.sum()<120 or valid.sum()/max(1,seg.sum())<.9:continue
+                yy,xx=np.nonzero(valid);center=[float(np.median(xx)),float(np.median(yy))]
+                if any((valid & cv2.resize(s['mask'].astype(np.uint8),valid.shape[::-1],interpolation=cv2.INTER_NEAREST).astype(bool)).sum()/valid.sum()>.8 for s in supports):continue
+                anchor=[round(center[0]*(size[0]-1)/(depth.shape[1]-1)),round(center[1]*(size[1]-1)/(depth.shape[0]-1))]
+                nearest=min(supports,key=lambda s:np.linalg.norm(np.subtract(s['anchor_px'],anchor))) if supports else None
+                if nearest is None:
+                    nearest={'reference':[[float(xx.min()/(depth.shape[1]-1)),float(yy.min()/(depth.shape[0]-1))],
+                        [float(xx.max()/(depth.shape[1]-1)),float(yy.max()/(depth.shape[0]-1))]],
+                        'reference_mm':[2000,5000],'reference_status':'unknown','plane_normal':[0,0,1],
+                        'slope_deg':0,'plane_residual':1}
+                derived.append({**nearest,'id':f'D{len(derived)+1}','label':'segmented interior steel; estimated support',
+                    'mask':cv2.resize(valid.astype(np.uint8),size,interpolation=cv2.INTER_NEAREST)>0,
+                    'anchor_px':anchor,'anchor':(np.asarray(anchor)/np.subtract(size,1)).tolist(),
+                    'depth':float(np.median(depth[valid])),'confidence':.35,'evidence_status':'unknown',
+                    'plane_basis':'segmentation_only_hidden_height_unknown'})
+            supports.extend(sorted(derived,key=lambda s:-int(s['mask'].sum()))[:16])
         scene={'key':key,'path':str(path),'folder':str(folder),'frame':frame,'size':size,
                'depth':depth,'allowed':allowed,'protected':protected,'supports':supports,
                'answer':answer.model_dump(),'basis':'estimated','seconds':time.monotonic()-start}
@@ -102,16 +130,21 @@ class Scenes:
         return scene
 
 
-def projection_geometry(vertices,faces,pose,yaw,elevation,normal=(0,0,1),patches=None):
+def projection_geometry(vertices,faces,pose,yaw,elevation,normal=(0,0,1),patches=None,camera=None):
     p,_=pose_points(vertices,pose['matrix'],yaw)
-    camera=camera_for(p,elevation)
+    camera=camera or camera_for(p,elevation)
     uv=cv2.convexHull(np.float32(project(p,camera))).reshape(-1,2).astype(float)
     polys,anchor=contact_geometry(p,faces,camera,normal=normal,patches=patches)
-    return {'camera':camera,'uv':uv,'contacts':polys,'anchor':anchor}
+    from .pile import mesh_raster
+    silhouette,depth=mesh_raster(p,faces,camera)
+    foot=np.zeros(silhouette.shape,np.uint8)
+    for poly in polys:cv2.fillConvexPoly(foot,np.rint(poly*len(foot)*16).astype(np.int32),255,shift=4)
+    return {'camera':camera,'uv':uv,'contacts':polys,'anchor':anchor,
+            'silhouette':silhouette,'zbuffer':depth,'foot_mask':foot}
 
 
 def cached_projection(asset,vertices,faces,pose,yaw,elevation,normal=(0,0,1),patches=None):
-    key=signature('projection-v3',asset['signature'],pose['matrix'],yaw,elevation,normal)
+    key=signature('projection-v4-true-mesh',asset['signature'],pose['matrix'],yaw,elevation,normal)
     folder=Path(asset['folder'])/'projections';folder.mkdir(exist_ok=True)
     path=folder/(key+'.npz')
     if path.is_file():
@@ -119,14 +152,16 @@ def cached_projection(asset,vertices,faces,pose,yaw,elevation,normal=(0,0,1),pat
             points=data['points'];offsets=data['offsets'];anchor=data['anchor']
             return {'camera':json.loads(str(data['camera'])),'uv':data['uv'],
                     'contacts':[points[a:b] for a,b in zip(offsets[:-1],offsets[1:])],
-                    'anchor':anchor if len(anchor) else None}
+                    'anchor':anchor if len(anchor) else None,'silhouette':data['silhouette'],
+                    'zbuffer':data['zbuffer'],'foot_mask':data['foot_mask']}
     geom=projection_geometry(vertices,faces,pose,yaw,elevation,normal,patches)
     offsets=np.cumsum([0]+[len(p) for p in geom['contacts']])
     fd,name=tempfile.mkstemp(dir=folder,suffix='.npz');os.close(fd)
     try:
         np.savez_compressed(name,uv=geom['uv'],points=np.concatenate(geom['contacts']) if geom['contacts'] else np.empty((0,2)),
                             offsets=offsets,anchor=geom['anchor'] if geom['anchor'] is not None else [],
-                            camera=json.dumps(geom['camera']))
+                            camera=json.dumps(geom['camera']),silhouette=geom['silhouette'],
+                            zbuffer=geom['zbuffer'],foot_mask=geom['foot_mask'])
         os.replace(name,path)
     finally:
         if os.path.exists(name):os.unlink(name)
@@ -141,15 +176,14 @@ def fitted_masks(geom, anchor_px, full_px, scene):
     w,h=scene['size']
     if min(low)<0 or high[0]>=w or high[1]>=h:return None
     x,y=low;cw,ch=high-low
-    if min(cw,ch)<12 or max(cw,ch)>w*.6:return None
-    contact=np.zeros((ch,cw),np.uint8)
-    for poly in geom['contacts']:
-        points=np.rint((poly*full_px+offset-low)*16).astype(np.int32)
-        cv2.fillConvexPoly(contact,points,255,shift=4)
-    hull=cv2.convexHull(np.float32(xy-low))
-    silhouette=np.zeros((ch,cw),np.uint8);cv2.fillConvexPoly(silhouette,hull.astype(np.int32),1)
+    if min(cw,ch)<12*scene.get('_image_scale',1.) or max(cw,ch)>w*.6:return None
+    raster_size=geom['silhouette'].shape[0]
+    transform=np.float32([[full_px/raster_size,0,offset[0]-x],[0,full_px/raster_size,offset[1]-y]])
+    contact=cv2.warpAffine(geom['foot_mask'],transform,(int(cw),int(ch)),flags=cv2.INTER_NEAREST)
+    silhouette=cv2.warpAffine(geom['silhouette'].astype(np.uint8),transform,(int(cw),int(ch)),flags=cv2.INTER_NEAREST)
+    depth=cv2.warpAffine(geom['zbuffer'],transform,(int(cw),int(ch)),flags=cv2.INTER_NEAREST)
     return {'origin':[int(x),int(y)],'bounds':[int(x),int(y),int(high[0]),int(high[1])],
-            'offset':offset.tolist(),'contact':contact,'hull':silhouette>0}
+            'offset':offset.tolist(),'contact':contact,'hull':silhouette>0,'depth':depth}
 
 
 def fit_checks(fit, surface, scene):
@@ -182,7 +216,7 @@ def support_anchors(site):
     return anchors
 
 
-def choose_candidates(asset,scene,seed=0):
+def choose_planar_candidates(asset,scene,seed=0):
     data=np.load(asset['geometry']);vertices=data['vertices'];faces=data['faces']
     elevations=sorted(set([*scene['answer']['elevation'],sum(scene['answer']['elevation'])/2]))
     midpoint=sum(scene['answer']['elevation'])/2
@@ -263,3 +297,8 @@ def choose_candidates(asset,scene,seed=0):
         if candidate not in chosen:chosen.append(candidate)
         if len(chosen)==3:break
     return chosen,rejections
+
+
+def choose_candidates(asset,scene,seed=0,config=None):
+    from .pile import choose_pile_candidates
+    return choose_pile_candidates(asset,scene,seed,config)

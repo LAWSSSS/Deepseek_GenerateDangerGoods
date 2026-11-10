@@ -10,6 +10,8 @@ from PIL import Image
 
 from .geometry import contact_support
 from .schema import TONE_PROFILES
+from .photography import match_linear, sensor_statistics
+from .pile import depth_order
 
 
 def linear(rgb):
@@ -27,12 +29,14 @@ def sample_environment(scene, candidate):
     w,h=scene['size'];x,y,r,b=candidate['bounds'];pad=round(max(r-x,b-y)*.8)
     l,t,rr,bb=max(0,x-pad),max(0,y-pad),min(w,r+pad),min(h,b+pad)
     sample=np.zeros((h,w),bool);sample[t:bb,l:rr]=True
-    sample &= site['mask'] & ~scene['protected']
+    support_masks=[s['mask'] for s in scene['supports'] if s['id'] in candidate.get('support_ids',[site['id']])]
+    support_union=np.logical_or.reduce(support_masks)
+    sample &= support_union & ~scene['protected']
     sample[y:b,x:r]=False
     rgb=np.asarray(scene['frame']);lum=rgb@np.array([.2126,.7152,.0722])
     if sample.sum()<100:
         # frame is the untouched photograph: the surface under the future object is valid evidence.
-        sample=site['mask'].copy() & ~scene['protected']
+        sample=support_union.copy() & ~scene['protected']
     if sample.sum()<100:raise ValueError('insufficient_same_surface_light_samples')
     lo,hi=np.percentile(lum[sample],[12,92]);sample &= (lum>=lo)&(lum<=hi)
     pixels=rgb[sample].astype(float);median=np.median(pixels,axis=0)
@@ -45,7 +49,10 @@ def sample_environment(scene, candidate):
                  'key_direction':answer['light_direction'] if answer['light_confidence']>=.55 else None,
                  'haze':answer['haze'],'sample_count':int(sample.sum()),
                  'sample_hash':hashlib.sha256(np.packbits(sample)).hexdigest(),
-                 'luma_median':luminance,'basis':'same_support_estimate'}
+                 'luma_median':luminance,'basis':'same_support_estimate',
+                 'dust_color':linear(median/255).tolist(),
+                 'sensor':sensor_statistics(rgb[t:bb,l:rr],sample[t:bb,l:rr]) if sample[t:bb,l:rr].sum()>=100
+                          else sensor_statistics(rgb,sample)}
     return environment,sample
 
 
@@ -95,32 +102,62 @@ def match_rgb(rgb, alpha, background_pixels, specular_weight, tone, seed):
 
 
 def compose(scene,candidate,render_dir,render_meta,environment,samples,params,seed,out):
-    render_dir=Path(render_dir);source=np.asarray(Image.open(render_dir/'object.png').convert('RGBA')).astype(np.float32)/255
+    render_dir=Path(render_dir)
+    alpha_dir=Path(candidate.get('fixed_alpha_dir',render_dir))
+    source=np.asarray(Image.open(alpha_dir/'object.png').convert('RGBA')).astype(np.float32)/255
     w,h=scene['size'];x,y,r,b=candidate['bounds'];pad=max(12,round(candidate['target_px']*.12))
     bounds=[max(0,x-pad),max(0,y-pad),min(w,r+pad),min(h,b+pad)]
     x,y,r,b=bounds
     # Anchor derives from contact geometry, never from the alpha or shadow bounding box.
     offset=np.asarray(candidate['anchor_px'])-np.asarray(render_meta['anchor_uv'])*candidate['full_px']
-    premult=np.dstack([source[:,:,:3]*source[:,:,3,None],source[:,:,3]])
-    rgba=warp(premult,candidate['full_px'],offset,bounds)
-    alpha=rgba[:,:,3].copy();rgb=rgba[:,:,:3]/np.maximum(alpha[:,:,None],1e-6)
+    alpha=warp(source[:,:,3],candidate['full_px'],offset,bounds)
     spec=cv2.imread(str(render_dir/'specular0001.exr'),cv2.IMREAD_UNCHANGED)
     diff=cv2.imread(str(render_dir/'diffuse0001.exr'),cv2.IMREAD_UNCHANGED)
     if spec is None or diff is None:raise ValueError('missing_linear_material_passes')
+    combined_path=render_dir/'combined0001.exr'
+    combined=cv2.imread(str(combined_path),cv2.IMREAD_UNCHANGED) if combined_path.is_file() else None
+    radiance=(combined[:,:,:3] if combined is not None else spec[:,:,:3]+diff[:,:,:3])[:,:,::-1]
+    raw=warp(radiance,candidate['full_px'],offset,bounds)/np.maximum(alpha[...,None],1e-6)
     highlight=np.max(spec[:,:,:3],axis=2)/np.maximum(np.max(spec[:,:,:3]+diff[:,:,:3],axis=2),.0001)
-    highlight=warp(highlight,candidate['full_px'],offset,bounds)
-    rgb,photo=match_rgb(rgb,alpha,np.asarray(scene['frame'])[samples],highlight,params['tone'],seed)
-    haze=float(np.clip(environment['haze'],0,.18))
-    veil=np.mean(np.asarray(scene['frame'])[samples],axis=0)/255
-    rgb=rgb*(1-haze)+veil*haze
+    highlight=warp(highlight*source[:,:,3],candidate['full_px'],offset,bounds)/np.maximum(alpha,1e-6)
+    channels={}
+    for name in ('metallic','upward'):
+        path=render_dir/(name+'0001.exr')
+        if path.is_file():
+            value=cv2.imread(str(path),cv2.IMREAD_UNCHANGED)
+            if value.ndim==3:value=value[:,:,0]
+            channels[name]=warp(value,candidate['full_px'],offset,bounds)/np.maximum(alpha,1e-6)
+    photo_environment={**environment,'material_classes':candidate.get('material_classes',[])}
+    rgb,photo=match_linear(raw,alpha,np.asarray(scene['frame'])[samples],highlight,params,seed,photo_environment,**channels)
+    photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     site=next(s for s in scene['supports'] if s['id']==candidate['site_id'])
-    support=site['mask'][y:b,x:r];protected=scene['protected'][y:b,x:r]
-    foreground=(scene['depth_native'][y:b,x:r]>site['depth']+.10)&~support
+    support=np.logical_or.reduce([s['mask'][y:b,x:r] for s in scene['supports']
+        if s['id'] in candidate.get('support_ids',[site['id']])]);protected=scene['protected'][y:b,x:r]
+    order={'confidence':'legacy_estimate','basis':'frozen_original_occlusion'}
+    if candidate.get('placement') and not candidate.get('legacy_occlusion'):
+        depth_path=render_dir/'depth0001.exr'
+        if not depth_path.is_file():raise ValueError('missing_object_depth_pass')
+        distance=cv2.imread(str(depth_path),cv2.IMREAD_UNCHANGED)
+        if distance.ndim==3:distance=distance[:,:,0]
+        n=distance.shape[0];vv,uu=np.mgrid[0:n,0:n]
+        tangent=2*math.tan(math.radians(render_meta['camera']['fov'])/2)
+        distance=distance/np.sqrt(1+(((uu+.5)/n-.5)*tangent)**2+(((vv+.5)/n-.5)*tangent)**2)
+        distance=np.where((source[:,:,3]>.001)&np.isfinite(distance)&(distance<1e8),distance,0)
+        object_z=warp((distance*source[:,:,3]).astype(np.float32),candidate['full_px'],offset,bounds)/np.maximum(alpha,1e-6)
+        foreground,order=depth_order(scene,candidate,bounds,object_z,alpha,refine=True)
+    else:foreground=(scene['depth_native'][y:b,x:r]>site['depth']+.10)&~support
     foreground &= ~protected
     visible_alpha=alpha*((~foreground)&(~protected))
-    with_shadow=np.asarray(Image.open(render_dir/'with-shadow.png').convert('RGB'),dtype=np.float32)/255
-    without_shadow=np.asarray(Image.open(render_dir/'without-shadow.png').convert('RGB'),dtype=np.float32)/255
-    a=linear(with_shadow).mean(axis=2);base=linear(without_shadow).mean(axis=2)
+    shadow_dir=Path(candidate.get('fixed_shadow_dir',render_dir))
+    with_shadow=np.asarray(Image.open(shadow_dir/'with-shadow.png').convert('RGB'),dtype=np.float32)/255
+    without_shadow=np.asarray(Image.open(shadow_dir/'without-shadow.png').convert('RGB'),dtype=np.float32)/255
+    if (shadow_dir/'with-shadow-linear0001.exr').is_file() and (shadow_dir/'without-shadow-linear0001.exr').is_file():
+        a=cv2.imread(str(shadow_dir/'with-shadow-linear0001.exr'),cv2.IMREAD_UNCHANGED)[:,:,:3].mean(axis=2)
+        base=cv2.imread(str(shadow_dir/'without-shadow-linear0001.exr'),cv2.IMREAD_UNCHANGED)[:,:,:3].mean(axis=2)
+        shadow_basis='scene_linear_EXR_ratio'
+    else:
+        a=linear(with_shadow).mean(axis=2);base=linear(without_shadow).mean(axis=2)
+        shadow_basis='legacy_sRGB_decoded_ratio'
     loss=np.clip(1-a/np.maximum(base,.015),0,.65)
     loss[base<.015]=0
     loss=warp(loss,candidate['full_px'],offset,bounds)
@@ -128,7 +165,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     loss[loss<1/512]=0
     base_rgb=np.asarray(scene['frame']).copy();crop=base_rgb[y:b,x:r].astype(np.float32)/255
     shaded=linear(crop)*(1-loss[:,:,None])
-    result=srgb(shaded)*(1-visible_alpha[:,:,None])+rgb*visible_alpha[:,:,None]
+    result=srgb(shaded*(1-visible_alpha[:,:,None])+linear(rgb)*visible_alpha[:,:,None])
     edited=(visible_alpha>0)|(loss>0)
     crop_out=np.uint8(np.rint(np.clip(result,0,1)*255))
     original=base_rgb[y:b,x:r].copy()
@@ -163,12 +200,18 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     checks={
       'lying':{'status':'pass' if tilt is not None and tilt<=15 else 'unknown',
                'measurement_deg':tilt,'threshold_deg':15,'basis':'compound_simulation_on_estimated_plane'},
-      'support':{'status':'pass' if cover and min(cover)>=.9 else 'fail','measurements':cover,'threshold':.9,'basis':'estimated_surface'},
-      'camera_clearance':{'status':'pass','elevation_interval':candidate['elevation_interval'],'basis':'interval_projection'},
-      'physics':{'status':'pass' if physics.get('stable') else 'unknown','evidence':physics,
+      'support':{'status':('unknown' if 'support_geometry_uncertain' in candidate.get('uncertainties',[]) else 'pass')
+                 if cover and min(cover)>=.9 else 'unknown' if candidate.get('allow_uncertain') else 'fail',
+                 'measurements':cover,'threshold':.9,'basis':'estimated_surface'},
+      'camera_clearance':{'status':'unknown' if candidate.get('camera_risks') else 'pass',
+                 'risks':candidate.get('camera_risks',[]),'elevation_interval':candidate['elevation_interval'],'basis':'interval_projection'},
+      'physics':{'status':physics.get('status','pass' if physics.get('stable') else 'unknown'),'evidence':physics,
                  'basis':'estimated_plane_not_measured_irregular_pile'},
-      'occlusion':{'status':'pass' if foreground_changes==0 else 'fail','foreground_changed_pixels':foreground_changes},
-      'scale':{'status':'pass' if abs(unoccluded_major-expected)<=tolerance else 'fail',
+      'occlusion':{'status':'fail' if foreground_changes else 'unknown' if
+                   (order.get('confidence')=='unknown' and order.get('occluded_fraction',0)>.02)
+                   or order.get('ambiguous_fraction',0)>.25 else 'pass',
+                   'foreground_changed_pixels':foreground_changes,'depth_evidence':order},
+      'scale':{'status':candidate['scale'].get('status','pass') if abs(unoccluded_major-expected)<=tolerance else 'fail',
                'basis':'estimated_local_reference','measurement_px':unoccluded_major,'visible_px':major,
                'expected_px':expected,'tolerance_px':tolerance,'evidence':candidate['scale']},
       'anchor':{'status':'pass' if max(anchor_error,projection_error)<=1.5 else 'fail',
@@ -180,7 +223,18 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     }
     local=Image.fromarray(base_rgb).crop((x,y,r,b));local.thumbnail((1000,800));local.save(Path(out).with_suffix('.crop.jpg'),quality=92)
     thumb=Image.fromarray(base_rgb);thumb.thumbnail((1536,1024));thumb.save(Path(out).with_suffix('.full.jpg'),quality=88)
+    if candidate.get('placement'):
+        overlay=np.asarray(scene['frame'])[y:b,x:r].copy()
+        overlay[support]=np.uint8(overlay[support]*.6+np.array([20,210,120])*.4)
+        overlay[foreground]=np.uint8(overlay[foreground]*.5+np.array([65,140,255])*.5)
+        overlay[foot>0]=[255,170,40]
+        Image.fromarray(overlay).save(Path(out).with_suffix('.occlusion.png'))
     return {'checks':checks,'photo':photo,'measured_major_px':major,'edit_bounds':bounds,
+            'placement':candidate.get('placement','surface'),'support_ids':candidate.get('support_ids',[site['id']]),
+            'evidence_confidence':candidate.get('evidence_confidence','estimated'),
+            'uncertainties':candidate.get('uncertainties',[]),'depth_order':order,'shadow_basis':shadow_basis,
+            'alpha_hash':hashlib.sha256(alpha.tobytes()).hexdigest(),
+            'visible_alpha_hash':hashlib.sha256(visible_alpha.tobytes()).hexdigest(),
             'scene_basis':'estimated','alpha_pixels':int((visible_alpha>.5).sum()),
             'occlusion_fraction':float(1-visible_alpha.sum()/max(alpha.sum(),1e-6)),
             'image':str(out),'crop':str(Path(out).with_suffix('.crop.jpg')),

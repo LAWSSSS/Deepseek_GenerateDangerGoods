@@ -20,7 +20,7 @@ async def diagnose(config):
                                   stable_poses=len(asset['poses']),asset_reason=asset.get('reason'))
                     if asset['poses']:
                         scene=await pipe.scenes.prepare(job['background'])
-                        candidates,rejected=await asyncio.to_thread(choose_candidates,asset,scene,job['seed'])
+                        candidates,rejected=await asyncio.to_thread(choose_candidates,asset,scene,job['seed'],config)
                         record.update(scene_signature=scene['key'],candidates=candidates,rejected=rejected,
                                       status='pass' if candidates else 'review')
                 except Exception as error:record['reason']=str(error)[:300]

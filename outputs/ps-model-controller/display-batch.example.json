@@ -8,5 +8,8 @@
   "render_device": "OPTIX",
   "cache": "work/display-batch-cache",
   "ai_concurrency": 2,
-  "cpu_concurrency": 2
+  "cpu_concurrency": 2,
+  "photo_style": "scrap_gray",
+  "placement_mode": "auto",
+  "uncertain_policy": "render_review"
 }

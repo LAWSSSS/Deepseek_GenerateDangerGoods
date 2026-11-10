@@ -15,6 +15,14 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/batch_display.py
 
 复制示例 JSON 后修改 `backgrounds` 与 `output`。默认 100 个任务、初稿之后最多修正 2 轮；`count` 允许 1–1000，`max_iterations` 允许 0–10。小于 100 的任务数用于诊断。`assets` 留空使用当前全部 44 个条目；可指定 `['3','6','10','13','19-1','31']` 对应的 JSON 字符串数组。每个任务只有一个物品。
 
+本轮新增三个默认选项，旧配置缺少时也采用这些值：
+
+| 字段 | 默认 | 其他值 |
+|---|---|---|
+| `photo_style` | `scrap_gray` 废钢灰强融合 | `retain_color` 保留更多本色 |
+| `placement_mode` | `auto` 自动选表面、组合承托、局部嵌入 | `surface`、`combined`、`embedded` |
+| `uncertain_policy` | `render_review` 证据不足仍出待审图 | `skip` 跳过不确定候选 |
+
 网页沿用 `placement-web/server.py`，从工作台标题栏打开“多背景批量生成”，或访问 `/batch`。默认服务端口 8765；本轮验证实例端口为 8767。表单包含背景目录、任务数、模型列表、种子、修正轮数和设备，提供进度、结果与续跑入口。新代码需重启服务进程才能加载。
 
 同一配置、输出目录再次运行即可续跑；已完成任务不重跑。运行中的输出目录有独占锁。输入内容、配置、算法或依赖签名改变时要求新输出目录，避免混合两版结果。恢复中的任务从可复用缓存重放已完成阶段，模型响应缓存命中不产生新请求。
@@ -43,18 +51,22 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/batch_display.py
 - SAM 与相对深度只用于限制候选，不能当作标定深度。区域内按距离变换寻找少量内部落点；再检查真实网格投影、各接触簇、三个俯角和相邻参照深度。跨深度参照差超过 0.085 时拒绝。
 - CoACD 生成仅用于碰撞的多个凸部件。封闭部件按均匀密度求体积、质量和质心；碰撞代理保持组件相对位置，渲染网格和 UV 不改写。非封闭面积占比过高、装配关系未知或散件进入待审。
 - 每个模型最多六个初始落稳姿态，缓存后搜索水平朝向。长轴与水平夹角不超过 15°；紧凑物体保留低姿态。局部承托坡度改变时单独复验，滚动、穿透、悬空、质心无支撑和未收敛分别记录。
-- 实际接触簇的投影支撑率均须 ≥90%，不得把分离足底的空隙当支撑。相机区间两端和中点使用同一物理尺度，最终渲染按接触锚点放回背景。
+- 真实网格逐像素深度与轮廓保留孔洞。接触斑可以分别落在 2–4 块钢料上；碰撞接收面只覆盖分割片，空隙不填充。前三候选才进行有限承托片的物理复验，底层横躺姿态继续缓存。
+- 实际接触簇的投影支撑率达到 ≥90% 才能记为通过；隐藏接触和高度证据不足记为未知。相机中点成图，端点风险保留待审，不再因此丢弃中点合理的检查图。尺度逐锚点重算，跨深度参照不能转为同层证据；缺少参照时使用有明确假设的展示尺度。
+- 相对深度拟合到局部承托，再与物体 Z 通道比较，可同时遮挡后方钢料并被前方钢料遮挡。嵌入优先 10%–40%，没有自然遮挡时不制造遮挡。边界在原图尺度细化，前景恢复原图像素。
 - 保留模型已有金属/粗糙度/法线贴图和材质分组。混合 PBR 贴图不会因为名称包含“橡胶”而跳过细节；纯塑料/橡胶不增加金属度。新增细节只在渲染材质中产生，源模型文件不变。
-- 估计环境反射、柔光源和承托面共同参与渲染；输出漫反射、高光、透明度与有影/无影图。阴影在线性亮度下计算，裁到同一承托面，前景和文字区恢复原像素。
-- 调色限制曝光、白平衡、色度、雾化和最终像素噪声；高光由独立 pass 保护，透明度不参与调色。每件最多三个 512 px 粗候选；最终根据整个投影画幅约 2 倍采样，限制为 512–2048。
+- 估计环境反射、柔光源和承托面共同参与渲染；保存 combined、漫反射、高光、Z、金属度、朝上程度以及有影/无影线性 EXR。曝光、白平衡与光照雾化在线性辐射量处理后，只应用一次 Blender OCIO AgX 显示变换；依据见 [Blender 色彩管理](https://docs.blender.org/manual/en/4.5/render/color_management.html)。阴影使用线性 EXR 比值，裁到承托片集合。
+- 强融合色度系数限制为 0.20–0.55，局部场景颜色用于积灰；低频明暗和表面扰动与高光分别处理。纯塑料/橡胶降低积灰及表面扰动，保留类别区别。平坦区域估计传感器噪声，边缘估计锐度，不以整体亮度方差代替噪声。所有摄影调整只改 RGB，不改孔洞 alpha。每件最多三个 512 px 粗候选；最终根据整个投影画幅约 2 倍采样，限制为 512–2048。
 
-这里的承托面是图像推断的局部平面，**不是实测三维料堆**。尺度也是模型尺寸区间与同层参照的估计。复杂交叠钢件、不可辨孔洞、隐藏连接关系和细杆仍可能被拒绝，不能通过 AI 分数覆盖程序检查。
+这里的接收面是图像推断的有限共面钢料片，**不是实测三维料堆**。高度一致性不足时物理状态仍为未知，不能把仿真稳定等同于真实料堆验证。尺度也是模型尺寸区间与同层参照的估计。只剩尺度/遮挡/隐藏接触未知时默认出待审图；确认穿透、悬空、非横躺和保护区冲突仍拒绝。没有可用基础姿态或模型确有损坏时不会虚构图像。
 
 ## 自动复核与输出
 
 AI 查看实际 PNG 的全景、局部、当前模型参照与已有候选。返回原五项评分、材质和关键结构评分、缺陷位置/严重度/证据，以及最多三项白名单动作。动作只能使用已有位置/姿态/方位角或有限材质、光照、调色档位。
 
-展示合格要求原五项各 ≥3、合计 ≥16，材质与结构各 ≥3，无严重缺陷，并通过程序检查。参数重复、无有效动作、连续不改善或轮数用完时停止；先按硬性检查，再按严重缺陷数量和分数保留最佳版本。明确模型级结构问题在该批次隔离，避免随后逐图修补；AI 的模型级判断仍需人工复核。
+展示合格要求原五项各 ≥3、合计 ≥16，材质与结构各 ≥3，无严重缺陷，并且所有程序检查通过，未知不能被 AI 高分覆盖。参数重复、实际像素不变、无有效动作、连续不改善或轮数用完时停止；先比较失败/未知/通过，再比较严重缺陷和评分。
+
+结构复核区分可见、被遮挡、不可判断。单张图的疑点不会立即隔离模型；只有独立无遮挡渲染对照确认可见的真实损坏才进入模型级待审，该确认按模型缓存。摄影动作新增 `chroma/dust/contrast/haze/sharpness` 的 `auto/less/more` 档位，`more chroma` 表示更强降色度；摄影动作复用渲染通道。
 
 每批目录包括：
 
@@ -70,7 +82,7 @@ AI 查看实际 PNG 的全景、局部、当前模型参照与已有候选。返
 | `model-review.json` | 当前批次的模型级待审隔离依据 |
 | `index.html` | 全部结果的浏览入口 |
 
-没有位置或姿态满足条件时只保存拒绝依据，不虚构合成图。`review` 与 `failed` 不自动补生成，任务总数固定。保留中间图用于追溯，因此大量批次会占用较多磁盘；源模型、缓存和结果不进入 Git。
+结果另存摆放方式、承托片集合、遮挡比例、尺度假设、置信度、摄影参数与逐项拒绝原因。`*-geometry.jpg` 和 `*.occlusion.png` 标注承托片、接触斑和前景。`summary.json` 的 `generated_pngs/image_rate` 与展示合格数分别统计，出图增加不代表物理通过。`review` 与 `failed` 不自动补生成，任务总数固定。保留中间图用于追溯，因此大量批次会占用较多磁盘；源模型、缓存和结果不进入 Git。
 
 GPU 渲染进程使用全局独占锁，默认 OptiX；CPU 作业和 AI 请求各最多 2 路。一个常驻 Blender 复用设备，物理缓存和渲染缓存分开。报告分别记录实际 worker 操作、等待、API 与任务阶段耗时；并行任务耗时之和不能当作批次墙钟时间。
 
@@ -87,6 +99,7 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/batch_display.py
 
 # 离线/模拟测试与真实 Blender 物理测试分开执行
 work/triposr-env/Scripts/python.exe outputs/ps-model-controller/checks_display_batch.py
+work/triposr-env/Scripts/python.exe outputs/ps-model-controller/checks_display_fusion.py
 work/triposr-env/Scripts/python.exe outputs/ps-model-controller/checks_display_physics.py
 work/triposr-env/Scripts/python.exe outputs/ps-model-controller/placement-web/checks_web.py
 work/triposr-env/Scripts/python.exe outputs/ps-model-controller/audit_display_assets.py --out outputs/asset-audit/audit.json
@@ -95,6 +108,8 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/audit_display_as
 work/triposr-env/Scripts/python.exe outputs/ps-model-controller/report_display_batch.py --batches outputs/your-development outputs/your-heldout --out outputs/your-report
 ```
 
-1000 任务故障恢复测试仅模拟队列，不等于生成 1000 张图片。真实评估使用相机 53 的 20 张图开发、相机 36 的 3 张图留出，六类模型共 138 项。开发/留出展示合格率分别为 3.3% / 5.6%，没有达到 80% 目标；完整结果、用量与限制见 [验证记录](DISPLAY_BATCH_VALIDATION.md)。不得用通过单张预检代替批量合格率。
+1000 任务故障恢复测试仅模拟队列，不等于生成 1000 张图片。上一版开发/留出展示合格率分别为 3.3% / 5.6%，见 [历史验证记录](DISPLAY_BATCH_VALIDATION.md)。现有 23 张背景都已查看，本轮 138 项称为跨背景回归；新的独立验收必须另取未参与开发的相机组。不得用通过单张预检代替批量合格率。
+
+固定摆位摄影复验入口为 `replay_display_photography.py --batches <旧批次...> --out <新目录> --rerender-materials`。补齐 EXR 后按版本缓存，固定原 alpha、阴影、位置、尺度与姿态，不重新落稳。`prepare_display_fusion.py --batches <旧批次...> --out <新验证目录>` 生成 48 项恢复清单和 138 项回归清单及配置；两份清单用相同配对种子复用缓存。真实渲染锚点核查使用 `checks_display_renders.py --batch <新批次> --out <新检查目录>`，只读取已有分辨率缓存，不调用模型或新增渲染。
 
 旧批次若在后续复核异常时丢失最佳版本元数据，可运行 `recover_display_evidence.py --batches <已完成批次目录>`。它只按已有检查与评分恢复失败任务的最佳已审图，保留原记录及散列；不调用模型、不渲染、不改变失败状态。独立回读入口为 `audit_display_outputs.py --batches <批次目录> --out <报告 JSON>`。

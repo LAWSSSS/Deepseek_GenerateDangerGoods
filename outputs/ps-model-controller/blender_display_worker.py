@@ -110,6 +110,25 @@ def rigid(obj, shape, passive=False):
     return body
 
 
+def make_receiver(request,normal,physical=False):
+    patches=request.get('receiver',{}).get('patches',[])
+    if patches:
+        vertices=[];faces=[]
+        for patch in patches:
+            offset=len(vertices);vertices.extend(patch['vertices'])
+            faces.extend([[offset+i for i in face] for face in patch['faces']])
+        mesh=bpy.data.meshes.new('separate support faces');mesh.from_pydata(vertices,[],faces);mesh.update()
+        ground=bpy.data.objects.new('finite support patches',mesh);bpy.context.scene.collection.objects.link(ground)
+        if physical:rigid(ground,'MESH',True)
+    else:
+        bpy.ops.mesh.primitive_cube_add(size=1,location=Vector(normal)*-.1)
+        ground=bpy.context.object;ground.scale=(8,8,.2)
+        ground.rotation_euler=Vector((0,0,1)).rotation_difference(Vector(normal)).to_euler()
+        bpy.ops.object.transform_apply(location=False,rotation=False,scale=True)
+        if physical:rigid(ground,'BOX',True)
+    return ground
+
+
 def settle(request):
     data=np.load(request['geometry']);vertices=data['vertices'];faces=data['faces']
     proxy=json.loads(Path(request['proxy']).read_text(encoding='utf8'))
@@ -133,11 +152,7 @@ def settle(request):
             child=bpy.data.objects.new('convex part',child_mesh);scene.collection.objects.link(child)
             child.parent=root;child.matrix_parent_inverse=Matrix.Identity(4)
             rigid(child,'CONVEX_HULL').mass=max(.00001,float(part['volume']))
-        bpy.ops.mesh.primitive_cube_add(size=1,location=Vector(normal)*-.1)
-        floor=bpy.context.object;floor.scale=(8,8,.2)
-        floor.rotation_euler=Vector((0,0,1)).rotation_difference(Vector(normal)).to_euler()
-        bpy.ops.object.transform_apply(location=False,rotation=False,scale=True)
-        rigid(floor,'BOX',True)
+        floor=make_receiver(request,normal,physical=True)
         scene.gravity=(0,0,-9.81)
         world=scene.rigidbody_world
         world.substeps_per_frame=10;world.solver_iterations=40
@@ -159,6 +174,15 @@ def settle(request):
         minimum=float((p@normal).min()); height=float(np.ptp(p[:,2]))
         tilt=horizontal_angle(request['axis'],matrix)
         contact=p[(p@normal)<=.008]
+        if request.get('receiver',{}).get('patches') and len(contact):
+            from mathutils.bvhtree import BVHTree
+            tree=BVHTree.FromPolygons([v.co for v in floor.data.vertices],
+                                     [list(face.vertices) for face in floor.data.polygons],all_triangles=True)
+            actual=[]
+            for point in contact:
+                found=tree.find_nearest(Vector(point))
+                if found[0] is not None and found[3]<=.010:actual.append(point)
+            contact=np.asarray(actual).reshape(-1,3)
         center=transformed(com[None],matrix)[0]
         supported=False
         if len(contact)>=3:
@@ -217,6 +241,7 @@ def surface_detail(material,node,environment,dust_gain):
     tree=material.node_tree
     if tree.nodes.get('batch_micrograin'):
         tree.nodes['batch_dust_strength'].inputs[1].default_value=min(.38,(.12+environment.get('haze',0)*.55)*dust_gain)
+        tree.nodes['batch_dust_tint'].inputs[2].default_value=(*environment.get('dust_color',[.16,.145,.12]),1)
         return
     noise=tree.nodes.new('ShaderNodeTexNoise');noise.name='batch_micrograin'
     noise.inputs['Scale'].default_value=160;noise.inputs['Detail'].default_value=3
@@ -228,7 +253,8 @@ def surface_detail(material,node,environment,dust_gain):
     broad=tree.nodes.new('ShaderNodeTexNoise');broad.inputs['Scale'].default_value=11
     broad.inputs['Detail'].default_value=4
     remap=tree.nodes.new('ShaderNodeMapRange')
-    remap.inputs['To Min'].default_value=.68;remap.inputs['To Max'].default_value=1.
+    remap.inputs['From Min'].default_value=.32;remap.inputs['From Max'].default_value=.68;remap.clamp=True
+    remap.inputs['To Min'].default_value=.42;remap.inputs['To Max'].default_value=1.
     tree.links.new(broad.outputs['Fac'],remap.inputs['Value'])
     multiply=tree.nodes.new('ShaderNodeMixRGB');multiply.blend_type='MULTIPLY';multiply.inputs[0].default_value=1.
     if node.inputs['Base Color'].is_linked:
@@ -240,6 +266,14 @@ def surface_detail(material,node,environment,dust_gain):
     else:material_mask.inputs[0].default_value=node.inputs['Metallic'].default_value
     tree.links.new(remap.outputs[0],material_mask.inputs[1])
     tree.links.new(material_mask.outputs[0],multiply.inputs[2])
+    variation=tree.nodes.new('ShaderNodeMapRange')
+    variation.inputs['From Min'].default_value=.3;variation.inputs['From Max'].default_value=.7
+    variation.inputs['To Min'].default_value=-.12;variation.inputs['To Max'].default_value=.10;variation.clamp=True
+    tree.links.new(broad.outputs['Fac'],variation.inputs['Value'])
+    rough=tree.nodes.new('ShaderNodeMath');rough.name='batch_roughness_variation';rough.operation='ADD';rough.use_clamp=True
+    if node.inputs['Roughness'].is_linked:tree.links.new(node.inputs['Roughness'].links[0].from_socket,rough.inputs[0])
+    else:rough.inputs[0].default_value=node.inputs['Roughness'].default_value
+    tree.links.new(variation.outputs[0],rough.inputs[1]);tree.links.new(rough.outputs[0],node.inputs['Roughness'])
     geometry=tree.nodes.new('ShaderNodeNewGeometry')
     upward=tree.nodes.new('ShaderNodeVectorMath');upward.operation='DOT_PRODUCT';upward.inputs[1].default_value=(0,0,1)
     tree.links.new(geometry.outputs['Normal'],upward.inputs[0])
@@ -252,7 +286,8 @@ def surface_detail(material,node,environment,dust_gain):
     exposed=tree.nodes.new('ShaderNodeMath');exposed.operation='MULTIPLY';exposed.use_clamp=True
     tree.links.new(upward.outputs['Value'],exposed.inputs[0]);tree.links.new(metal_mask.outputs[0],exposed.inputs[1])
     tree.links.new(exposed.outputs[0],strength.inputs[0])
-    dust=tree.nodes.new('ShaderNodeMixRGB');dust.inputs[2].default_value=(.16,.145,.12,1)
+    dust=tree.nodes.new('ShaderNodeMixRGB');dust.name='batch_dust_tint'
+    dust.inputs[2].default_value=(*environment.get('dust_color',[.16,.145,.12]),1)
     tree.links.new(strength.outputs[0],dust.inputs[0]);tree.links.new(multiply.outputs[0],dust.inputs[1])
     tree.links.new(dust.outputs[0],node.inputs['Base Color'])
 
@@ -264,6 +299,15 @@ def pass_outputs(scene, folder):
     scene.use_nodes=True;tree=scene.node_tree;tree.nodes.clear()
     source=tree.nodes.new('CompositorNodeRLayers')
     composite=tree.nodes.new('CompositorNodeComposite');tree.links.new(source.outputs['Image'],composite.inputs[0])
+    layer.use_pass_z=True
+    for label,socket in [('combined','Image'),('depth','Depth'),('metallic','metallic'),('upward','upward')]:
+        if label in ('metallic','upward') and not layer.aovs.get(label):
+            aov=layer.aovs.add();aov.name=label;aov.type='VALUE'
+    bpy.context.view_layer.update()
+    for label,socket in [('combined','Image'),('depth','Depth'),('metallic','metallic'),('upward','upward')]:
+        node=tree.nodes.new('CompositorNodeOutputFile');node.base_path=str(folder)
+        node.format.file_format='OPEN_EXR';node.format.color_depth='32' if label=='depth' else '16'
+        node.file_slots[0].path=label;tree.links.new(source.outputs[socket],node.inputs[0])
     for label,prefix in [('diffuse','Diff'),('specular','Gloss')]:
         add=tree.nodes.new('CompositorNodeMixRGB');add.blend_type='ADD';add.inputs[0].default_value=1
         tree.links.new(source.outputs[prefix+'Dir'],add.inputs[1]);tree.links.new(source.outputs[prefix+'Ind'],add.inputs[2])
@@ -274,19 +318,39 @@ def pass_outputs(scene, folder):
         tree.links.new(mul.outputs[0],node.inputs[0])
 
 
+def shadow_output(scene,folder,name):
+    scene.use_nodes=True;tree=scene.node_tree;tree.nodes.clear()
+    source=tree.nodes.new('CompositorNodeRLayers');composite=tree.nodes.new('CompositorNodeComposite')
+    tree.links.new(source.outputs['Image'],composite.inputs[0])
+    output=tree.nodes.new('CompositorNodeOutputFile');output.base_path=str(folder)
+    output.format.file_format='OPEN_EXR';output.format.color_depth='16';output.file_slots[0].path=name+'-linear'
+    tree.links.new(source.outputs['Image'],output.inputs[0])
+    legacy.render(scene,folder/(name+'.png'))
+
+
 def render(request):
     folder=Path(request['output']);folder.mkdir(parents=True,exist_ok=True)
     scene=reset(request['device'],request.get('resolution',1024));obj=normalized_mesh(request['mesh'])
     vertices,faces=arrays(obj);p,rot=pose_points(vertices,request['matrix'],request['yaw'])
     matrix=np.eye(4);matrix[:3,:3]=rot
     obj.matrix_world=Matrix(matrix) @ Matrix(request['matrix'])
-    camera=camera_for(p,request['elevation'])
+    camera=request.get('camera') or camera_for(p,request['elevation'])
     cam=legacy.make_camera(scene,camera['eye'],camera['target'],fov=camera['fov'])
     illuminate(scene,cam,request['environment'],request.get('light_gain',1.))
     for material in obj.data.materials:
         if not material or not material.use_nodes:continue
         for node in list(material.node_tree.nodes):
-            if node.type=='BSDF_PRINCIPLED':surface_detail(material,node,request['environment'],request.get('dust_gain',1.))
+            if node.type=='BSDF_PRINCIPLED':
+                tree=material.node_tree
+                if not tree.nodes.get('batch_metallic_aov'):
+                    aov=tree.nodes.new('ShaderNodeOutputAOV');aov.name='batch_metallic_aov';aov.aov_name='metallic'
+                    if node.inputs['Metallic'].is_linked:tree.links.new(node.inputs['Metallic'].links[0].from_socket,aov.inputs['Value'])
+                    else:aov.inputs['Value'].default_value=node.inputs['Metallic'].default_value
+                    geometry=tree.nodes.new('ShaderNodeNewGeometry')
+                    dot=tree.nodes.new('ShaderNodeVectorMath');dot.operation='DOT_PRODUCT';dot.inputs[1].default_value=(0,0,1)
+                    tree.links.new(geometry.outputs['Normal'],dot.inputs[0])
+                    upward=tree.nodes.new('ShaderNodeOutputAOV');upward.aov_name='upward';tree.links.new(dot.outputs['Value'],upward.inputs['Value'])
+                surface_detail(material,node,request['environment'],request.get('dust_gain',1.))
             if node.type=='BSDF_PRINCIPLED' and node.inputs['Roughness'].is_linked:
                 adjustment=material.node_tree.nodes.get('batch_roughness_delta')
                 if adjustment is None:
@@ -304,9 +368,7 @@ def render(request):
     polys,anchor=contact_geometry(p,faces,camera,normal=normal)
     # The receiver also participates in object indirect lighting. Camera invisibility
     # keeps holes transparent while preventing an artificially illuminated underside.
-    bpy.ops.mesh.primitive_plane_add(size=20,location=Vector(normal)*-.0005)
-    ground=bpy.context.object
-    ground.rotation_euler=Vector((0,0,1)).rotation_difference(Vector(normal)).to_euler()
+    ground=make_receiver(request,normal)
     mat=bpy.data.materials.new('neutral receiver');mat.use_nodes=True
     mat.node_tree.nodes.get('Principled BSDF').inputs['Base Color'].default_value=(.3,.3,.3,1)
     mat.node_tree.nodes.get('Principled BSDF').inputs['Roughness'].default_value=.9
@@ -320,13 +382,14 @@ def render(request):
     scene.render.resolution_x=scene.render.resolution_y=512
     scene.cycles.samples=16
     obj.visible_camera=False
-    legacy.render(scene,folder/'with-shadow.png')
+    shadow_output(scene,folder,'with-shadow')
     obj.hide_render=True
-    legacy.render(scene,folder/'without-shadow.png')
+    shadow_output(scene,folder,'without-shadow')
     return {'anchor_uv':anchor.tolist() if anchor is not None else None,
             'contact_polygons':[q.tolist() for q in polys], 'camera':camera,
             'resolution':request.get('resolution',1024),'shadow_resolution':512,
-            'device':DEVICE,'passes':['diffuse0001.exr','specular0001.exr']}
+            'device':DEVICE,'passes':['combined0001.exr','diffuse0001.exr','specular0001.exr',
+                'depth0001.exr','metallic0001.exr','upward0001.exr']}
 
 
 def main():

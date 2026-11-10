@@ -166,9 +166,13 @@ class WebTests(unittest.TestCase):
                 payload={'backgrounds':str(background),'assets':['missing'],'count':1,'output':'outside'}
                 self.assertEqual(client.post('/api/batches',json=payload).status_code,400)
                 launch.assert_not_called()
-                payload['assets']=['3'];response=client.post('/api/batches',json=payload)
+                payload.update(assets=['3'],photo_style='scrap_gray',placement_mode='embedded',uncertain_policy='render_review')
+                response=client.post('/api/batches',json=payload)
                 self.assertEqual(response.status_code,202);info=response.json()
                 self.assertTrue(Path(info['output']).is_relative_to(root/'outputs'))
+                saved=json.loads((root/'configs'/(info['id']+'.json')).read_text(encoding='utf8'))
+                self.assertEqual(saved['placement_mode'],'embedded')
+                self.assertEqual(saved['photo_style'],'scrap_gray')
                 launch.assert_called_once_with(info['id'])
                 status=client.get('/api/batches/'+info['id']).json()
                 self.assertFalse(status['running']);self.assertFalse(status['has_results'])
@@ -273,7 +277,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
     async def test_model_quarantine_stops_later_images(self):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);pipe=Pipeline.__new__(Pipeline);pipe.out=root;pipe.store=Store(root/'jobs.sqlite')
-            pipe.model_review={'A':{'mesh_hash':'h','job_id':'prior','defects':[]}}
+            pipe.model_review={'A':{'mesh_hash':'h','job_id':'prior','defects':[],'independent_confirmation':True}}
             pipe.vision=type('CachedVision',(),{'calls':[]})()
             payload={'asset_id':'A','mesh_hash':'h','background':'unused','seed':0}
             pipe.store.initialize('test',[payload])
@@ -306,7 +310,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             pipe.render=render
             candidates=[{'id':'A','target_px':200,'score':1}]
             def compose(*args):
-                path=args[-1];Image.new('RGB',(12,12),(40 if args[-3]['tone']=='scene' else 80,0,0)).save(path)
+                path=args[-1];Image.new('RGB',(12,12),({'scene':40,'darker':80,'cooler':100}.get(args[-3]['tone'],120),0,0)).save(path)
                 crop=path.with_suffix('.crop.jpg');Image.new('RGB',(12,12)).save(crop)
                 return {'checks':{'support':{'status':'pass' if hard_pass else 'fail'}},
                         'image':str(path),'crop':str(crop),'preview':str(crop),'measured_major_px':200}
@@ -346,6 +350,16 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         result,calls=await self.run_loop(0,[RuntimeError('invalid response')])
         self.assertEqual(result['status'],'failed');self.assertTrue(result['unreviewed_draft'])
         self.assertEqual(result['checks']['support']['status'],'pass');self.assertEqual(calls,1)
+
+    async def test_unchanged_pixels_stop_before_another_paid_review(self):
+        result,calls=await self.run_loop(2,[review(2,[Action(kind='chroma',value='more')])])
+        self.assertEqual(calls,1);self.assertEqual(result['reason'],'no_effective_image_change')
+
+    async def test_occluded_structure_does_not_quarantine_model(self):
+        defect=Defect(code='structure',scope='asset',severity='major',visibility='occluded',
+                      region=[.2,.2,.5,.5],evidence='钢料遮挡，无法判断')
+        result,calls=await self.run_loop(0,[review(2,defects=[defect])])
+        self.assertEqual(calls,1);self.assertNotEqual(result['reason'],'asset_structure_requires_review')
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

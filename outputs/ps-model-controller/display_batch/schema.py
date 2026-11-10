@@ -24,6 +24,9 @@ class BatchConfig(Strict):
     provider_config: str | None = None
     render_device: Literal["OPTIX", "CUDA", "CPU"] = "OPTIX"
     offline: bool = False
+    photo_style: Literal['scrap_gray', 'retain_color'] = 'scrap_gray'
+    placement_mode: Literal['auto', 'surface', 'combined', 'embedded'] = 'auto'
+    uncertain_policy: Literal['render_review', 'skip'] = 'render_review'
     cache: str = "work/display-batch-cache"
     # A manifest is a list of {background, asset_id, group}; it fixes evaluation jobs.
     manifest: str | None = None
@@ -107,10 +110,11 @@ class Defect(Strict):
     region: tuple[Unit, Unit, Unit, Unit]
     evidence: str = Field(max_length=160)
     scope: Literal['image','asset'] = 'image'
+    visibility: Literal['visible','occluded','unassessable'] = 'visible'
 
 
 class Action(Strict):
-    kind: Literal["candidate", "material", "light", "tone"]
+    kind: Literal["candidate", "material", "light", "tone", "chroma", "dust", "contrast", "haze", "sharpness"]
     value: str = Field(max_length=32)
 
 
@@ -128,16 +132,25 @@ class Probe(Strict):
     description: str = Field(min_length=2, max_length=100)
 
 
+class StructureConfirmation(Strict):
+    confirmed_damage: bool
+    visibility: Literal['visible','occluded','unassessable']
+    evidence: str = Field(min_length=2, max_length=240)
+
+
 MATERIAL_PROFILES = {"original": 0., "clearer": -.08, "softer": .08, "weathered": .03}
 LIGHT_PROFILES = {"scene": 1., "softer": .65, "defined": 1.25}
 TONE_PROFILES = {"scene": (0., 0.), "darker": (-.25, 0.), "brighter": (.25, 0.),
                  "cooler": (0., -1.5), "warmer": (0., 1.5)}
+PHOTO_CONTROLS = {name: {'auto':1., 'less':.7, 'more':1.3}
+                  for name in ('chroma','dust','contrast','haze','sharpness')}
 
 
 def apply_actions(params, actions, candidate_ids):
     result = dict(params)
     allowed = {"candidate": set(candidate_ids), "material": set(MATERIAL_PROFILES),
                "light": set(LIGHT_PROFILES), "tone": set(TONE_PROFILES)}
+    allowed.update({k:set(v) for k,v in PHOTO_CONTROLS.items()})
     seen = set()
     for action in actions:
         if action.kind in seen or action.value not in allowed[action.kind]:
@@ -149,8 +162,9 @@ def apply_actions(params, actions, candidate_ids):
 
 def version_rank(checks, review):
     hard = sum(c.get("status") == "pass" for c in checks.values())
-    failures = sum(c.get("status") != "pass" for c in checks.values())
+    failures = sum(c.get("status") == "fail" for c in checks.values())
+    unknown = sum(c.get("status") == "unknown" for c in checks.values())
     if review is None:
-        return (-failures, hard, -99, -99, 0)
-    return (-failures, hard, -sum(d.severity == "fatal" for d in review.defects),
+        return (-failures, -unknown, hard, -99, -99, 0)
+    return (-failures, -unknown, hard, -sum(d.severity == "fatal" for d in review.defects),
             -sum(d.severity == "major" for d in review.defects), sum(review.scores.model_dump().values()))

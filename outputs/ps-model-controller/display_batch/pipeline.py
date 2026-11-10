@@ -20,12 +20,14 @@ from .common import ROOT, HERE, atomic_json, file_hash, load_catalog, resolve, s
 from .compose import compose, sample_environment
 from .scene import Scenes, choose_candidates, projection_geometry, fitted_masks, fit_checks
 from .schema import (BatchConfig, Review, Probe, MATERIAL_PROFILES, LIGHT_PROFILES,
-                     TONE_PROFILES, apply_actions, version_rank)
+                     TONE_PROFILES, PHOTO_CONTROLS, StructureConfirmation, apply_actions, version_rank)
+from .pile import support_union, diagnostic, depth_order
+from .geometry import contact_support
 from .store import Store
 from .worker import Blender, RenderUnavailable
 
-RENDER_VERSION='pbr-linear-shadow-v7'
-COMPOSE_VERSION='highlight-preserving-v3'
+RENDER_VERSION='pbr-linear-patina-v9'
+COMPOSE_VERSION='scrap-gray-pile-v4'
 
 
 def final_resolution(candidate):
@@ -48,6 +50,12 @@ REVIEW_PROMPT += ''' Defect scope is image for view/lighting/appearance problems
 intrinsic mesh damage. Do not call a foreshortened part missing merely because the reference is upright.
 An absent separately operated handle is intentional when the object name says so. Lack of foreground
 occlusion on an open floor is not itself a defect. Contact shadow must agree with the visible supports.'''
+REVIEW_PROMPT += ''' The requested photographic style is strongly weathered grey scrap, not saturated showroom paint.
+Partial embedding and 10-40 percent foreground occlusion are intentional. A feature behind steel, facing away,
+or below readable pixel size has visibility occluded/unassessable: do not claim intrinsic model damage.
+Only visible, evidenced geometry loss can be asset scope; a separate unobstructed review must confirm it.
+Chroma/dust/contrast/haze/sharpness actions use auto/less/more; more chroma means MORE desaturation.
+Do not demand an occluded identifying feature to become visible, and do not confuse dust with missing geometry.'''
 
 
 @contextmanager
@@ -89,8 +97,10 @@ def make_jobs(config,catalog):
         k=str(job['asset_id']);path=resolve(job['background'])
         if k not in catalog:raise ValueError('未知模型编号：'+k)
         if not path.is_file():raise ValueError('背景不存在：'+str(path))
+        seed=job.get('seed',config.seed+i)
+        if type(seed) is not int or seed<0:raise ValueError('invalid manifest seed')
         result.append({**job,'background':str(path),'asset_id':k,'background_hash':file_hash(path),
-                       'mesh_hash':catalog[k]['mesh_hash'],'seed':config.seed+i})
+                       'mesh_hash':catalog[k]['mesh_hash'],'seed':seed})
     return result
 
 
@@ -112,6 +122,7 @@ def catalog_preflight(catalog):
 
 
 def write_summary(out,store,usage=None,run=None):
+    out=Path(out).resolve()
     rows=store.rows();records=[r['result'] for r in rows if r['result']]
     with (out/'results.jsonl').open('w',encoding='utf8') as f:
         for record in records:f.write(json.dumps(record,ensure_ascii=False)+'\n')
@@ -124,7 +135,9 @@ def write_summary(out,store,usage=None,run=None):
     times=[r['seconds'] for r in records if 'seconds' in r]
     summary={'version':VERSION,'counts':store.counts(),'groups':groups,'formal_acceptance':'not_changed',
              'run':run,'usage_current_run':usage,'seconds_median':statistics.median(times) if times else None,
-             'seconds_p95':sorted(times)[min(len(times)-1,math.ceil(len(times)*.95)-1)] if times else None}
+             'seconds_p95':sorted(times)[min(len(times)-1,math.ceil(len(times)*.95)-1)] if times else None,
+             'generated_pngs':sum(bool(r.get('image')) for r in records),
+             'image_rate':sum(bool(r.get('image')) for r in records)/max(1,len(rows))}
     atomic_json(out/'summary.json',summary)
     sections=[]
     for r in records:
@@ -151,6 +164,7 @@ class Pipeline:
         self.cpu=asyncio.Semaphore(config.cpu_concurrency)
         self.prepare_lock=asyncio.Lock()
         self.model_review={}
+        self.structure_locks={}
         review_path=self.out/'model-review.json'
         if review_path.is_file():self.model_review=json.loads(review_path.read_text(encoding='utf8'))
 
@@ -183,6 +197,8 @@ class Pipeline:
              'roughness_delta':MATERIAL_PROFILES[params['material']],
              'dust_gain':1.6 if params['material']=='weathered' else 1.,
              'light_gain':LIGHT_PROFILES[params['light']]}
+        if candidate.get('camera'):req['camera']=candidate['camera']
+        if candidate.get('receiver',{}).get('patches'):req['receiver']=candidate['receiver']
         key=signature(RENDER_VERSION,asset['mesh_hash'],req,self.config.render_device,'blender-4.5.3')
         folder=self.cache/'renders'/key;folder.mkdir(parents=True,exist_ok=True)
         info=folder/'result.json';hit=info.is_file()
@@ -193,6 +209,8 @@ class Pipeline:
         return folder,meta,environment,samples,hit
 
     async def validate_local_pose(self,asset,scene,candidate):
+        if candidate.get('placement'):
+            return await self.validate_pile_pose(asset,scene,candidate)
         normal=candidate['plane_normal']
         key=signature('terrain-physics-v1',asset['physics_signature'],candidate['matrix'],normal)
         path=Path(asset['folder'])/'terrain'/(key+'.json')
@@ -228,6 +246,97 @@ class Pipeline:
                          'plane_normal':normal,'basis':candidate['plane_basis']})
         return candidate
 
+    async def validate_pile_pose(self,asset,scene,candidate):
+        from .geometry import transformed,horizontal_angle
+        candidate=dict(candidate);candidate['allow_uncertain']=self.config.uncertain_policy=='render_review'
+        receiver=candidate['receiver'];data=np.load(asset['geometry'])
+        original=transformed(data['vertices'],candidate['matrix'])
+        if original[:,2].min()<-.004:raise ValueError('confirmed_initial_ground_penetration')
+        key=signature('finite-support-physics-v1',asset['physics_signature'],candidate['matrix'],receiver['signature'])
+        path=Path(asset['folder'])/'terrain'/(key+'.json');hit=path.is_file()
+        if receiver['patches']:
+            if hit:physics=json.loads(path.read_text(encoding='utf8'))
+            else:
+                physics=await self.blender.ask('settle',{'geometry':asset['geometry'],
+                    'proxy':str(Path(asset['folder'])/'collision.json'),'axis':asset['axis'],
+                    'initial_matrices':[candidate['matrix']],'assembly':asset['semantic']['assembly'],
+                    'plane_normal':[0,0,1],'receiver':receiver},timeout=90)
+                atomic_json(path,physics)
+            simulated=physics['poses'][0]
+        else:simulated={'stable':False,'failure_codes':['receiver_geometry_insufficient']}
+        pose={'matrix':candidate['matrix'],'stable':False,'status':'unknown','axis_angle_deg':candidate['axis_angle_deg']}
+        if simulated['stable']:
+            pose=simulated
+        elif not candidate['allow_uncertain']:
+            raise ValueError('estimated_support_simulation_'+','.join(simulated['failure_codes']))
+        else:
+            candidate['uncertainties']=list(candidate['uncertainties'])+['hidden_support_or_height_unknown']
+        # Keep the scene camera fixed when a simulated object moves; update the contact pixel.
+        middle=candidate['elevation'];camera=candidate['camera'];full=candidate['full_px']
+        geom=projection_geometry(data['vertices'],data['faces'],pose,0,middle,camera=camera)
+        if geom['anchor'] is None:raise ValueError('no_visible_contact_geometry')
+        anchor=(np.asarray(candidate['offset'])+geom['anchor']*full).tolist()
+        fit=fitted_masks(geom,anchor,full,scene)
+        if fit is None:raise ValueError('local_pose_outside_image')
+        x,y,r,b=fit['bounds'];mask=fit['hull']
+        if np.any(mask&scene['protected'][y:b,x:r]):raise ValueError('protected_region_conflict')
+        if (mask&scene['allowed'][y:b,x:r]).sum()/max(1,mask.sum())<.98:raise ValueError('local_pose_outside_hopper')
+        cover=contact_support(
+            fit['contact'],support_union(scene,candidate['support_ids'],fit['bounds']))
+        if not cover or min(cover)<.9:
+            if not candidate['allow_uncertain']:raise ValueError('support_coverage_insufficient')
+            candidate['uncertainties']=list(candidate['uncertainties'])+['support_coverage_insufficient']
+        tilt=horizontal_angle(asset['axis'],pose['matrix'])
+        if tilt>15:raise ValueError('confirmed_non_horizontal_pose')
+        candidate.update(matrix=pose['matrix'],anchor_px=anchor,offset=fit['offset'],bounds=fit['bounds'],
+            target_px=max(r-x,b-y),expected_major_px=float(np.ptp(geom['uv'],axis=0).max()*full),
+            anchor_uv=geom['anchor'].tolist(),contact_polygons=[p.tolist() for p in geom['contacts']],
+            contact_min=min(cover) if cover else 0,axis_angle_deg=tilt)
+        endpoint_risks=[]
+        for elevation in candidate['elevation_interval']:
+            endpoint=projection_geometry(data['vertices'],data['faces'],pose,0,elevation)
+            other=fitted_masks(endpoint,anchor,full,scene)
+            if other is None:endpoint_risks.append({'elevation':elevation,'reason':'outside_image'});continue
+            ox,oy,rr,bb=other['bounds'];m=other['hull']
+            coverage=contact_support(
+                other['contact'],support_union(scene,candidate['support_ids'],other['bounds']))
+            if np.any(m&scene['protected'][oy:bb,ox:rr]) or not coverage or min(coverage)<.9:
+                endpoint_risks.append({'elevation':elevation,'reason':'support_or_clearance_uncertain'})
+        candidate['camera_risks']=endpoint_risks
+        if endpoint_risks and not candidate['allow_uncertain']:raise ValueError('camera_interval_uncertain')
+        if receiver['height_confidence']=='unknown':
+            candidate['uncertainties']=list(candidate['uncertainties'])+['support_heights_uncertain']
+        candidate['terrain_physics']={**pose,'signature':key,'cache_hit':hit,'simulation':simulated,
+            'status':'pass' if pose.get('stable') and receiver['height_confidence']!='unknown' else 'unknown',
+            'basis':receiver['basis'],'hidden_heights':receiver['hidden_heights']}
+        return candidate
+
+    async def confirm_structure(self,asset,candidate,scene,defects):
+        # One cached, independent unoccluded orbit check per model; no single composite quarantines it.
+        key=signature('structure-confirm-v1',asset['mesh_hash'],file_hash(asset['board']))
+        folder=self.cache/'structure-confirm'/key;folder.mkdir(parents=True,exist_ok=True)
+        answer_path=folder/'answer.json'
+        if answer_path.is_file():return StructureConfirmation.model_validate_json(answer_path.read_text(encoding='utf8'))
+        environment,_=sample_environment(scene,candidate)
+        render_path=folder/'result.json'
+        if not render_path.is_file():
+            metadata=await self.blender.ask('render',{'mesh':asset['mesh'],'matrix':asset['poses'][0]['matrix'],
+                'yaw':90,'elevation':45,'environment':environment,'resolution':512,'roughness_delta':0,
+                'light_gain':1,'dust_gain':1,'output':str(folder)},timeout=240)
+            atomic_json(render_path,metadata)
+        answer=await self.vision.ask('structure-confirm',StructureConfirmation,
+            'Compare the independent unobstructed render with the CURRENT approved model reference. '
+            'Only confirm visible intrinsic mesh damage, never a hidden/rear/tiny feature or intentional revision. '
+            'If reference/view is insufficient return unassessable and confirmed_damage=false. Do not evaluate color.',
+            {'name':asset['name'],'intentional_revisions':'Use the current model; detached jack handle intentionally removed, '
+             'one can/bottle only, cylinder wall intentionally closed.','suspected':[d.model_dump() for d in defects]},
+            [folder/'object.png',asset['board']])
+        atomic_json(answer_path,answer.model_dump());return answer
+
+    def default_params(self,candidate):
+        return {'candidate':candidate,'material':'original','light':'scene','tone':'scene',
+                'photo_style':self.config.photo_style,**{k:'auto' for k in PHOTO_CONTROLS}}
+
     async def job(self,job):
         ident=job['id'];payload=job['payload'];start=time.monotonic();calls_before=len(self.vision.calls)
         asyncio.current_task().set_name(ident)
@@ -238,7 +347,7 @@ class Pipeline:
         best=None
         try:
             held=getattr(self,'model_review',{}).get(payload['asset_id'])
-            if held and held.get('mesh_hash')==payload.get('mesh_hash'):
+            if held and held.get('independent_confirmation') and held.get('mesh_hash')==payload.get('mesh_hash'):
                 result.update(reason='asset_structure_requires_review',model_review=held);return result
             self.store.checkpoint(ident,'asset',job['checkpoint'] or {})
             asset=await self.prepare_asset(payload['asset_id'])
@@ -253,12 +362,12 @@ class Pipeline:
             result['scene_signature']=scene['key'];result['physics_signature']=asset['physics_signature']
             async with self.cpu:
                 stage_start=time.monotonic()
-                candidates,rejected=await asyncio.to_thread(choose_candidates,asset,scene,payload['seed'])
+                candidates,rejected=await asyncio.to_thread(choose_candidates,asset,scene,payload['seed'],self.config)
             result['timings']['placement_seconds']=round(time.monotonic()-stage_start,3)
             atomic_json(folder/'candidates.json',{'candidates':candidates,'rejected':rejected})
             result['rejections']=rejected
             if not candidates:
-                result['reason']='no_supported_lying_candidate';return result
+                result['reason']='no_geometric_candidate';return result
             # Render at most three coarse candidates; the same ranked winner starts the final loop.
             coarse=[];validated=[]
             for candidate in candidates:
@@ -268,10 +377,15 @@ class Pipeline:
                     environment,samples=await asyncio.to_thread(sample_environment,scene,candidate) if 'plane_normal' in candidate else (None,None)
                 except ValueError as failure:
                     rejected.append({'candidate':candidate['id'],'reason':str(failure)});continue
-                params={'candidate':candidate['id'],'material':'original','light':'scene','tone':'scene'}
+                params=self.default_params(candidate['id'])
                 rendered=await self.render(asset,scene,candidate,params,512)
                 image=folder/(candidate['id']+'-coarse.png')
                 comp=await asyncio.to_thread(compose,scene,candidate,*rendered[:4],params,payload['seed'],image)
+                if any(c['status']=='fail' for c in comp['checks'].values()):
+                    rejected.append({'candidate':candidate['id'],'reason':'explicit_composite_check_failed',
+                                     'checks':comp['checks']});continue
+                if candidate.get('placement'):
+                    diagnostic(scene,candidate,folder/(candidate['id']+'-geometry.jpg'))
                 coarse.append({'candidate':candidate['id'],'image':str(image),
                                'hard_failures':sum(c['status']!='pass' for c in comp['checks'].values())})
                 validated.append(candidate)
@@ -288,8 +402,8 @@ class Pipeline:
                 draw.text((384*i+10,8),item['candidate'],fill='white')
             alternatives.save(folder/'alternatives.jpg',quality=90)
             ranked=sorted(zip(candidates,coarse),key=lambda v:(v[1]['hard_failures'],-v[0]['score']))
-            params={'candidate':ranked[0][0]['id'],'material':'original','light':'scene','tone':'scene'}
-            seen=set();best=None;best_rank=None;no_gain=0;reason='iterations_exhausted'
+            params=self.default_params(ranked[0][0]['id'])
+            seen=set();seen_images=set();best=None;best_rank=None;no_gain=0;reason='iterations_exhausted'
             for iteration in range(self.config.max_iterations+1):
                 psig=signature(params)
                 if psig in seen:reason='repeated_parameters';break
@@ -302,12 +416,21 @@ class Pipeline:
                 draft={**comp,'iteration':iteration,'params':params.copy(),
                        'render_cache_hit':hit,'image_hash':file_hash(image)}
                 atomic_json(folder/f'draft-{iteration}.json',draft)
+                if any(c['status']=='fail' for c in comp['checks'].values()):
+                    result['rejections'].append({'candidate':candidate['id'],'reason':'final_program_checks_failed',
+                        'checks':comp['checks']})
+                    reason='final_program_checks_failed'
+                    break
+                if draft['image_hash'] in seen_images:
+                    reason='no_effective_image_change';break
+                seen_images.add(draft['image_hash'])
                 self.store.checkpoint(ident,'review_request',{'last_iteration':iteration,
                     'params':params,'draft':str(folder/f'draft-{iteration}.json')})
                 review=await self.vision.ask('review',Review,REVIEW_PROMPT,
                     {'name':asset['name'],'features':asset['semantic']['key_features'],'params':params,
                      'allowed':{'candidate':[c['id'] for c in candidates], 'material':list(MATERIAL_PROFILES),
-                                'light':list(LIGHT_PROFILES),'tone':list(TONE_PROFILES)},
+                                'light':list(LIGHT_PROFILES),'tone':list(TONE_PROFILES),
+                                **{k:list(v) for k,v in PHOTO_CONTROLS.items()}},
                      'profile_meanings':{'clearer':'reduce roughness, stronger existing metal highlights',
                          'softer':'increase roughness, soften specular reflection',
                          'weathered':'increase light surface dust on exposed paint while retaining bare-metal reflections',
@@ -325,12 +448,21 @@ class Pipeline:
                 else:no_gain+=1
                 if all(c['status']=='pass' for c in comp['checks'].values()) and review.passes():
                     result['status']='accepted_display';reason='display_checks_passed';best=entry;break
-                if any(d.code=='structure' and d.scope=='asset' and d.severity in ('major','fatal') for d in review.defects):
-                    if not hasattr(self,'model_review'):self.model_review={}
-                    self.model_review[payload['asset_id']]={'mesh_hash':payload.get('mesh_hash'),
-                        'job_id':ident,'defects':[d.model_dump() for d in review.defects if d.scope=='asset']}
-                    atomic_json(self.out/'model-review.json',self.model_review)
-                    reason='asset_structure_requires_review';break
+                suspects=[d for d in review.defects if d.code=='structure' and d.scope=='asset'
+                          and d.visibility=='visible' and d.severity in ('major','fatal')]
+                if suspects:
+                    if not hasattr(self,'structure_locks'):self.structure_locks={}
+                    async with self.structure_locks.setdefault(payload['asset_id'],asyncio.Lock()):
+                        confirmation=await self.confirm_structure(asset,candidate,scene,suspects)
+                    entry['structure_confirmation']=confirmation.model_dump()
+                    atomic_json(folder/f'iteration-{iteration}.json',entry)
+                    if confirmation.confirmed_damage and confirmation.visibility=='visible':
+                        if not hasattr(self,'model_review'):self.model_review={}
+                        self.model_review[payload['asset_id']]={'mesh_hash':payload.get('mesh_hash'),
+                            'job_id':ident,'independent_confirmation':True,'confirmation':confirmation.model_dump(),
+                            'defects':[d.model_dump() for d in suspects]}
+                        atomic_json(self.out/'model-review.json',self.model_review)
+                        reason='asset_structure_requires_review';break
                 if iteration>=self.config.max_iterations:break
                 if no_gain>=2:reason='no_improvement';break
                 if not review.actions:reason='no_valid_action';break
@@ -343,7 +475,10 @@ class Pipeline:
                 crop=dest/(ident+'.crop.jpg');shutil.copy2(best['crop'],crop)
                 result.update(image=str(final),crop=str(crop),best_iteration=best['iteration'],
                               checks=best['checks'],scores=best['review']['scores'],
-                              measured_major_px=best['measured_major_px'])
+                              measured_major_px=best['measured_major_px'],
+                              placement=best.get('placement','surface'),support_ids=best.get('support_ids',[]),
+                              occlusion_fraction=best.get('occlusion_fraction'),photo=best.get('photo'),
+                              evidence_confidence=best.get('evidence_confidence','unknown'))
             result['reason']=reason
             return result
         except (ProviderUnavailable,RenderUnavailable):

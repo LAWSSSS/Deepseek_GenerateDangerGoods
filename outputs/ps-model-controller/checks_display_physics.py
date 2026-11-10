@@ -26,7 +26,7 @@ def fixture(folder,name,pieces):
 
 
 async def main():
-    out=ROOT/'outputs/多背景批量-物理回归-20261110';out.mkdir(parents=True,exist_ok=True)
+    out=ROOT/'outputs/摄影嵌入-物理回归-20261110';out.mkdir(parents=True,exist_ok=True)
     worker=Blender(out/'worker','CPU');records={}
     try:
         with tempfile.TemporaryDirectory(prefix='display-physics-') as directory:
@@ -54,6 +54,18 @@ async def main():
             inclined=await worker.ask('settle',request)
             assert not inclined['poses'][0]['stable'],inclined
             records['cylinder_roll_rejected']={'passed':True,'flat':flat,'inclined':inclined}
+            patches=[{'vertices':[[a,-1,0],[b,-1,0],[b,1,0],[a,1,0]],'faces':[[0,1,2],[0,2,3]]}
+                     for a,b in ((-1,-.35),(.35,1))]
+            bridge=trimesh.creation.box(extents=[1.4,.2,.15]);bridge.apply_translation([0,0,.075])
+            request=fixture(folder,'bridge',[bridge]);request['receiver']={'patches':patches}
+            bridged=await worker.ask('settle',request)
+            assert bridged['poses'][0]['stable'],bridged
+            records['separate_patches_support_bridge']={'passed':True,**bridged}
+            block=trimesh.creation.box(extents=[.2,.2,.15]);block.apply_translation([0,0,.075])
+            request=fixture(folder,'gap',[block]);request['receiver']={'patches':patches}
+            gap=await worker.ask('settle',request)
+            assert not gap['poses'][0]['stable'],gap
+            records['convex_gap_is_not_support']={'passed':True,**gap}
     finally:await worker.close()
     atomic_json(out/'checks.json',{'kind':'actual_blender_bullet','device':'CPU','checks':records,
                                   'seconds':worker.seconds})

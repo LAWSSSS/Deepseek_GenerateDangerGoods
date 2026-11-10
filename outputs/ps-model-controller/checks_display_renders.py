@@ -13,9 +13,9 @@ from display_batch.pipeline import Pipeline,final_resolution
 from display_batch.schema import BatchConfig
 
 
-async def main(batch,limit):
+async def main(batch,limit,out):
     batch=Path(batch);raw=json.loads((batch/'config.json').read_text(encoding='utf8'))
-    raw.update(output=str(ROOT/'outputs/多背景批量-渲染回归-20261110'),offline=True)
+    raw.update(output=out,offline=True)
     pipe=Pipeline(BatchConfig.model_validate(raw))
     async def missing(*args,**kwargs):raise AssertionError('actual render evidence missing; no new render permitted')
     pipe.blender.ask=missing
@@ -52,4 +52,5 @@ async def main(batch,limit):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--batch',required=True);parser.add_argument('--limit',type=int,default=3)
-    args=parser.parse_args();asyncio.run(main(args.batch,args.limit))
+    parser.add_argument('--out',required=True)
+    args=parser.parse_args();asyncio.run(main(args.batch,args.limit,args.out))

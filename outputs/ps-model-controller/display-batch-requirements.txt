@@ -1,2 +1,4 @@
 # Additional collision dependency; use the existing project Python environment.
 coacd==1.0.14
+opencolorio==2.4.2
+numba==0.68.1
