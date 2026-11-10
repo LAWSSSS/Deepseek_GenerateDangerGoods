@@ -186,7 +186,8 @@ function makeCandidate(source,job) {
         if(job.shade){
             var shadow=importLayer(doc,job.shade.path);
             doc.activeLayer=shadow;moveTo(shadow,job.shade.x-x0,job.shade.y-y0);
-            shadow.name="Contact shadow on support";shadow.blendMode=BlendMode.MULTIPLY;shadow.opacity=55;
+            shadow.name="Contact shadow on support";shadow.blendMode=BlendMode.MULTIPLY;
+            shadow.opacity=job.shade.opacity===undefined ? 55 : job.shade.opacity;
             shadeBounds=bounds(shadow);
         }
         if(job.contact_delta){

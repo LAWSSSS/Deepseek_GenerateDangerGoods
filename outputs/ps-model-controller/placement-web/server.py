@@ -14,7 +14,7 @@ from pathlib import Path
 import cv2
 import httpx
 import numpy as np
-from PIL import Image, ImageDraw, ImageFilter, ImageOps
+from PIL import Image, ImageDraw, ImageOps
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -26,10 +26,9 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(HERE.parent))
 from scene_v2 import Perception, digest
-from relight import ambient_match, apply_contact_ao, estimate_render_environment
-from photometry import quiet_photo
-from contact_shadow import make_contact_shadow
-from occlusion import refine_thin_mask, thin_line_seeds
+from relight import aligned_alpha, ambient_match, estimate_render_environment, local_samples
+from contact_shadow import MIN_SUPPORT, contact_clusters, contact_coverage, make_contact_shadow, projected_footprint
+from occlusion import foreground_matte, refine_thin_mask, thin_line_seeds
 from lighting_estimate import estimate_light_from_rods
 from review_feedback import load_feedback
 
@@ -685,8 +684,8 @@ SESSIONS = {}
 ENGINE = None
 ENGINE_LOCK = asyncio.Lock()
 CHAT_ACTIVE = set()
-RENDER_ALGORITHM = 'scene-light-contact-v7'
-ANALYSIS_ALGORITHM = 'native-thin-occlusion-v1'
+RENDER_ALGORITHM = 'mesh-contact-camera-v8'
+ANALYSIS_ALGORITHM = 'native-thin-occlusion-v2'
 
 
 def err(message, status=400):
@@ -1092,7 +1091,18 @@ async def update_state(request):
         return err(e)
 
 
-def compute_candidates(s, revision, state):
+def placement_box(state):
+    side = round(state['size'])
+    return round(state['x'] - side / 2), round(state['y'] - side / 2), side
+
+
+def scene_rect(s, state):
+    x, y, side = state['x'], state['y'], state['size']
+    return (max(0, int(x - side)), max(0, int(y - side)),
+            min(s['width'], int(x + side)), min(s['height'], int(y + side)))
+
+
+def compute_candidates(s, revision, state, object_alpha=None):
     global ENGINE
     if ENGINE is None:
         ENGINE = Perception(ROOT / 'work/v2-models', ROOT / 'work/v2-cache')
@@ -1101,9 +1111,6 @@ def compute_candidates(s, revision, state):
     x, y, radius = state['x'] * sx, state['y'] * sy, state['size'] * max(sx, sy) * .65
     yy, xx = np.ogrid[:rgb.shape[0], :rgb.shape[1]]
     roi = ((xx-x)**2 + (yy-y)**2) < radius**2
-    # Provisional contact neighborhood only: projected bottom of the square
-    # is not a physical contact point and cannot prove a support relation.
-    contact = (np.abs(xx-x)<radius*.50)&(np.abs(yy-(y+radius*.42))<radius*.22)
     candidates = []
     folder = Path(s['directory']) / f'analysis-{revision}'
     folder.mkdir(exist_ok=True)
@@ -1120,18 +1127,23 @@ def compute_candidates(s, revision, state):
     with Image.open(s['background']) as source:
         frame=ImageOps.exif_transpose(source).convert('RGB')
     side=state['size'];cx=state['x'];cy=state['y']
-    rect=(max(0,int(cx-side)),max(0,int(cy-side)),min(original[0],int(cx+side)),min(original[1],int(cy+side)))
+    rect = scene_rect(s, state)
     for i, (mask, _) in enumerate(candidates[:12], 1):
         ys, xs = np.nonzero(mask)
         full = cv2.resize(mask.astype('uint8'), original, interpolation=cv2.INTER_NEAREST)>0
         full, refinement=refine_thin_mask(ENGINE,frame,full,rect,radius=min(16,max(5,round(2/max(sx,sy)))))
         Image.fromarray(full.astype('uint8')*255).save(folder / f'{i}.png')
         results.append({'id': i, 'bounds': [round(xs.min()/sx), round(ys.min()/sy), round((xs.max()+1)/sx), round((ys.max()+1)/sy)],
-                        'support_score':round(float((mask & contact).sum()/max(1,contact.sum())),3),
+                        'support_score': None,
                         'boundary_refinement':refinement,
                         'relative_depth': round(float(np.median(depth[mask])), 3), 'order': 'unknown'})
     local=frame.crop(rect)
-    for seed in thin_line_seeds(local,(cx-rect[0],cy-rect[1]),side,limit=4):
+    silhouette = None
+    if object_alpha is not None:
+        ox, oy, pixels = placement_box(state)
+        alpha = object_alpha.resize((pixels, pixels), Image.Resampling.LANCZOS)
+        silhouette = aligned_alpha(alpha, local.size, ox - rect[0], oy - rect[1]) >= 128
+    for seed in thin_line_seeds(local, (cx-rect[0],cy-rect[1]), side, limit=4, silhouette=silhouette):
         full=np.zeros((original[1],original[0]),dtype=bool)
         full[rect[1]:rect[3],rect[0]:rect[2]]=seed
         full,refinement=refine_thin_mask(ENGINE,frame,full,rect,radius=6)
@@ -1151,7 +1163,7 @@ def compute_candidates(s, revision, state):
         Image.fromarray(full.astype('uint8')*255).save(folder/f'{i}.png')
         depthmask=cv2.resize(full.astype('uint8'),(depth.shape[1],depth.shape[0]),interpolation=cv2.INTER_NEAREST)>0
         results.append({'id':i,'bounds':[int(xs.min()),int(ys.min()),int(xs.max()+1),int(ys.max()+1)],
-                        'support_score':0,'boundary_refinement':refinement,'kind':'thin_line_proposal',
+                        'support_score':None,'boundary_refinement':refinement,'kind':'thin_line_proposal',
                         'relative_depth':round(float(np.median(depth[depthmask])),3) if depthmask.any() else None,
                         'order':'unknown'})
     return results
@@ -1259,79 +1271,63 @@ async def support_selection(request):
         return err(e)
 
 
-def foreground(s):
-    mask = Image.new('L', (s['width'], s['height']))
-    for n in s['selected']:
-        with Image.open(Path(s['directory']) / f"analysis-{s['revision']}" / f'{n}.png') as im:
-            mask = Image.fromarray(np.maximum(np.asarray(mask), np.asarray(im.convert('L'))))
-    return mask
+def region_mask(s, ident, rect):
+    path = Path(s['directory']) / f"analysis-{s['revision']}" / f'{ident}.png'
+    with Image.open(path) as image:
+        return np.asarray(image.convert('L').crop(rect)) >= 128
 
 
-def match_local_photo(s, obj, x, y):
-    """Use selected support, or explicitly unverified nearby scene pixels."""
-    n = s.get('support')
-    side = obj.width
-    pad = round(side*.5)
-    crop = (max(0,x-pad), max(0,y-pad), min(s['width'],x+side+pad), min(s['height'],y+side+pad))
-    if n:
-        path = Path(s['directory']) / f"analysis-{s['revision']}" / f'{n}.png'
-        with Image.open(path) as im:
-            mask = np.asarray(im.convert('L').crop(crop)) > 127
-    else:
-        # A surrounding-scene sample is a fallback for light and color only;
-        # it is not evidence of a common support or of a 3-D light direction.
-        mask = np.ones((crop[3]-crop[1],crop[2]-crop[0]),dtype=bool)
-    front = np.asarray(foreground(s).crop(crop)) >= 128
-    with Image.open(s['background']) as im:
-        frame = im.convert('RGB').crop(crop)
-    if n:
-        yy, xx = np.indices(mask.shape)
-        cx, cy = x-crop[0]+side/2, y-crop[1]+side/2
-        distance = np.sqrt((xx-cx)**2 + (yy-cy)**2)
-        nearby = mask & ~front & (distance > side*.50) & (distance < side*.92)
-        try:
-            matched, evidence = quiet_photo(frame, mask, nearby, obj, x-crop[0], y-crop[1], side)
-            core = np.asarray(obj.getchannel('A')) >= 190
-            before_lab = cv2.cvtColor(np.asarray(obj.convert('RGB')), cv2.COLOR_RGB2LAB)
-            after_lab = cv2.cvtColor(np.asarray(matched.convert('RGB')), cv2.COLOR_RGB2LAB)
-            before_ab = before_lab[core][:, 1:].astype(np.float32) - 128
-            after_ab = after_lab[core][:, 1:].astype(np.float32) - 128
-            before_chroma = float(np.median(np.linalg.norm(before_ab, axis=1))) if core.sum() else 0
-            after_chroma = float(np.median(np.linalg.norm(after_ab, axis=1))) if core.sum() else 0
-            # Strongly coloured objects (red paint, labels) must keep their
-            # identity; the local steel field must not turn them grey/brown.
-            if before_chroma > 20 and after_chroma < before_chroma*.62:
-                raise ValueError('quiet_photo_desaturated_colour')
-            photo = {
-                'status': 'estimated',
-                'method': 'bounded_local_light_field',
-                'support_verification': s.get('support_mode') or 'user_selected_pending',
-                'light_direction': 'unknown',
-                'nearby_samples': int(nearby.sum()),
-                'quiet_photo': evidence,
-                'object_after': None,
-            }
-            before = np.asarray(obj.convert('RGB'))
-            after = np.asarray(matched.convert('RGB'))
-            alpha = np.asarray(obj.getchannel('A')) >= 190
-            if alpha.sum() >= 60:
-                photo['object_before'] = {
-                    'luma_p20_p50_p80': [round(float(v), 1) for v in
-                                         np.percentile(cv2.cvtColor(before, cv2.COLOR_RGB2GRAY)[alpha], [20, 50, 80])],
-                }
-                photo['object_after'] = {
-                    'luma_p20_p50_p80': [round(float(v), 1) for v in
-                                         np.percentile(cv2.cvtColor(after, cv2.COLOR_RGB2GRAY)[alpha], [20, 50, 80])],
-                }
+def foreground(s, rect=None):
+    l, t, r, b = rect or (0, 0, s['width'], s['height'])
+    mask = np.zeros((b - t, r - l), dtype=bool)
+    for ident in s['selected']:
+        mask |= region_mask(s, ident, (l, t, r, b))
+    return Image.fromarray(mask.astype(np.uint8) * 255)
+
+
+def review_contact(s, footprint, regions, front, reason=None):
+    """A region is useful only if it contains every projected contact cluster."""
+    clusters = contact_clusters(footprint) if np.count_nonzero(footprint) >= 4 and not reason else []
+    thin = {c['id'] for c in s['candidates'] if c.get('kind') == 'thin_line_proposal'}
+    scores = {n: min(contact_coverage(clusters, mask & ~front))
+              for n, mask in regions.items() if clusters and n not in thin and n not in s['selected']}
+    ranked = sorted(scores, key=scores.get, reverse=True)
+    ident = s.get('support') if s.get('support_mode') == 'user_confirmed' else None
+    mode = 'user_confirmed' if ident is not None else None
+    if ident is None and ranked and scores[ranked[0]] >= MIN_SUPPORT:
+        if len(ranked) > 1 and scores[ranked[0]] - scores[ranked[1]] < .06:
+            reason = '多个区域与接触斑重合，请确认承托面'
+        else:
+            ident, mode = ranked[0], 'estimated'
+    fraction = scores.get(ident)
+    supported = fraction is not None and fraction >= MIN_SUPPORT
+    if not supported and not reason:
+        reason = ('接触斑投影过小，无法核对承托区域' if not clusters else
+                  '所选区域未覆盖每个接触斑' if mode == 'user_confirmed' else
+                  '没有候选区域覆盖每个接触斑')
+    evidence = {
+        'status': 'projected_overlap' if supported else 'unknown',
+        'source': 'projected_mesh_low_points',
+        'patches': len(clusters), 'threshold': MIN_SUPPORT,
+        'min_coverage': round(fraction, 4) if fraction is not None else None,
+        'best_coverage': round(max(scores.values()), 4) if scores else None,
+        'physical_support': 'unknown', 'reason': reason,
+    }
+    return ident, mode, regions[ident] if supported else None, scores, evidence
+
+
+def match_local_photo(s, frame, obj, x, y, support, front):
+    """Use the support sample when it has enough neighbouring pixels."""
+    seed = int(s['background_sha256'][:16], 16)
+    nearby = np.ones_like(front, dtype=bool)
+    if support is not None:
+        matched, photo = ambient_match(frame, support, front, obj, x, y, anchored=True, seed=seed)
+        if photo['status'] == 'measured':
+            photo['support_verification'] = 'projected_support_only'
             return matched, photo
-        except (ValueError, KeyError, OSError, cv2.error, IndexError):
-            pass
-    result, photo = ambient_match(frame, mask, front, obj, x-crop[0], y-crop[1])
-    photo['support_verification'] = (s.get('support_mode') or 'surrounding_scene_unverified')
-    if n:
-        photo['quiet_photo_fallback'] = True
-        photo['quiet_photo_fallback_reason'] = 'colored_object_or_insufficient_local_samples'
-    return result, photo
+    matched, photo = ambient_match(frame, nearby, front, obj, x, y, seed=seed)
+    photo['support_verification'] = 'surrounding_scene_unverified'
+    return matched, photo
 
 
 async def preview(request):
@@ -1357,7 +1353,7 @@ async def preview(request):
             state = s['state'].copy()
             try:
                 async with ENGINE_LOCK:
-                    found = await asyncio.to_thread(compute_candidates,s,revision,state)
+                    found = await asyncio.to_thread(compute_candidates, s, revision, state, obj.getchannel('A'))
                 async with s['lock']:
                     if revision != s['revision'] or old_generation != s['generation']:
                         return err('摆位或遮挡已变化，忽略旧分析',409)
@@ -1366,19 +1362,15 @@ async def preview(request):
                     s['generation'] += 1
                     save(s)
             except (FileNotFoundError,RuntimeError,ValueError):
-                # Continue as an explicitly unlit, review-only preview.
+                # Continue with nearby light samples and an unknown support.
                 pass
-        if s.get('support') is None:
-            ranked = sorted((c for c in s['candidates'] if c['id'] not in s['selected']),
-                            key=lambda c:c.get('support_score',0),reverse=True)
-            if ranked and ranked[0].get('support_score',0)>=.15 and (len(ranked)==1 or
-                    ranked[0]['support_score']-ranked[1].get('support_score',0)>=.08):
-                s['support'] = ranked[0]['id']
-                s['support_mode'] = 'estimated'
-                s['generation'] += 1
-                save(s)
-        generation = s['generation']
-        st = s['state'].copy()
+        async with s['lock']:
+            if revision != s['revision']:
+                return err('摆位已变化，请重新生成', 409)
+            generation = s['generation']
+            st = s['state'].copy()
+            job = {**s, 'selected': s['selected'].copy(),
+                   'candidates': [candidate.copy() for candidate in s['candidates']]}
         row = row_for(st['asset'])
         mesh = Path(row['mesh'])
         if digest(mesh) != row.get('mesh_sha256'):
@@ -1387,25 +1379,22 @@ async def preview(request):
         folder = Path(s['directory']) / ('render-' + run_id)
         folder.mkdir()
         output = folder / 'object.png'
-        side=round(st['size']);cx=st['x'];cy=st['y']
-        light_rect=(max(0,int(cx-side)),max(0,int(cy-side)),min(s['width'],int(cx+side)),min(s['height'],int(cy+side)))
+        x, y, side = placement_box(st)
+        rect = scene_rect(job, st)
+        left, top = rect[:2]
+        ox, oy = x - left, y - top
         with Image.open(s['background']) as background:
-            light_frame=ImageOps.exif_transpose(background).convert('RGB').crop(light_rect)
-        environment_path = folder / 'environment.png'
-        environment_image = light_frame.resize((512, 256), Image.Resampling.LANCZOS)
-        environment_image = environment_image.filter(ImageFilter.GaussianBlur(22))
-        environment_image.save(environment_path)
-        lighting=await asyncio.to_thread(estimate_light_from_rods,light_frame,(cx-light_rect[0],cy-light_rect[1]),side)
-        if s.get('support'):
-            with Image.open(Path(s['directory'])/f"analysis-{revision}"/f"{s['support']}.png") as im:
-                support_mask=np.asarray(im.convert('L').crop(light_rect))>127
-        else:
-            support_mask=np.ones((light_frame.height,light_frame.width),dtype=bool)
-        front_mask=np.asarray(foreground(s).crop(light_rect))>=128
-        environment=await asyncio.to_thread(
-            estimate_render_environment, light_frame, support_mask & ~front_mask,
-            (cx-light_rect[0], cy-light_rect[1]), side, lighting)
-        environment['texture'] = str(environment_path)
+            base = ImageOps.exif_transpose(background).convert('RGBA')
+        frame = base.crop(rect).convert('RGB')
+        regions = {c['id']: region_mask(job, c['id'], rect) for c in job['candidates']}
+        front = np.zeros((frame.height, frame.width), dtype=bool)
+        for ident in job['selected']:
+            front |= regions[ident]
+        client_alpha = obj.getchannel('A').resize((side, side), Image.Resampling.LANCZOS)
+        projected = aligned_alpha(client_alpha, frame.size, ox, oy)
+        lighting = await asyncio.to_thread(estimate_light_from_rods, frame, (st['x']-left, st['y']-top), side)
+        samples = local_samples(frame, np.ones_like(front), front, projected)
+        environment = await asyncio.to_thread(estimate_render_environment, frame, samples, lighting)
         req = {'mesh':str(mesh), 'azimuth':st['azimuth'], 'elevation':st['elevation'],
                'rotation_deg':[float(st.get('rot_x',0)),float(st.get('rot_y',0)),float(st.get('rot_z',0))],
                'output':str(output), 'lighting':lighting, 'environment':environment}
@@ -1442,38 +1431,38 @@ async def preview(request):
             edge_iou = float(np.count_nonzero(one_d & two_d) / edge_union) if edge_union else 0
         if iou < .94 and (edge_iou is None or edge_iou < .97):
             raise ValueError(f'网页与 Blender 的投影不一致（IoU {iou:.3f}，边缘 IoU {edge_iou or 0:.3f}），停止生成')
-        obj = blender_image
-        side = round(st['size'])
-        obj = obj.resize((side, side), Image.Resampling.LANCZOS)
-        x, y = round(st['x']-side/2), round(st['y']-side/2)
-        matched, photo = await asyncio.to_thread(match_local_photo,s,obj,x,y)
-        matched = apply_contact_ao(matched)
-        base = Image.open(s['background']).convert('RGBA')
+        obj = blender_image.resize((side, side), Image.Resampling.LANCZOS)
+        bounds = obj.getchannel('A').getbbox()
+        if bounds is None:
+            raise ValueError('缩放后的物体透明度为空')
+        major = max(bounds[2]-bounds[0], bounds[3]-bounds[1])
+        alpha = aligned_alpha(obj.getchannel('A'), frame.size, ox, oy)
+        ground = json.loads((folder/'contact.json').read_text(encoding='utf8'))
+        patch = projected_footprint(ground['polygons'], side)
+        footprint = aligned_alpha(patch, frame.size, ox, oy) > 0
+        contact_reason = ground.get('reason')
+        if np.count_nonzero(footprint) != np.count_nonzero(np.asarray(patch)):
+            contact_reason = '接触斑超出画面'
+        support, support_mode, support_mask, scores, contact = review_contact(
+            job, footprint, regions, front, contact_reason)
+        matched, photo = await asyncio.to_thread(match_local_photo, job, frame, obj, ox, oy, support_mask, front)
         result = base.copy()
-        front_mask = foreground(s)
-        support_mask = np.zeros((s['height'], s['width']), dtype=bool)
-        if s.get('support'):
-            with Image.open(Path(s['directory'])/f"analysis-{revision}"/f"{s['support']}.png") as im:
-                support_mask = np.asarray(im.convert('L')) > 127
-        shadow_layer, shadow_info = make_contact_shadow(
-            support_mask, np.asarray(front_mask) >= 128, np.asarray(obj.getchannel('A')),
-            x, y, side, environment.get('key_direction'))
+        shadow_layer = None
+        shadow_info = {'status': 'unavailable', 'reason': contact['reason']}
+        if support_mask is not None:
+            shadow_layer, shadow_info = make_contact_shadow(footprint, support_mask, front, alpha, major)
         if shadow_layer is not None:
-            crop = shadow_info['crop']
-            result.alpha_composite(shadow_layer, (crop[0], crop[1]))
+            l, t, r, b = shadow_info['crop']
+            shadow_info['crop'] = [left+l, top+t, left+r, top+b]
+            result.alpha_composite(shadow_layer, (left+l, top+t))
             shadow_info['path'] = str(Path(s['directory']) / 'object-shadow.png')
-        else:
-            shadow_info = {**shadow_info, 'path': None}
         result.alpha_composite(matched, (x, y))
-        object_pixels = np.asarray(obj.getchannel('A')) >= 128
-        overlap = np.asarray(front_mask.crop((x,y,x+side,y+side))) >= 128
-        visible_ratio = 1-float(np.count_nonzero(object_pixels & overlap))/max(1,int(object_pixels.sum()))
-        overlaps={}
-        for candidate in s['candidates']:
-            with Image.open(Path(s['directory'])/f"analysis-{revision}"/f"{candidate['id']}.png") as im:
-                mask=np.asarray(im.convert('L').crop((x,y,x+side,y+side)))>=128
-            overlaps[candidate['id']]=int(np.count_nonzero(mask&object_pixels))
-        result.paste(base, (0, 0), front_mask)
+        matte = foreground_matte(front)
+        if matte.any():
+            result.paste(base.crop(rect), (left, top), Image.fromarray(matte))
+        visible_ratio = float(np.sum(alpha * (1 - matte.astype(np.float32)/255))
+                              / max(1, np.asarray(obj.getchannel('A')).sum()))
+        overlaps = {n: int(np.count_nonzero(mask & (alpha >= 128))) for n, mask in regions.items()}
         async with s['lock']:
             if revision != s['revision'] or generation != s['generation']:
                 return err('摆位已变化，忽略旧预览', 409)
@@ -1491,25 +1480,38 @@ async def preview(request):
             s['lighting']=lighting
             s['scene_light']=environment
             s['shadow']=shadow_info
+            s['support'], s['support_mode'] = support, support_mode
+            s['contact'] = contact
             s['object_visible_fraction'] = round(visible_ratio,4)
             for candidate in s['candidates']:
-                candidate['object_overlap_pixels']=overlaps[candidate['id']]
-            bounds = obj.getchannel('A').getbbox()
+                ident = candidate['id']
+                candidate['object_overlap_pixels'] = overlaps[ident]
+                candidate['support_score'] = round(scores[ident], 4) if ident in scores else None
             s['rendered_bounds_px'] = [x+bounds[0], y+bounds[1], x+bounds[2], y+bounds[3]]
-            s['rendered_major_px'] = max(bounds[2]-bounds[0], bounds[3]-bounds[1])
+            s['rendered_major_px'] = major
             s['tone'] = None
             s['photometry'] = photo
-            s['warnings'] = ['Blender 视角渲染，未验证刚体、接触、尺度和遮挡；不是 Photoshop 最终结果。',
-                             ('已依据'+('自动估计的承托区域' if s.get('support_mode')=='estimated' else '人工选择的区域' if s.get('support') else '周边像素（承托面未确认）')+'估算局部环境光和颜色；实际光源方向、承托面及保护区仍待确认。') if photo and photo.get('status') in ('measured','estimated') else '可用的环境像素不足，尚未重建环境光和调色。',
-                             ('已生成屏幕空间估计接触阴影，不是物理接触阴影。' if s.get('shadow',{}).get('status')=='estimated' else '没有经过验证的接触点，未生成接触阴影。')]
+            s['warnings'] = ['当前为待审预览，落稳、现场尺度、源视图覆盖和保护区仍需核验。']
+            if photo['status'] == 'measured':
+                basis = '接触斑所在的候选面' if photo['support_verification']=='projected_support_only' else '轮廓周边'
+                s['warnings'].append(f'从{basis}采样匹配光色和画质。')
+            else:
+                s['warnings'].append('可用的光色样本不足。')
+            if shadow_layer is not None:
+                s['warnings'].append('接触阴影按网格投影估算，并限制在候选承托面内。')
+            elif shadow_info.get('reason'):
+                s['warnings'].append(shadow_info['reason'] + '。')
             if visible_ratio<.5:
-                s['warnings'].append(f'遮挡后物体仅露出约 {visible_ratio:.0%}，请确认前景选择。')
+                s['warnings'].append(f'画面内只显示约 {visible_ratio:.0%} 的物体，请检查摆位和前景。')
             if s['selected'] and all(overlaps.get(n,0)==0 for n in s['selected']):
                 s['warnings'].append('所选前景区域没有与物体相交，未形成遮挡。')
+            pending = sum(pixels > 0 for n, pixels in overlaps.items() if n not in s['selected'] and n != support)
+            if pending:
+                s['warnings'].append(f'{pending} 个候选与物体轮廓相交，前后关系待确认。')
             if s['candidates'] and s.get('analysis_algorithm')!=ANALYSIS_ALGORITHM:
                 s['warnings'].append('当前遮挡候选来自旧版分析；请重新识别以获得细钢件候选。')
-            s['warnings'].append('光向由局部钢件明暗低置信度估计，非实测。' if lighting['status']=='estimated'
-                                 else '未找到足够一致的光向线索，使用中性环境光。')
+            s['warnings'].append('局部钢件提供了低置信度光向线索。' if environment['status']=='estimated'
+                                 else '光向证据不足，使用渐变半球环境光与弱顶光。')
             save(s)
         return JSONResponse(snapshot(s))
     except (ValueError, OSError, TypeError) as e:
@@ -1547,15 +1549,16 @@ async def photoshop_export(request):
         bbox = asset.getchannel('A').getbbox()
         if not bbox:
             raise ValueError('物体透明度为空')
-        ox, oy = round(st['x']-st['size']/2), round(st['y']-st['size']/2)
+        ox, oy, _ = placement_box(st)
         l,t,r,b = (ox+bbox[0],oy+bbox[1],ox+bbox[2],oy+bbox[3])
         if l < 0 or t < 0 or r > s['width'] or b > s['height']:
             raise ValueError('物体超出背景边界，不能导出')
         asset.crop(bbox).save(folder/'asset.png')
         with Image.open(Path(s['directory'])/'object.png') as im:
-            im.convert('RGBA').crop(bbox).save(folder/'neutral.png')
-        mask = np.asarray(foreground(s))
-        entry = save_mask(mask, folder/'foreground.png', [0,0,s['width'],s['height']], (255,255,255))
+            im.convert('RGBA').crop(bbox).save(folder/'before-match.png')
+        rect = scene_rect(s, st)
+        mask = foreground_matte(np.asarray(foreground(s, rect)) >= 128)
+        entry = save_mask(mask, folder/'foreground.png', rect, (255,255,255))
         shade = None
         shadow_bounds = None
         shadow = s.get('shadow') or {}
@@ -1563,10 +1566,11 @@ async def photoshop_export(request):
             with Image.open(shadow['path']) as im:
                 im.convert('RGBA').save(folder/'shadow.png')
             shadow_bounds = shadow.get('crop')
-            shade = {'path': str(folder/'shadow.png'), 'x': int(shadow_bounds[0]), 'y': int(shadow_bounds[1])}
+            shade = {'path': str(folder/'shadow.png'), 'x': int(shadow_bounds[0]), 'y': int(shadow_bounds[1]),
+                     'opacity': 100}
         spec = {'id':'manual','asset':str(folder/'asset.png'),'center':[(l+r)/2,(t+b)/2],
                 'width':r-l,'angle':0,'canvas':[s['width'],s['height']], 'crop':[0,0,s['width'],s['height']],
-                'unmatched_asset':str(folder/'neutral.png'),
+                'unmatched_asset':str(folder/'before-match.png'),
                 'tone':{'brightness':0,'warmth':0,'saturation':0,'blur_px':0},'shade':shade,'occlusion':entry,
                 'png':str(folder/'manual.png'),'psd':str(folder/'manual.psd')}
         mcp = ROOT/'work/photoshop-mcp-env/Scripts/photoshop-mcp-server.exe'
@@ -1602,7 +1606,7 @@ async def photoshop_export(request):
             s['export'] = {'directory':str(folder),'status':'review','outside_changed_pixels':outside,
                            'projection_iou':s.get('projection_iou'),
                            'limitations':['落稳、支撑、尺度、保护区、同层调色、阴影及前后顺序待确认',
-                                          '接触阴影为屏幕空间估计，不是物理阴影']}
+                                          '接触阴影依据网格接触斑与候选承托区域估算']}
             save(s)
         return JSONResponse(s['export'])
     except Exception as e:

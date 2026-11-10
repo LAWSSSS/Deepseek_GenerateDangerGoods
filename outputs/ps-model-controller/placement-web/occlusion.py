@@ -4,10 +4,12 @@ import numpy as np
 from PIL import Image
 
 
-def thin_line_seeds(frame, center, object_size, *, limit=4):
+def thin_line_seeds(frame, center, object_size, *, limit=4, silhouette=None):
     """Propose paired image edges in native pixels; never decide depth order."""
     rgb=np.asarray(frame.convert('RGB'))
     gray=cv2.cvtColor(rgb,cv2.COLOR_RGB2GRAY)
+    if silhouette is not None and silhouette.shape != gray.shape:
+        raise ValueError('silhouette and frame must have the same dimensions')
     gray=cv2.createCLAHE(clipLimit=2,tileGridSize=(8,8)).apply(gray)
     edges=cv2.Canny(gray,45,130)
     minimum=max(18,round(object_size*.13))
@@ -39,16 +41,34 @@ def thin_line_seeds(frame, center, object_size, *, limit=4):
             length=hi-lo
             if length<minimum or length<.55*min(t1-t0,s1-s0):continue
             poly=np.array([u*lo+normal*n0,u*hi+normal*n0,u*hi+normal*n1,u*lo+normal*n1])
-            seed=np.zeros(gray.shape,np.uint8)
-            cv2.fillConvexPoly(seed,np.rint(poly).astype('int32'),1)
-            options.append((length/(1+width*.03),seed.astype(bool)))
-    options.sort(key=lambda x:x[0],reverse=True)
+            priority = 0
+            if silhouette is not None:
+                middle = np.linspace(lo, hi, max(3, round(length)))[:, None] * u + normal * (n0 + n1) / 2
+                xs = np.clip(np.rint(middle[:, 0]).astype(int), 0, gray.shape[1] - 1)
+                ys = np.clip(np.rint(middle[:, 1]).astype(int), 0, gray.shape[0] - 1)
+                inside = np.flatnonzero(silhouette[ys, xs])
+                if len(inside) >= 3:
+                    priority = 2 if inside[0] > 1 and inside[-1] < len(middle) - 2 else 1
+            options.append((priority, length / (1 + width * .03), poly))
+    options.sort(key=lambda item: item[:2], reverse=True)
     chosen=[]
-    for _,mask in options:
+    for _, _, poly in options:
+        seed = np.zeros(gray.shape, np.uint8)
+        cv2.fillConvexPoly(seed, np.rint(poly).astype(np.int32), 1)
+        mask = seed > 0
         if any(np.count_nonzero(mask&other)/max(1,np.count_nonzero(mask|other))>.4 for other in chosen):continue
         chosen.append(mask)
         if len(chosen)>=limit:break
     return chosen
+
+
+def foreground_matte(selected):
+    """Soften one pixel on the inside of confirmed masks; keep their cores."""
+    hard = selected.astype(np.uint8) * 255
+    if not hard.any():
+        return hard
+    edge = cv2.GaussianBlur(hard, (3, 3), .60)
+    return np.where(selected, np.rint(.68 * hard + .32 * edge), 0).astype(np.uint8)
 
 
 def refine_thin_mask(engine, frame, seed, rect, *, radius=8):

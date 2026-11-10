@@ -1,99 +1,53 @@
-"""Bounded screen-space contact shadow for the manual placement preview.
-
-The shadow is an appearance estimate, not a measured 3-D contact shadow.  It
-is derived only from the object alpha, the selected support mask and the
-foreground mask; it never changes the background outside those regions.
-"""
+"""Render a restrained contact layer from projected near-ground mesh patches."""
 import cv2
 import numpy as np
 from PIL import Image
 
 
-def make_contact_shadow(support, foreground, alpha, x, y, side, light_direction=None):
-    """Return a local RGBA shadow layer and evidence, or ``(None, evidence)``.
+MIN_SUPPORT = .90
 
-    Parameters are full-frame masks except ``alpha`` (the square object
-    alpha).  ``x/y`` are the object's top-left in frame pixels.
-    """
-    support = np.asarray(support, dtype=bool)
-    foreground = np.asarray(foreground, dtype=bool)
-    alpha = np.asarray(alpha, dtype=np.uint8)
-    if support.shape != foreground.shape or alpha.ndim != 2:
+
+def projected_footprint(polygons, side):
+    """Rasterize separate contact faces in the same square as the render."""
+    mask = np.zeros((side, side), np.uint8)
+    for polygon in polygons:
+        coords = np.asarray(polygon, dtype=float)
+        cv2.fillConvexPoly(mask, np.rint((coords * side - .5) * 16).astype(np.int32), 255, shift=4)
+    return Image.fromarray(mask)
+
+
+def contact_clusters(footprint):
+    count, labels = cv2.connectedComponents(footprint.astype(np.uint8))
+    return [np.nonzero(labels == index) for index in range(1, count)]
+
+
+def contact_coverage(clusters, support):
+    return [float(np.mean(support[patch])) for patch in clusters]
+
+
+def make_contact_shadow(footprint, support, foreground, alpha, major_px):
+    """Return a tight contact layer, only on the supported, visible surface."""
+    if not (footprint.shape == support.shape == foreground.shape == alpha.shape):
         raise ValueError('contact shadow masks have incompatible shapes')
-    height, width = support.shape
-    if side <= 0 or x < 0 or y < 0 or x + side > width or y + side > height:
-        return None, {'status': 'unavailable', 'reason': '物体超出画面，无法生成接触阴影'}
-    object_mask = alpha >= 128
-    box = Image.fromarray(object_mask.astype(np.uint8) * 255).getbbox()
-    if box is None:
-        return None, {'status': 'unavailable', 'reason': '物体透明度为空'}
-    bbox_w, bbox_h = box[2] - box[0], box[3] - box[1]
-    if bbox_w < 4 or bbox_h < 4:
-        return None, {'status': 'unavailable', 'reason': '物体过小，无法生成接触阴影'}
-    pad = max(8, round(.28 * side))
-    l, t = max(0, x - pad), max(0, y - pad)
-    r, b = min(width, x + side + pad), min(height, y + side + pad)
-    local_support = support[t:b, l:r]
-    local_front = foreground[t:b, l:r]
-    local_object = np.zeros((b - t, r - l), dtype=np.uint8)
-    ox, oy = x - l, y - t
-    local_object[oy:oy + side, ox:ox + side] = object_mask.astype(np.uint8) * 255
-
-    # The bottom band of the object is the only plausible contact region.
-    band = max(2, round(.13 * bbox_h))
-    contact = np.zeros_like(local_object)
-    contact[oy + box[3] - band:oy + box[3], ox + box[0]:ox + box[2]] = \
-        local_object[oy + box[3] - band:oy + box[3], ox + box[0]:ox + box[2]]
-    if contact.sum() < 12:
-        return None, {'status': 'insufficient_samples', 'reason': '接触带像素不足'}
-
-    direction = np.asarray(light_direction if light_direction is not None else [0.0, 1.0], dtype=float)
-    if direction.shape != (2,) or not np.all(np.isfinite(direction)) or np.linalg.norm(direction) < 1e-4:
-        direction = np.array([0.0, 1.0])
-    direction /= np.linalg.norm(direction)
-    shift = max(2.0, .055 * side)
-    # Shadow falls opposite the estimated screen-space light direction.
-    matrix = np.float32([[1, 0, -direction[0] * shift], [0, 1, -direction[1] * shift]])
-    shifted = cv2.warpAffine(contact, matrix, (r - l, b - t), flags=cv2.INTER_LINEAR,
-                             borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-    sigma = max(2.0, .035 * side)
-    blurred = cv2.GaussianBlur(shifted.astype(np.float32) / 255.0, (0, 0), sigma)
-    shadow = np.clip(blurred * .90, 0, 1)
-    # A soft elliptical darkening at the actual base makes the object sit even
-    # when the selected support has a rough/textured edge. It is still a
-    # screen-space approximation, not a physical contact shadow.
-    base_center = (int(round(ox + (box[0] + box[2]) / 2)), int(round(oy + box[3] - max(2, .02 * side))))
-    base_radius = (max(3, int(round(bbox_w * .56))), max(2, int(round(side * .075))))
-    base = np.zeros_like(shadow, dtype=np.uint8)
-    cv2.ellipse(base, base_center, base_radius, 0, 0, 360, 255, -1)
-    base = cv2.GaussianBlur(base.astype(np.float32) / 255.0, (0, 0), max(2.0, .06 * side))
-    shadow = np.maximum(shadow, base * .42)
-    shadow *= local_support.astype(np.float32)
-    shadow *= (~local_front).astype(np.float32)
-    shadow[local_object > 0] = 0
-    # The selected support can be a narrow steel strip while the base sits at
-    # its edge. Keep the small base ellipse visible on the local background so
-    # the object reads as grounded; it is still marked as a screen-space
-    # estimate and never treated as physical support evidence.
-    base_shadow = base * .48
-    base_shadow *= (~local_front).astype(np.float32)
-    base_shadow[local_object > 0] = 0
-    if local_support.any():
-        shadow = np.maximum(shadow, base_shadow)
-    if shadow.sum() < 1:
-        return None, {'status': 'unavailable', 'reason': '承托面内没有可用阴影像素'}
-    mask = np.rint(np.clip(shadow, 0, 1) * 255).astype(np.uint8)
-    if not np.any(mask):
-        return None, {'status': 'unavailable', 'reason': '阴影透明度为空'}
-    layer = Image.new('RGBA', (r - l, b - t), (0, 0, 0, 0))
-    layer.putalpha(Image.fromarray(mask))
+    contact = footprint.astype(np.float32)
+    if not contact.any():
+        return None, {'status': 'unavailable', 'reason': '没有可投影的网格接触斑'}
+    sigma = float(np.clip(.010 * major_px, .8, 3.5))
+    close = cv2.GaussianBlur(contact, (0, 0), sigma)
+    soft = cv2.GaussianBlur(contact, (0, 0), sigma * 2.5)
+    linear_loss = .55 * close + .16 * soft
+    # A black transparent layer acts on display RGB, so encode the linear
+    # attenuation as a bounded display-space opacity for preview and PSD.
+    opacity = 1 - np.power(1 - np.clip(linear_loss, 0, .63), 1 / 2.2)
+    opacity *= support & ~foreground & (alpha < 128)
+    mask = Image.fromarray(np.uint8(np.rint(opacity * 255)))
+    bounds = mask.getbbox()
+    if bounds is None:
+        return None, {'status': 'unavailable', 'reason': '接触斑周围没有露出的承托像素'}
+    layer = Image.new('RGBA', (bounds[2] - bounds[0], bounds[3] - bounds[1]))
+    layer.putalpha(mask.crop(bounds))
     return layer, {
-        'status': 'estimated',
-        'method': 'screen_space_contact_from_alpha_and_support',
-        'crop': [int(l), int(t), int(r), int(b)],
-        'samples': int(np.count_nonzero(mask)),
-        'max_alpha': int(mask.max()),
-        'shift_px': round(float(shift), 2),
-        'direction_screen': [round(float(direction[0]), 3), round(float(direction[1]), 3)],
-        'limitation': '屏幕空间近似，不是三维接触阴影或物理支撑证据',
+        'status': 'estimated', 'method': 'projected_mesh_contact_on_support',
+        'crop': list(bounds), 'samples': int(np.count_nonzero(np.asarray(mask))),
+        'max_alpha': mask.getextrema()[1], 'sigma_px': round(sigma, 3),
     }

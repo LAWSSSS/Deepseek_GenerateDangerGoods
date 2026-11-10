@@ -10,10 +10,10 @@ import numpy as np
 from PIL import Image
 from starlette.testclient import TestClient
 import server
-from relight import ambient_match, apply_contact_ao, estimate_render_environment
-from contact_shadow import make_contact_shadow
+from relight import ambient_match, estimate_render_environment
+from contact_shadow import make_contact_shadow, projected_footprint
 from photometry import quiet_photo
-from occlusion import refine_thin_mask, thin_line_seeds
+from occlusion import foreground_matte, refine_thin_mask, thin_line_seeds
 from lighting_estimate import estimate_light_from_rods
 
 
@@ -137,7 +137,8 @@ class PlacementChecks(unittest.TestCase):
 
     def test_fallback_color_is_explicitly_unverified(self):
         obj=Image.new('RGBA',(40,40),(160,140,120,255))
-        matched,info=server.match_local_photo(self.live,obj,44,40)
+        with Image.open(self.live['background']) as frame:
+            matched,info=server.match_local_photo(self.live,frame,obj,44,40,None,np.zeros((96,128),bool))
         self.assertEqual(info['status'],'measured')
         self.assertEqual(info['support_verification'],'surrounding_scene_unverified')
         self.assertTrue(np.array_equal(np.asarray(matched.getchannel('A')),np.asarray(obj.getchannel('A'))))
@@ -253,16 +254,16 @@ class RelightChecks(unittest.TestCase):
         self.assertEqual(info['status'],'insufficient_samples')
         self.assertTrue(np.array_equal(np.asarray(obj),np.asarray(result)))
 
-    def test_gradient_is_bounded_and_not_claimed_as_light_direction(self):
+    def test_material_color_survives_exposure_match(self):
         x = np.linspace(65,150,240,dtype=np.uint8)
         pixels = np.repeat(np.broadcast_to(x,(240,240))[:,:,None],3,axis=2).copy()
         frame = Image.fromarray(pixels)
-        obj = Image.new('RGBA',(80,80),(145,135,125,255))
+        obj = Image.new('RGBA',(80,80),(173,53,39,255))
         support = np.ones((240,240),bool)
         result,info = ambient_match(frame,support,np.zeros_like(support),obj,80,80)
         self.assertEqual(info['light_direction'],'unknown')
-        self.assertIsNotNone(info['screen_gradient_rgb_per_object_width'])
-        self.assertLessEqual(max(abs(v) for v in info['screen_gradient_rgb_per_object_width']),5.4)
+        self.assertGreater(info['object_after']['chroma_c'], .64 * info['object_before']['chroma_c'])
+        self.assertTrue(-16 <= info['lightness_offset'] <= 13)
         self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')),np.asarray(obj.getchannel('A'))))
 
     def test_blur_never_changes_openings_or_transparent_edges(self):
@@ -276,20 +277,24 @@ class RelightChecks(unittest.TestCase):
         self.assertGreater(info['detail_blur_sigma_px'],0)
         self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')),pixels[:,:,3]))
 
-    def test_render_environment_is_bounded_and_gradient_is_low_confidence(self):
+    def test_render_environment_does_not_turn_background_gradient_into_key_light(self):
         x = np.linspace(60,170,240,dtype=np.uint8)
         pixels = np.repeat(np.broadcast_to(x,(240,240))[:,:,None],3,axis=2).copy()
         frame = Image.fromarray(pixels)
-        env = estimate_render_environment(frame, np.ones((240,240),bool), (120,120), 160)
-        self.assertIn(env['status'], ('gradient_estimate','assumed'))
+        samples = np.ones((240,240),bool)
+        env = estimate_render_environment(frame, samples)
+        self.assertEqual(env['status'], 'diffuse_estimate')
         self.assertEqual(len(env['world_color']), 3)
         self.assertTrue(all(0 <= v <= 1 for v in env['world_color']))
         self.assertGreaterEqual(env['world_strength'], .30)
         self.assertLessEqual(env['world_strength'], .78)
-        self.assertEqual(len(env['key_direction']), 2)
-        self.assertIn(env['light_direction'], ('screen_gradient_assumption','unknown'))
+        self.assertIsNone(env['key_direction'])
+        self.assertEqual(env['light_direction'], 'unknown')
+        estimate = estimate_render_environment(frame, samples, {'status':'estimated','direction_screen':[.6,-.8]})
+        self.assertEqual(estimate['key_direction'], [.6,-.8])
+        self.assertEqual(estimate['confidence'], 'low')
         empty = estimate_render_environment(Image.new('RGB',(300,300),(80,80,80)),
-                                            np.zeros((300,300),bool), (150,150), 100)
+                                            np.zeros((300,300),bool))
         self.assertEqual(empty['status'], 'insufficient_samples')
         self.assertEqual(empty['light_direction'], 'unknown')
 
@@ -307,50 +312,68 @@ class RelightChecks(unittest.TestCase):
         self.assertIn('background_lab', evidence)
         self.assertIn('accent_chroma_cap', evidence)
 
-    def test_contact_ao_darkens_base_without_changing_alpha(self):
-        obj = Image.new('RGBA',(60,60),(140,120,100,0))
-        alpha = np.zeros((60,60),np.uint8); alpha[8:60,10:50]=255
-        obj.putalpha(Image.fromarray(alpha))
-        result = apply_contact_ao(obj)
-        self.assertTrue(np.array_equal(np.asarray(result.getchannel('A')), alpha))
-        before = np.asarray(obj)[..., :3].astype(float)
-        after = np.asarray(result)[..., :3].astype(float)
-        self.assertLess(after[59, 20].mean(), before[59, 20].mean())
-        self.assertEqual(after[15, 20].mean(), before[15, 20].mean())
-
-
 class ContactShadowChecks(unittest.TestCase):
     def test_shadow_is_bounded_to_support_and_keeps_alpha_input(self):
-        support = np.zeros((200,200),bool); support[50:150,40:160] = True
-        foreground = np.zeros((200,200),bool)
-        alpha = np.zeros((60,60),np.uint8); alpha[8:60,10:50] = 255
+        support = np.zeros((200,200),bool)
+        support[100:132,60:140] = True
+        foreground = np.zeros_like(support)
+        foreground[:,105:108] = True
+        alpha = np.zeros((200,200),np.uint8)
+        alpha[55:126,65:135] = 255
+        footprint = np.asarray(projected_footprint([[[.37,.60],[.63,.60],[.63,.64],[.37,.64]]], 200)) > 0
         before = alpha.copy()
-        layer, info = make_contact_shadow(support, foreground, alpha, 70, 70, 60, [0.3, 0.8])
+        layer, info = make_contact_shadow(footprint, support, foreground, alpha, 70)
         self.assertTrue(np.array_equal(alpha, before))
         self.assertIsNotNone(layer)
         self.assertEqual(info['status'], 'estimated')
         shadow_alpha = np.asarray(layer.getchannel('A'))
         self.assertGreater(int(shadow_alpha.sum()), 0)
         l,t,r,b = info['crop']
-        self.assertGreaterEqual(l, 40)
-        self.assertLessEqual(r, 160)
-        self.assertGreaterEqual(t, 50)
-        self.assertLessEqual(b, 150)
-        self.assertTrue(all(0 <= v <= 1 for v in info['direction_screen']))
+        allowed = (support & ~foreground & (alpha < 128))[t:b,l:r]
+        self.assertFalse((shadow_alpha[~allowed] > 0).any())
 
     def test_shadow_refuses_missing_support_or_foreground(self):
         support = np.zeros((200,200),bool)
-        alpha = np.zeros((60,60),np.uint8); alpha[8:60,10:50] = 255
-        layer, info = make_contact_shadow(support, np.zeros((200,200),bool), alpha, 70, 70, 60)
+        footprint = support.copy()
+        footprint[110:116, 80:130] = True
+        alpha = np.zeros((200,200),np.uint8)
+        layer, info = make_contact_shadow(footprint, support, np.zeros_like(support), alpha, 70)
         self.assertIsNone(layer)
         self.assertNotEqual(info['status'], 'estimated')
         support[50:150,40:160] = True
         foreground = np.ones((200,200),bool)
-        layer, info = make_contact_shadow(support, foreground, alpha, 70, 70, 60)
+        layer, info = make_contact_shadow(footprint, support, foreground, alpha, 70)
         self.assertIsNone(layer)
+
+    def test_each_disconnected_contact_patch_needs_support(self):
+        footprint = np.zeros((120, 120), bool)
+        footprint[85:89, 20:30] = True
+        footprint[85:89, 90:100] = True
+        support = np.zeros_like(footprint)
+        support[80:100, :65] = True
+        front = np.zeros_like(footprint)
+        session = {'candidates': [{'id': 1}], 'selected': []}
+        _, _, mask, scores, contact = server.review_contact(session, footprint, {1: support}, front)
+        self.assertIsNone(mask)
+        self.assertEqual(scores[1], 0)
+        self.assertEqual(contact['patches'], 2)
+        support[80:100, 80:110] = True
+        ident, _, mask, _, contact = server.review_contact(session, footprint, {1: support}, front)
+        self.assertEqual(ident, 1)
+        self.assertIsNotNone(mask)
+        self.assertEqual(contact['min_coverage'], 1)
+        self.assertEqual(contact['physical_support'], 'unknown')
 
 
 class ThinOcclusionChecks(unittest.TestCase):
+    def test_foreground_matte_keeps_opaque_core_and_stays_inside_region(self):
+        selected = np.zeros((80, 80), bool)
+        selected[10:70, 30:36] = True
+        matte = foreground_matte(selected)
+        self.assertTrue((matte[15:65, 31:35] == 255).all())
+        self.assertTrue((matte[15:65, 30] < 255).all())
+        self.assertFalse(matte[~selected].any())
+
     def test_native_line_pair_proposal(self):
         pixels=np.full((240,240,3),180,np.uint8)
         pixels[30:210,115:121]=40

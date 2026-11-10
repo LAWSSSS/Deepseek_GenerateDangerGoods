@@ -1,4 +1,4 @@
-"""Render the unmodified glTF pose using the browser's perspective camera."""
+"""Render the user's glTF pose and project its near-ground mesh patches."""
 import json
 import math
 import sys
@@ -11,32 +11,67 @@ from mathutils import Matrix, Vector
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import blender_worker as worker
 
+
+def clip_to_height(points, height):
+    clipped = []
+    for first, last in zip(points, np.roll(points, -1, axis=0), strict=True):
+        first_in, last_in = first[2] <= height, last[2] <= height
+        if first_in:
+            clipped.append(first)
+        if first_in != last_in:
+            clipped.append(first + (last - first) * ((height - first[2]) / (last[2] - first[2])))
+    return np.asarray(clipped)
+
+
+def ground_projection(scene, camera, obj, span, elevation):
+    if elevation < 8:
+        return {'polygons': [], 'reason': '当前观察角度不足以判断承托投影'}
+    points = np.asarray(worker.world_vertices(obj), dtype=np.float64)
+    floor = points[:, 2].min()
+    height = floor + span * .012
+    obj.data.calc_loop_triangles()
+    indices = np.empty((len(obj.data.loop_triangles), 3), dtype=np.int32)
+    obj.data.loop_triangles.foreach_get('vertices', indices.ravel())
+    near = points[:, 2] <= height
+    polygons = []
+    for face in indices[near[indices].any(axis=1)]:
+        patch = clip_to_height(points[face], height)
+        if len(patch) < 3:
+            continue
+        # Project onto the hypothesized ground plane using the render camera.
+        screen = [worker.world_to_camera_view(scene, camera, Vector((x, y, floor))) for x, y, _ in patch]
+        if any(point.z <= 0 for point in screen):
+            continue
+        xy = np.array([(point.x, 1 - point.y) for point in screen])
+        area2 = np.dot(xy[:, 0], np.roll(xy[:, 1], -1)) - np.dot(xy[:, 1], np.roll(xy[:, 0], -1))
+        if abs(area2) > 1e-9:
+            polygons.append(xy.round(6).tolist())
+    return {'polygons': polygons, 'band_fraction': .012, 'plane': 'lowest_world_z'}
+
+
+def ambient_dome(scene, color, strength):
+    """Build a smooth hemisphere from colour statistics, without scene texture."""
+    width, height = 128, 64
+    z = np.sin(np.linspace(-math.pi / 2, math.pi / 2, height, dtype=np.float32))
+    brightness = .70 + .90 * (z + 1) / 2
+    pixels = np.ones((height, width, 4), dtype=np.float32)
+    pixels[:, :, :3] = brightness[:, None, None] * np.asarray(color, dtype=np.float32)
+    image = bpy.data.images.new('estimated ambient dome', width=width, height=height, float_buffer=True)
+    image.colorspace_settings.name = 'Non-Color'
+    image.pixels.foreach_set(pixels.ravel())
+    nodes = scene.world.node_tree.nodes
+    world = nodes.get('Background')
+    env = nodes.new('ShaderNodeTexEnvironment')
+    env.image = image
+    scene.world.node_tree.links.new(env.outputs['Color'], world.inputs['Color'])
+    world.inputs['Strength'].default_value = strength
+
+
 request = json.loads(Path(sys.argv[sys.argv.index('--') + 1]).read_text(encoding='utf8'))
 scene = worker.setup_scene('CPU', 1024)
-# Use a bounded local environment and a soft key rather than a pure white
-# world. The estimate still comes from a single 2-D image and is not a
-# measured 3-D light direction.
-environment = request.get('environment') or {}
-world_color = environment.get('world_color') or [.32, .32, .32]
-if len(world_color) != 3 or not all(math.isfinite(v) and 0 <= v <= 1 for v in world_color):
-    raise ValueError('环境色估计无效')
-world_strength = float(environment.get('world_strength', .55))
-if not math.isfinite(world_strength) or not .1 <= world_strength <= 1.2:
-    raise ValueError('环境强度估计无效')
-background = scene.world.node_tree.nodes.get('Background')
-background.inputs['Color'].default_value = (*world_color, 1)
-background.inputs['Strength'].default_value = world_strength
-texture_path = environment.get('texture')
-if texture_path and Path(texture_path).is_file():
-    nodes = scene.world.node_tree.nodes
-    links = scene.world.node_tree.links
-    environment_node = nodes.new('ShaderNodeTexEnvironment')
-    environment_node.image = bpy.data.images.load(texture_path, check_existing=False)
-    environment_node.image.colorspace_settings.name = 'sRGB'
-    environment_node.projection = 'EQUIRECTANGULAR'
-    links.new(environment_node.outputs['Color'], background.inputs['Color'])
-objects = [worker.load_mesh(request['mesh'])]
-points = [p for obj in objects for p in worker.world_vertices(obj)]
+scene.view_settings.view_transform = 'AgX'
+obj = worker.load_mesh(request['mesh'])
+points = worker.world_vertices(obj)
 low = Vector([min(p[i] for p in points) for i in range(3)])
 high = Vector([max(p[i] for p in points) for i in range(3)])
 center = (low + high) / 2
@@ -47,46 +82,46 @@ rotation = request.get('rotation_deg') or [0, 0, 0]
 if len(rotation) != 3 or not all(math.isfinite(float(v)) for v in rotation):
     raise ValueError('物体旋转角无效')
 if any(abs(float(v)) > 1e-6 for v in rotation):
-    obj = objects[0]
-    # The browser centres the unrotated object at the origin, then applies
-    # Euler XYZ rotation in its Y-up world. Convert that rotation into
-    # Blender's Z-up frame and rotate the mesh data around its bbox centre.
+    # Preserve the original normalization while rotating about the same
+    # world-space centre as the browser.
     convert = Matrix.Rotation(-math.pi / 2, 4, 'X')
     browser_rotation = (Matrix.Rotation(math.radians(float(rotation[2])), 4, 'Z')
                         @ Matrix.Rotation(math.radians(float(rotation[1])), 4, 'Y')
                         @ Matrix.Rotation(math.radians(float(rotation[0])), 4, 'X'))
     blender_rotation = convert.inverted() @ browser_rotation @ convert
-    around_center = Matrix.Translation(center) @ blender_rotation @ Matrix.Translation(-center)
-    obj.data.transform(around_center)
-    bpy.context.view_layer.update()
-    # Keep the original center and span: the browser normalises before
-    # rotating, so camera framing must use the unrotated envelope.
+    obj.matrix_world = Matrix.Translation(center) @ blender_rotation @ Matrix.Translation(-center) @ obj.matrix_world
+
 a, e = map(math.radians, (request['azimuth'], request['elevation']))
 direction = Vector((math.sin(a)*math.cos(e), -math.cos(a)*math.cos(e), math.sin(e)))
-camera=worker.make_camera(scene, center + direction * span * 2.35, center, fov=35)
-key_direction = environment.get('key_direction') or [-.45, -.60]
-if len(key_direction) != 2 or not all(math.isfinite(v) and abs(v) <= 1.01 for v in key_direction):
-    raise ValueError('环境光方向估计无效')
+camera = worker.make_camera(scene, center + direction * span * 2.35, center, fov=35)
 bpy.context.view_layer.update()
-local = Vector((key_direction[0], -key_direction[1], .8)).normalized()
-key_world = camera.matrix_world.to_quaternion() @ local
-key_strength = float(environment.get('key_strength', .65))
-key = bpy.data.objects.get('soft light')
-if key is None:
-    data = bpy.data.lights.new('soft light', 'AREA')
-    key = bpy.data.objects.new('soft light', data)
-    scene.collection.objects.link(key)
-key.data.shape = 'DISK'
-key.data.size = max(span * 4, .2)
-key.data.energy = max(30.0, 350.0 * span * span * np.clip(key_strength, .35, 1.3))
-key.location = center + key_world * span * 4
-key.rotation_euler = (center - key.location).to_track_quat('-Z', 'Y').to_euler()
-fill = bpy.data.lights.new('environment fill', 'AREA')
-fill.energy = key.data.energy * float(np.clip(environment.get('fill_strength', .25), .1, .4))
-fill.shape = 'DISK'
-fill.size = max(span * 6, .3)
-fill_obj = bpy.data.objects.new('environment fill', fill)
-scene.collection.objects.link(fill_obj)
-fill_obj.location = center - key_world * span * 4
-fill_obj.rotation_euler = (center - fill_obj.location).to_track_quat('-Z', 'Y').to_euler()
-worker.render(scene, Path(request['output']))
+
+environment = request.get('environment') or {}
+world_color = environment.get('world_color', [.36, .36, .36])
+light_color = environment.get('light_color', [1., 1., 1.])
+if any(len(color) != 3 or not all(math.isfinite(v) and 0 <= v <= 1 for v in color)
+       for color in (world_color, light_color)):
+    raise ValueError('环境色估计无效')
+ambient_dome(scene, world_color, float(np.clip(environment.get('world_strength', .76), .3, .8)))
+# A weak overhead source represents the diffuse sky. Only a consistent
+# scene cue can move the light away from overhead.
+soft = bpy.data.objects['soft light']
+key_world = Vector((0, 0, 1))
+key_direction = environment.get('key_direction')
+if key_direction is not None:
+    if len(key_direction) != 2 or not all(math.isfinite(v) and abs(v) <= 1.01 for v in key_direction):
+        raise ValueError('环境光方向估计无效')
+    local = Vector((key_direction[0], -key_direction[1], .8)).normalized()
+    key_world = camera.matrix_world.to_quaternion() @ local
+    key_world.z = max(key_world.z, .32)
+soft.data.color = light_color
+soft.data.shape = 'DISK'
+soft.data.size = 5.8 * span
+soft.data.energy = 470 * span * span * float(np.clip(environment.get('key_strength', .18), .1, .65))
+soft.location = center + key_world.normalized() * span * 3.5
+soft.rotation_euler = (center - soft.location).to_track_quat('-Z', 'Y').to_euler()
+
+output = Path(request['output'])
+contact = ground_projection(scene, camera, obj, span, request['elevation'])
+output.with_name('contact.json').write_text(json.dumps(contact, ensure_ascii=False), encoding='utf8')
+worker.render(scene, output)

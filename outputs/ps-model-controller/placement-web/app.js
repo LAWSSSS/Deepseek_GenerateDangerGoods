@@ -8,8 +8,7 @@ renderer.setSize(768,768,false); renderer.setClearColor(0,0); renderer.outputCol
 const scene=new THREE.Scene(), camera=new THREE.PerspectiveCamera(35,1,.01,50);
 // Match the standalone model review page's neutral studio light. The white
 // ambient-only setup washed out metal and made the live model look different
-// from the reviewed GLB. Scene-specific light is still estimated only after a
-// support area has been selected.
+// from the reviewed GLB. The preview renderer estimates scene lighting.
 scene.add(new THREE.AmbientLight(0xffffff,.75));
 for(const [lightPosition,intensity] of [[[4,6,5],1.4],[[-4,3,-4],.7]]){
   const light=new THREE.DirectionalLight(0xffffff,intensity);
@@ -50,10 +49,67 @@ function layout(){if(!session)return;let w=$('stage').clientWidth, scale=w/sessi
 async function sync(){if(!session||!model)return;const sid=session.id, state={...position,asset:$('asset').value};syncQueue=syncQueue.catch(()=>{}).then(async()=>{let updated=await api(`/api/sessions/${sid}/state`,post(state));if(session?.id!==sid)return;session=updated;$('result').hidden=true;$('download').hidden=true;$('mask').hidden=true;$('regions').innerHTML='';$('checks').textContent='人工位置与视角已记录；落稳、尺度、可见面、保护区和遮挡均待核验。'});return syncQueue}
 function schedule(){clearTimeout(syncTimer);syncTimer=setTimeout(()=>{syncTimer=null;sync().catch(error)},250)}
 async function setup(file){try{let f=new FormData();if(file)f.append('background',file);session=await api('/api/sessions',{method:'POST',body:f});position={x:session.width*.5,y:session.height*.65,size:Math.round(Math.min(session.width,session.height)*.16),azimuth:80,elevation:45,rot_x:0,rot_y:0,rot_z:0};$('background').src=endpoint('/background');$('empty').hidden=true;$('stage').style.display='block';$('result').hidden=true;$('regions').innerHTML='';layout();await loadModel();say('已加载背景，请放置物品')}catch(e){error(e)}}
-function candidates(){let root=$('regions');root.innerHTML='<p class="hint">勾选遮挡物；圆点选择用于调色的承托面。悬停查看区域。</p>';for(const c of session.candidates){let row=document.createElement('label');row.className='region';let input=document.createElement('input');input.type='checkbox';input.checked=session.selected.includes(c.id);input.onchange=applySelection;let radio=document.createElement('input');radio.type='radio';radio.name='support';radio.checked=session.support===c.id;radio.title='设为承托面';radio.disabled=c.kind==='thin_line_proposal';radio.onchange=async()=>{try{session=await api(endpoint('/support'),post({revision:session.revision,support:c.id}));showLive();say('已选择承托面，将用于局部调色')}catch(e){error(e)}};const kind=c.kind==='thin_line_proposal'?'细钢件候选':'区域';const boundary=c.boundary_refinement?.status==='refined'?'原图边缘已细化':'边界待核';const crossing=c.object_overlap_pixels===0?' · 未相交':c.object_overlap_pixels>0?' · 与物体相交':'';row.append(input,radio,document.createTextNode(`${kind} ${c.id} · ${boundary}${crossing} · 前后待确认`));input.dataset.id=c.id;row.onmouseenter=()=>showMask(c.id);root.append(row)}if(!session.candidates.length)root.textContent='没有检测到候选区域；遮挡仍需人工检查。'}
+function candidates(){
+  const root=$('regions');
+  root.innerHTML='<p class="hint">先看与物体相交的候选。悬停查看原图区域，勾选前景，圆点选择候选承托面。</p>';
+  const priority=c=>c.object_overlap_pixels>0 ? (c.kind==='thin_line_proposal' ? 2 : 1) : 0;
+  const ranked=[...session.candidates].sort((a,b)=>priority(b)-priority(a)
+    || (b.object_overlap_pixels||0)-(a.object_overlap_pixels||0));
+  for(const c of ranked){
+    const row=document.createElement('label');
+    row.className='region';
+    const input=document.createElement('input');
+    input.type='checkbox';
+    input.checked=session.selected.includes(c.id);
+    input.dataset.id=c.id;
+    input.onchange=applySelection;
+    const radio=document.createElement('input');
+    radio.type='radio';
+    radio.name='support';
+    radio.checked=session.support===c.id;
+    radio.title='设为承托面';
+    radio.disabled=c.kind==='thin_line_proposal';
+    radio.onchange=async()=>{
+      try{
+        session=await api(endpoint('/support'),post({revision:session.revision,support:c.id}));
+        showLive();
+        say('已选择承托面，重新预览后核对接触斑');
+      }catch(e){error(e)}
+    };
+    const labels=[`${radio.disabled?'细钢件':'区域'} ${c.id}`];
+    if(c.object_overlap_pixels>0)labels.push(input.checked?'已设为前景':'与物体相交，前后待确认');
+    if(c.support_score>0)labels.push(`接触斑覆盖 ${Math.round(c.support_score*100)}%`);
+    row.append(input,radio,document.createTextNode(labels.join(' · ')));
+    row.onmouseenter=()=>showMask(c.id);
+    row.onmouseleave=()=>$('mask').hidden=true;
+    root.append(row);
+  }
+  if(!ranked.length)root.textContent='没有检测到候选区域，遮挡仍需人工检查。';
+}
 function showMask(n){$('mask').src=endpoint('/mask/'+n);$('mask').hidden=false}
 async function applySelection(){try{let ids=[...document.querySelectorAll('#regions input[type=checkbox]:checked')].map(x=>Number(x.dataset.id));session=await api(endpoint('/selection'),post({revision:session.revision,selected:ids}));showLive();say('已更新前景区域，可撤销')}catch(e){error(e)}}
-async function generate(){try{await syncPending();say('正在分析承托面、渲染并核对投影，首次分析可能需要几分钟…');renderer.render(scene,camera);session=await api(endpoint('/preview'),post({revision:session.revision,image:renderer.domElement.toDataURL('image/png')}));candidates();$('exports').innerHTML='';$('result').src=endpoint('/preview.png')+'?t='+Date.now();$('result').hidden=false;$('object').hidden=true;$('mask').hidden=true;$('download').href=$('result').src;$('download').hidden=false;$('checks').textContent=`物体包围框长边 ${session.rendered_major_px} px；网页与 Blender 投影 IoU：${session.projection_iou}。环境光：${session.scene_light?.status||'未知'}；接触阴影：${session.shadow?.status||'未生成'}。`+session.warnings.join(' ');say('待审预览已生成')}catch(e){error(e)}}
+async function generate(){
+  try{
+    await syncPending();
+    if(!session||!model)throw Error('请先选择背景和物品');
+    const {id,revision}=session;
+    say('正在核对投影、接触斑和场景光色…');
+    renderer.render(scene,camera);
+    const updated=await api(endpoint('/preview'),post({revision,image:renderer.domElement.toDataURL('image/png')}));
+    if(session.id!==id||session.revision!==revision||session.generation>updated.generation||syncTimer)return;
+    session=updated;
+    candidates();
+    $('exports').innerHTML='';
+    $('result').src=endpoint('/preview.png')+'?t='+Date.now();
+    $('result').hidden=false;
+    $('object').hidden=true;
+    $('mask').hidden=true;
+    $('download').href=$('result').src;
+    $('download').hidden=false;
+    $('checks').textContent=`投影长边 ${session.rendered_major_px} px，网页与 Blender 的轮廓 IoU 为 ${session.projection_iou}。`+session.warnings.join(' ');
+    say('待审预览已生成');
+  }catch(e){error(e)}
+}
 async function syncPending(){if(syncTimer){clearTimeout(syncTimer);syncTimer=null;await sync()}else await syncQueue}
 function showLive(){$('result').hidden=true;$('object').hidden=!model;$('download').hidden=true;$('exports').innerHTML=''}
 function drag(handle,mode){handle.addEventListener('contextmenu',ev=>{if(mode==='move')ev.preventDefault()});handle.addEventListener('pointerdown',ev=>{if(!session)return;ev.preventDefault();ev.stopPropagation();showLive();const activeMode=mode==='move'&&(interactionMode==='rotate'||ev.button===2||ev.shiftKey)?'rotate':mode;const roll=ev.button===2||ev.shiftKey;handle.setPointerCapture(ev.pointerId);let start={...position},x=ev.clientX,y=ev.clientY;const move=ev=>{let scale=session.width/$('stage').clientWidth,dx=ev.clientX-x,dy=ev.clientY-y;if(activeMode==='move'){position.x=Math.max(0,Math.min(session.width,start.x+dx*scale));position.y=Math.max(0,Math.min(session.height,start.y+dy*scale));layout()}else if(activeMode==='rotate'){if(ev.altKey){position.azimuth=((start.azimuth+dx*.35)%360+360)%360;position.elevation=Math.max(-89,Math.min(89,start.elevation-dy*.25));render()}else if(roll){position.rot_z=Math.max(-180,Math.min(180,start.rot_z+dx*.35));applyModelRotation()}else{position.rot_y=Math.max(-180,Math.min(180,start.rot_y+dx*.35));position.rot_x=Math.max(-180,Math.min(180,start.rot_x-dy*.25));applyModelRotation()}layout()}else{position.size=Math.max(16,Math.min(Math.max(session.width,session.height),start.size+(dx+dy)*scale));layout()}};const end=()=>{handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);schedule()};handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end)})}
