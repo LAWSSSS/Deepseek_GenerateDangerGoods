@@ -342,6 +342,7 @@ def configure_materials(obj,request,reference=True):
     for material in obj.data.materials:
         if not material or not material.use_nodes:continue
         for node in list(material.node_tree.nodes):
+            if node.get('display_deposit'):continue
             if node.type=='BSDF_PRINCIPLED':
                 tree=material.node_tree
                 if not tree.nodes.get('batch_metallic_aov'):
@@ -410,7 +411,74 @@ def render(request):
                 'depth0001.exr','metallic0001.exr','upward0001.exr']}
 
 
+def native_surface(material, bsdf, request):
+    tree = material.node_tree
+    metallic = bsdf.inputs['Metallic']
+    kind = material_kind(material.name, metallic.default_value, metallic.is_linked,
+                         request.get('material_classes', []))
+    maximum = {'metal':.065, 'paint':.13, 'rust':.08, 'polymer':.035, 'mixed':.025}.get(kind, 0.)
+    if not maximum:
+        return
+    strength = tree.nodes.get('native deposit amount')
+    deposit = tree.nodes.get('native dielectric deposit')
+    adjustment = tree.nodes.get('native roughness adjustment')
+    if strength is None:
+        output = next(n for n in tree.nodes if n.type=='OUTPUT_MATERIAL' and n.is_active_output)
+        original = output.inputs['Surface'].links[0].from_socket
+        geometry = tree.nodes.new('ShaderNodeNewGeometry')
+        normal = tree.nodes.new('ShaderNodeVectorMath')
+        normal.operation = 'DOT_PRODUCT'
+        normal.inputs[1].default_value = (0,0,1)
+        tree.links.new(geometry.outputs['Normal'], normal.inputs[0])
+        exposed = tree.nodes.new('ShaderNodeMapRange')
+        exposed.inputs['From Min'].default_value = -1.
+        exposed.inputs['To Min'].default_value = .15
+        tree.links.new(normal.outputs['Value'], exposed.inputs[0])
+        coordinates = tree.nodes.new('ShaderNodeTexCoord')
+        variation = tree.nodes.new('ShaderNodeTexNoise')
+        variation.inputs['Scale'].default_value = 28.
+        tree.links.new(coordinates.outputs['Object'], variation.inputs['Vector'])
+        weight = tree.nodes.new('ShaderNodeMath')
+        weight.operation = 'MULTIPLY'
+        tree.links.new(variation.outputs['Fac'], weight.inputs[0])
+        tree.links.new(exposed.outputs[0], weight.inputs[1])
+        strength = tree.nodes.new('ShaderNodeMath')
+        strength.name = 'native deposit amount'
+        strength.operation = 'MULTIPLY'
+        tree.links.new(weight.outputs[0], strength.inputs[0])
+        deposit = tree.nodes.new('ShaderNodeBsdfPrincipled')
+        deposit.name = 'native dielectric deposit'
+        deposit['display_deposit'] = True
+        deposit.inputs['Metallic'].default_value = 0.
+        deposit.inputs['Roughness'].default_value = .85
+        mix = tree.nodes.new('ShaderNodeMixShader')
+        tree.links.new(strength.outputs[0], mix.inputs[0])
+        tree.links.new(original, mix.inputs[1])
+        tree.links.new(deposit.outputs['BSDF'], mix.inputs[2])
+        tree.links.new(mix.outputs[0], output.inputs['Surface'])
+        adjustment = tree.nodes.new('ShaderNodeMath')
+        adjustment.name = 'native roughness adjustment'
+        adjustment.operation = 'ADD'
+        adjustment.use_clamp = True
+        roughness = bsdf.inputs['Roughness']
+        if roughness.is_linked:
+            tree.links.new(roughness.links[0].from_socket, adjustment.inputs[0])
+        else:
+            adjustment.inputs[0].default_value = roughness.default_value
+        tree.links.new(adjustment.outputs[0], roughness)
+    # The recognizer's specific surface-clean defect can request a stronger coat.
+    # Airlight is never an input, and the original metal or polymer shader remains intact.
+    extra = max(0.,request.get('dust_control',1.)-1.)
+    coat = maximum + min(extra/.30,1.)*{'metal':.28,'paint':.32,'rust':.12,'polymer':.20,'mixed':.07}.get(kind,0.)
+    strength.inputs[1].default_value = min(.5,coat*request.get('dust_gain',1.))
+    deposit.inputs['Base Color'].default_value = (*request['environment']['dust_color'], 1)
+    adjustment.inputs[1].default_value = float(np.clip(request.get('roughness_delta',0), -.04, .045))
+
+
 def scene_surface(material, bsdf, request):
+    if request.get('appearance')=='native':
+        native_surface(material,bsdf,request)
+        return
     tree=material.node_tree
     metal=bsdf.inputs['Metallic']
     kind=material.get('display_surface_kind')
@@ -563,8 +631,8 @@ def scene_lighting(state, camera, environment, gain, reference):
         light=environment.get('light_level',1.)
         target=Vector(camera['target'])
         if direction:
-            right=Vector(camera['basis'][0])
-            offset=right*(3.8*direction[0])+Vector((0,-1.6,4.1-1.6*direction[1]))
+            from display_batch.geometry import illumination_axis
+            offset=Vector(illumination_axis(camera,direction))*4.6
             lights=[(offset,210*light*gain,4.6+2*(1-spread)),((0,2.5,2.8),70*light,6.5)]
         else:
             lights=[((0,-.4,4.6),155*light*gain,7.5),((0,2.2,2.7),62*light,6.8)]
@@ -572,9 +640,19 @@ def scene_lighting(state, camera, environment, gain, reference):
             # The observed surroundings dominate reflections. These broad area
             # lights provide modest soft shadows where the sky is unobserved.
             lights=[(offset,power*.46,size*1.28) for offset,power,size in lights]
+        if environment.get('calibration'):
+            # Light profiles alter the broad key/fill ratio as well as its energy.
+            # The soft profile widens the source; it cannot create a narrow studio stripe.
+            width=1.30 if gain<1 else .85 if gain>1 else 1.
+            offset,power,size=lights[0]
+            lights[0]=(offset,power,size*width)
+            offset,power,size=lights[1]
+            lights[1]=(offset,power*(1.12 if gain<1 else .85 if gain>1 else 1.),size)
     pixels=np.ones((128,256,4),np.float32)
     if probe is not None:
         pixels[:,:,:3]=np.repeat(np.repeat(np.asarray(probe,np.float32),2,axis=0),2,axis=1)
+        if environment.get('calibration'):
+            pixels[:,:,:3]*=gain
     else:
         pixels[:,:,:3]=sky[:,:,None]*color
     image=state['world_image'];image.pixels.foreach_set(pixels.ravel());image.update()

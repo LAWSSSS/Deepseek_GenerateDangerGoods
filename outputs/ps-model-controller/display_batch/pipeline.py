@@ -28,6 +28,7 @@ from .framing import edit_bounds, final_resolution
 from .rendering import RenderCache, RENDER_VERSION
 from .review import allowed_actions, evidence_status, fusion_actions, inspect, repair, PLACEMENT_DEFECTS
 from .materials import material_kind, SURFACE_DUST
+from .atmosphere import Atmospheres
 
 COMPOSE_VERSION='scrap-gray-pile-v6-window'
 
@@ -169,6 +170,7 @@ class Pipeline:
         self.blender=Blender(self.cache/('worker-'+str(os.getpid())),config.render_device)
         self.renders=RenderCache(self.cache,self.blender)
         self.scenes=Scenes(self.cache,self.vision);self.assets={}
+        self.atmospheres=Atmospheres(self.cache,self.vision)
         self.catalog=load_catalog();self.store=Store(self.out/'jobs.sqlite')
         self.cpu=asyncio.Semaphore(config.cpu_concurrency)
         self.prepare_lock=asyncio.Lock()
@@ -200,6 +202,8 @@ class Pipeline:
 
     async def render(self,asset,scene,candidate,params,resolution):
         style=self.render_style
+        if style=='native':
+            scene['atmosphere']=await self.atmospheres.prepare(scene)
         environment,samples=await asyncio.to_thread(sample_environment,scene,candidate,
             scene_lighting=style in ('scene','native'),native=style=='native')
         render_candidate=candidate
@@ -216,6 +220,9 @@ class Pipeline:
     def render_style(self):
         if self.config.appearance=='native':return 'native'
         return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
+
+    async def choose_placements(self,asset,scene,seed):
+        return await asyncio.to_thread(choose_candidates,asset,scene,seed,self.config)
 
     async def validate_local_pose(self,asset,scene,candidate):
         if candidate.get('placement'):
@@ -345,7 +352,8 @@ class Pipeline:
     def default_params(self,candidate):
         photo_model={'native':'native','camera':'camera','scene':'camera'}.get(self.config.appearance,'reference')
         return {'candidate':candidate,'material':'original','light':'scene','tone':'scene','photo_model':photo_model,
-                'photo_style':self.config.photo_style,**{k:'auto' for k in PHOTO_CONTROLS}}
+                'photo_style':self.config.photo_style,'atmosphere':self.config.atmosphere,
+                **{k:'auto' for k in PHOTO_CONTROLS}}
 
     @staticmethod
     def finish_image(out,ident,result,best):
@@ -394,7 +402,7 @@ class Pipeline:
             result['scene_signature']=scene['key'];result['physics_signature']=asset['physics_signature']
             async with self.cpu:
                 stage_start=time.monotonic()
-                candidates,rejected=await asyncio.to_thread(choose_candidates,asset,scene,payload['seed'],self.config)
+                candidates,rejected=await self.choose_placements(asset,scene,payload['seed'])
             result['timings']['placement_seconds']=round(time.monotonic()-stage_start,3)
             candidates=sorted(candidates,key=lambda c:(len(set(c.get('uncertainties',[]))),-c['score']))[:3]
             ready={};invalid=set()

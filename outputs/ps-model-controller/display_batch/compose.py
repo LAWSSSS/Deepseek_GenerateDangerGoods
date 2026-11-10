@@ -14,6 +14,8 @@ from .photography import match_linear, sensor_statistics
 from .pile import depth_order
 from .framing import edit_bounds
 from .fusion import camera_psf, camera_tones, contact_darkening, optical_layer, reflection_probe
+from .atmosphere import (calibrate_environment, transmission_fields, fogged_radiance,
+                         shadowed_background)
 
 
 def linear(rgb):
@@ -41,6 +43,17 @@ def sample_environment(scene, candidate, *, scene_lighting=False, native=False):
         sample=support_union.copy() & ~scene['protected']
     if sample.sum()<100:raise ValueError('insufficient_same_surface_light_samples')
     lo,hi=np.percentile(lum[sample],[12,92]);sample &= (lum>=lo)&(lum<=hi)
+    sample_basis='same_support_estimate'
+    if native:
+        # Multiple support fragments can span depth. Use the landing layer for calibration.
+        comparable=sample & (abs(scene['depth_native']-site['depth'])<=.085)
+        chroma=(rgb.max(axis=2).astype(float)-rgb.min(axis=2))/255
+        comparable &= (chroma<.22)&(rgb.max(axis=2)<240)
+        if comparable.sum()>=100:
+            sample=comparable
+            sample_basis='same_depth_neutral_surface'
+        else:
+            sample_basis='support_fallback_insufficient_comparable_material'
     pixels=rgb[sample].astype(float);median=np.median(pixels,axis=0)
     # Keep albedo separate from illumination: only a restrained neutral cast is estimated.
     tint=np.clip(median/max(float(median.mean()),1),.88,1.12)
@@ -49,7 +62,7 @@ def sample_environment(scene, candidate, *, scene_lighting=False, native=False):
     answer=scene['answer']
     environment={'world_color':(ambient*tint).tolist(),'light_color':(tint/tint.max()).tolist(),
                  'key_direction':answer['light_direction'] if answer['light_confidence']>=.55 else None,
-                 'haze':answer['haze'],'sample_count':int(sample.sum()),
+                 'haze':answer['haze'],'sample_count':int(sample.sum()),'sample_basis':sample_basis,
                  'sample_hash':hashlib.sha256(np.packbits(sample)).hexdigest(),
                  'luma_median':luminance,'basis':'same_support_estimate',
                  'dust_color':linear(median/255).tolist(),
@@ -68,7 +81,11 @@ def sample_environment(scene, candidate, *, scene_lighting=False, native=False):
     if native:
         # The projection supplies only a local reflection estimate, not measured HDR.
         valid=scene['allowed']&~scene['protected']
-        probe,fraction=reflection_probe(rgb,valid,candidate,environment)
+        reflection_frame=rgb
+        if scene.get('atmosphere'):
+            compensated=calibrate_environment(scene,candidate,environment,sample)
+            reflection_frame=cv2.resize(compensated,(w,h),interpolation=cv2.INTER_LINEAR)
+        probe,fraction=reflection_probe(reflection_frame,valid,candidate,environment)
         environment.update(reflection_probe=probe,reflection_coverage=fraction,
                            lighting_basis='local_ground_reflection_estimate',
                            camera_psf=camera_psf(rgb[t:bb,l:rr],valid[t:bb,l:rr]))
@@ -182,14 +199,19 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     offset=np.asarray(candidate['anchor_px'])-np.asarray(render_meta['anchor_uv'])*candidate['full_px']
     full=candidate['full_px'];window=object_window(render_meta)
     color_alpha=warp(source,full,offset,bounds,window=window)
-    alpha=warp(alpha_source,full,offset,bounds) if fixed_alpha else color_alpha
+    alpha_window=candidate.get('fixed_alpha_window') if fixed_alpha else window
+    alpha=warp(alpha_source,full,offset,bounds,window=alpha_window) if fixed_alpha else color_alpha
     spec=cv2.imread(str(render_dir/'specular0001.exr'),cv2.IMREAD_UNCHANGED)
     diff=cv2.imread(str(render_dir/'diffuse0001.exr'),cv2.IMREAD_UNCHANGED)
     if spec is None or diff is None:raise ValueError('missing_linear_material_passes')
     combined_path=render_dir/'combined0001.exr'
     combined=cv2.imread(str(combined_path),cv2.IMREAD_UNCHANGED) if combined_path.is_file() else None
     radiance=(combined[:,:,:3] if combined is not None else spec[:,:,:3]+diff[:,:,:3])[:,:,::-1]
-    raw=warp(radiance,full,offset,bounds,window=window)/np.maximum(color_alpha[...,None],1e-6)
+    # EXR radiance is associated with its float coverage, not the rounded PNG alpha.
+    # Keep geometric coverage frozen while avoiding bright/dark fractional edge fringes.
+    beauty_alpha=combined[:,:,3] if combined is not None and combined.shape[2]==4 else source
+    beauty_coverage=warp(beauty_alpha,full,offset,bounds,window=window)
+    raw=warp(radiance,full,offset,bounds,window=window)/np.maximum(beauty_coverage[...,None],1e-6)
     highlight=np.max(spec[:,:,:3],axis=2)/np.maximum(np.max(spec[:,:,:3]+diff[:,:,:3],axis=2),.0001)
     if 'object_window' in render_meta:
         # Beauty is the denoised radiance. The other passes are only smooth guides.
@@ -213,9 +235,10 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     support=np.logical_or.reduce([s['mask'][y:b,x:r] for s in scene['supports']
         if s['id'] in candidate.get('support_ids',[site['id']])]);protected=scene['protected'][y:b,x:r]
     order={'confidence':'legacy_estimate','basis':'frozen_original_occlusion'}
+    object_z=np.zeros_like(alpha)
     if candidate.get('placement') and not candidate.get('legacy_occlusion'):
         object_z=depth_on_image(alpha_dir/'depth0001.exr',alpha_source,full,offset,bounds,
-                                render_meta['camera'],None if fixed_alpha else window)
+                                render_meta['camera'],alpha_window)
         foreground,order=depth_order(scene,candidate,bounds,object_z,alpha,refine=True)
         if window is not None and not fixed_alpha:
             order['depth_unresolved_fraction']=float(((object_z<=0)&(alpha>.5)).sum()/max(1,(alpha>.5).sum()))
@@ -257,14 +280,34 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         supported=bool(cover and min(cover)>=.9 and physics.get('stable') and physics.get('status')=='pass')
         contact=contact_darkening(foot,support,foreground|protected,candidate['target_px'],supported)
         loss=np.maximum(loss,contact)
-        rgb,local_tones=camera_tones(rgb,alpha,reference_pixels,channels.get('metallic'),photo['polymer_preservation'])
+        local_tones={'basis':'material_luminance_preserved_after_local_light_calibration'}
+        if not environment.get('calibration'):
+            rgb,local_tones=camera_tones(rgb,alpha,reference_pixels,channels.get('metallic'),photo['polymer_preservation'])
         photo['after_luma']=float(np.median((rgb@np.float32([.2126,.7152,.0722]))[alpha>.85])*255)
         if foreground.any() and order.get('confidence')=='estimated' and (foreground&(alpha>.5)).any():
             # A nearby foreground face screens a small amount of diffuse light.
             distance=cv2.distanceTransform((~foreground).astype(np.uint8),cv2.DIST_L2,cv2.DIST_MASK_PRECISE)
             rgb*=1-.07*np.exp(-distance[...,None]/max(2.,min(7.,candidate['target_px']*.012)))
-        psf=environment['camera_psf']
         from .schema import PHOTO_CONTROLS
+        atmospheric=None
+        if scene.get('atmosphere'):
+            object_t,background_t,airlight,depth_basis=transmission_fields(scene,bounds,object_z,order,
+                PHOTO_CONTROLS['haze'][params.get('haze','auto')],params.get('atmosphere','auto')=='auto',candidate=candidate)
+            rgb=srgb(fogged_radiance(linear(rgb),object_t,airlight))
+            atmospheric=(background_t,airlight)
+            summary=scene['atmosphere']['summary']
+            photo['atmosphere']={'signature':scene['atmosphere']['signature'],'mode':params.get('atmosphere','auto'),
+                'confidence':summary['confidence'],'depth_basis':depth_basis,
+                'depth_confidence':summary.get('depth_confidence','unknown'),
+                'sampling_confidence':summary.get('sampling_confidence',0.),
+                'transmission_range':np.percentile(object_t[alpha>.85],[5,50,95]).tolist(),
+                'airlight_camera_linear':np.median(airlight[alpha>.85],axis=0).tolist(),
+                'analysis':str(Path(scene['atmosphere']['folder'])/'estimate.json')}
+            photo['haze']=float(np.median(1-object_t[alpha>.85]))
+            photo['after_luma']=float(np.median((rgb@np.float32([.2126,.7152,.0722]))[alpha>.85])*255)
+            for label,value in PHOTO_CONTROLS['haze'].items():
+                photo['effective_controls'][label]['haze']=value if photo['haze']>.001 else 0.
+        psf=environment['camera_psf']
         sharpness=PHOTO_CONTROLS['sharpness'][params.get('sharpness','auto')]
         premult,optical_alpha,sigma,overlap=optical_layer(rgb,alpha,psf['sigma_px'],sharpness)
         write=(~foreground)&(~protected)&(scene['allowed'][y:b,x:r] | (alpha>0))
@@ -282,7 +325,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     loss[loss<1/512]=0
     if native:
         photo['visible_shadow_pixels']=int(((loss>.025)&(optical_alpha<.10)).sum())
-    shaded=linear(crop)*(1-loss[:,:,None])
+    shaded=shadowed_background(linear(crop),loss,*atmospheric) if native and atmospheric is not None else linear(crop)*(1-loss[:,:,None])
     result=srgb(shaded*(1-optical_alpha[:,:,None])+premult)
     if native:
         noise=float(np.clip(environment['sensor']['noise_sigma'],0,.012))
@@ -340,6 +383,10 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
       'holes_alpha':{'status':'pass','basis':'unchanged_object_alpha_before_foreground_mask'},
       'size':{'status':'pass' if exported_size==[w,h] else 'fail','pixels':exported_size},
     }
+    if photo.get('atmosphere'):
+        atmosphere=photo['atmosphere']
+        checks['atmosphere']={'status':'pass' if atmosphere['confidence']=='estimated' and atmosphere['mode']=='auto' else 'unknown',
+            'basis':'image_estimated_airlight_and_transmission','evidence':atmosphere}
     local=Image.fromarray(base_rgb).crop((x,y,r,b));local.thumbnail((1000,800));local.save(Path(out).with_suffix('.crop.jpg'),quality=92)
     thumb=Image.fromarray(base_rgb);thumb.thumbnail((1536,1024));thumb.save(Path(out).with_suffix('.full.jpg'),quality=88)
     if candidate.get('placement'):

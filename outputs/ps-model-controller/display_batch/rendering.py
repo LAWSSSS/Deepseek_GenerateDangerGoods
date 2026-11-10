@@ -16,7 +16,7 @@ from .schema import LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS
 
 
 REFERENCE_RENDER_VERSION = 'pbr-linear-patina-v9'
-RENDER_VERSION = 'render-parts-v1'
+RENDER_VERSION = 'render-parts-v2-material-layer'
 PART_FILES = {
     'object': ('object.png', 'combined0001.exr', 'diffuse0001.exr', 'specular0001.exr',
                'depth0001.exr', 'metallic0001.exr', 'upward0001.exr'),
@@ -61,12 +61,12 @@ def part_keys(request, device, dependencies):
     fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe')
     environment=request['environment']
     light={k:environment[k] for k in fields if k in environment}
+    light['calibrated']=bool(environment.get('calibration'))
     shared=(RENDER_VERSION,dependencies,device,request['appearance'],request['camera'],
             request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'])
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
              request['dust_gain'],request['dust_control'],request['material_classes'],
-             environment.get('dust_color'),environment.get('haze'),
-             environment.get('sensor',{}).get('surface_detail_rms') if request['appearance']=='native' else None)
+             environment.get('dust_color'),environment.get('haze') if request['appearance']!='native' else None)
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),

@@ -25,22 +25,29 @@ uncertain when evidence is insufficient, and visible when a clue remains. Identi
 noticeable clue in evidence. Check material, structure and the original five scores on the same
 0–4 scale, with 3 usable and 4 convincing. Respect occlusion and intentional model revisions.
 Give only visible image defects. Each defect must describe the cue and where it appears.
+Distinguish haze_clear (object too clear for nearby haze), haze_heavy (excessive object veil),
+light_direction, reflection_flat (lost metal response), reflection_hard (studio-like reflection),
+and surface_clean (evidenced missing surface dirt). Airborne haze does not imply deposited dust.
+Judge airlight, raised shadow levels and contrast against nearby surfaces of similar depth.
+Do not demand a hazy object to have showroom crispness or all materials to match the ground colour.
 Return JSON with trace, scores, defects and evidence. Each defect has only code, severity and evidence."""
 
 PLACEMENT_DEFECTS={'upright','floating','penetration','occlusion','scale','camera','shadow','structure'}
 ACTION_CAUSES={
     'candidate':PLACEMENT_DEFECTS,
-    'material':{'material','texture'},
-    'light':{'lighting','shadow','color','material'},
+    'material':{'material','texture','reflection_flat','reflection_hard'},
+    'light':{'lighting','shadow','color','material','light_direction','reflection_flat','reflection_hard'},
     'tone':{'color','lighting'},
     'chroma':{'color','material'},
-    'dust':{'material','color','texture'},
+    'dust':{'material','color','texture','surface_clean'},
     'contrast':{'lighting','texture','material'},
-    'haze':{'color','lighting','texture'},
+    'haze':{'color','lighting','texture','haze_clear','haze_heavy'},
     'sharpness':{'edge','texture'},
 }
 CAUSE_SCORES={'upright':'support','floating':'support','penetration':'support','scale':'support',
-              'camera':'support','shadow':'lighting','color':'lighting'}
+              'camera':'support','shadow':'lighting','color':'lighting','haze_clear':'lighting',
+              'haze_heavy':'lighting','light_direction':'lighting','reflection_flat':'material',
+              'reflection_hard':'material','surface_clean':'material'}
 
 
 def evidence_status(checks):
@@ -56,6 +63,7 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
         options.pop('material');options.pop('dust')
     elif params['photo_model']=='camera' and render_style=='reference':
         options.pop('dust')
+    if params.get('atmosphere')=='off':options.pop('haze',None)
     controls=photo.get('effective_controls',{})
     for kind,values in list(options.items()):
         current=params[kind]
@@ -79,17 +87,23 @@ def fusion_actions(review, comp, allowed):
     issues=severe or defects
     photo=comp['photo']
     options=[]
+    if 'haze_clear' in issues:options.append(('haze','more'))
+    if 'haze_heavy' in issues:options.append(('haze','less'))
     if issues&{'floating','penetration','occlusion','scale','camera','upright'} and allowed.get('candidate'):
         options.append(('candidate',allowed['candidate'][0]))
     if issues&{'lighting','material'} and photo.get('local_tones',{}).get('bright_band_fraction',0)>.12:
         options.append(('light','softer'))
-    if issues&{'material','texture'}:
-        options.append(('material','weathered'))
+    if 'light_direction' in issues:options.append(('light','softer'))
+    if 'reflection_flat' in issues:options.append(('material','clearer'))
+    if 'reflection_hard' in issues:options.append(('material','softer'))
+    if 'surface_clean' in issues:options.append(('dust','more'))
     if 'color' in issues and photo.get('after_chroma',0)>photo.get('scene_chroma',0)+3:
         options.append(('chroma','more'))
-    if 'lighting' in issues:
+    if 'lighting' in issues and not photo.get('calibration'):
         difference=photo.get('after_luma',0)-photo.get('target_luma',0)
         if abs(difference)>10:options.append(('tone','darker' if difference>0 else 'brighter'))
+    if 'lighting' in issues and photo.get('exposure_limited'):
+        options.append(('light','defined'))
     if 'shadow' in issues and comp['checks'].get('physics',{}).get('status')=='pass':
         options.append(('light','defined'))
     if 'edge' in issues:

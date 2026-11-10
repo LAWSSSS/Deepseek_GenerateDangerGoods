@@ -36,6 +36,7 @@ class BatchConfig(Strict):
     price_output_per_million: float | None = Field(default=None, ge=0)
     # New photographic profiles are promoted after staged evaluation.
     appearance: Literal['reference','camera','materials','scene','native'] = 'reference'
+    atmosphere: Literal['auto','off'] = 'auto'
     review_format: Literal['full','compact'] = 'full'
 
 
@@ -79,6 +80,23 @@ class SceneAnswer(Strict):
         return self
 
 
+class AtmosphereAnswer(Strict):
+    kind: Literal['clear','haze','veil','mixed','uncertain']
+    confidence: Unit
+    haze_regions: list[tuple[Unit, Unit, Unit, Unit]] = Field(max_length=6)
+    light_regions: list[tuple[Unit, Unit, Unit, Unit]] = Field(max_length=6)
+    exclude_regions: list[tuple[Unit, Unit, Unit, Unit]] = Field(max_length=6)
+    light_direction: tuple[float, float] | None
+    evidence: str = Field(max_length=240)
+
+    @model_validator(mode='after')
+    def ordered_regions(self):
+        for left,top,right,bottom in self.haze_regions+self.light_regions+self.exclude_regions:
+            if left>=right or top>=bottom:
+                raise ValueError('region must be ordered [left, top, right, bottom]')
+        return self
+
+
 class AssetAnswer(Strict):
     major_mm: tuple[float, float]
     assembly: Literal["rigid_assembly", "single_piece", "loose_parts", "unknown"]
@@ -107,7 +125,8 @@ class Scores(Strict):
 
 
 DefectCode = Literal["upright", "floating", "penetration", "occlusion", "scale", "camera",
-                     "material", "lighting", "color", "shadow", "edge", "texture", "structure"]
+                     "material", "lighting", "color", "shadow", "edge", "texture", "structure",
+                     "haze_clear", "haze_heavy", "light_direction", "reflection_flat", "reflection_hard", "surface_clean"]
 
 
 class Defect(Strict):
@@ -134,7 +153,8 @@ class Review(Strict):
 
     def photo_passes(self):
         return min(self.scores.lighting,self.scores.material,self.scores.texture)>=3 and not any(
-            d.severity in ('major','fatal') and d.code in ('color','lighting','material','texture')
+            d.severity in ('major','fatal') and d.code in ('color','lighting','material','texture',
+                'haze_clear','haze_heavy','light_direction','reflection_flat','reflection_hard','surface_clean')
             for d in self.defects)
 
 

@@ -12,5 +12,6 @@
   "photo_style": "scrap_gray",
   "appearance": "native",
   "placement_mode": "auto",
-  "uncertain_policy": "render_review"
+  "uncertain_policy": "render_review",
+  "atmosphere": "auto"
 }

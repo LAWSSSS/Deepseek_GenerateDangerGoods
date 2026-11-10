@@ -2,7 +2,7 @@
 import numpy as np
 import cv2
 
-from .geometry import project
+from .geometry import project, illumination_axis
 from .photography import LUMA, linear
 
 
@@ -40,14 +40,13 @@ def reflection_probe(frame, valid, candidate, environment):
     coverage = cv2.remap(weight,mx,my,cv2.INTER_LINEAR)
     ground = (elevation<-.1)&(length<2.)&(coverage>.5)
     baseline = np.maximum(environment['dust_color'],.025)
-    reflection = np.clip(sampled/baseline,.40,1.75)**.65
+    calibrated=bool(environment.get('calibration'))
+    reflection = np.clip(sampled/baseline,.12,2.4) if calibrated else np.clip(sampled/baseline,.40,1.75)**.65
     confidence = np.clip((coverage-.45)*2,0,1)*np.clip(-elevation*4,0,1)*ground
     neutral = np.asarray(environment['world_color'])
-    sky = .72+.46*np.maximum(elevation,0)
+    sky = .35+1.25*np.maximum(elevation,0) if calibrated else .72+.46*np.maximum(elevation,0)
     if environment.get('key_direction') is not None:
-        dx,dy=environment['key_direction']
-        axis=np.asarray(camera['basis'][0])*dx+np.array([0.,-.25,1.-dy*.45])
-        axis/=np.linalg.norm(axis)
+        axis=illumination_axis(camera,environment['key_direction'])
         facing=np.sum(directions*axis,axis=-1)
         sky+=.62*environment['light_confidence']*np.exp(-(1-facing)/.31)*np.maximum(elevation,0)
     radiance = neutral*sky[...,None]
@@ -146,11 +145,13 @@ def optical_layer(rgb, alpha, psf, sharpness):
     sigma = float(np.sqrt(max(psf**2-.38**2,0))/sharpness)
     premult = linear(rgb)*alpha[...,None]
     original = alpha>.5
-    if sigma>.18:
-        softened = cv2.GaussianBlur(alpha,(0,0),sigma,borderType=cv2.BORDER_CONSTANT)
+    # If a tiny hole limits the measured PSF, retain the strongest safe fraction.
+    for trial in (sigma,sigma*.75,sigma*.5,sigma*.25):
+        if trial<=.18:continue
+        softened = cv2.GaussianBlur(alpha,(0,0),trial,borderType=cv2.BORDER_CONSTANT)
         mask = softened>.5
         overlap = (mask&original).sum()/max(1,(mask|original).sum())
         if overlap>=.995 and topology(mask)==topology(original):
-            return (cv2.GaussianBlur(premult,(0,0),sigma,borderType=cv2.BORDER_CONSTANT),
-                    softened,sigma,float(overlap))
+            return (cv2.GaussianBlur(premult,(0,0),trial,borderType=cv2.BORDER_CONSTANT),
+                    softened,trial,float(overlap))
     return premult,alpha,0.,1.

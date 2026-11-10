@@ -44,6 +44,16 @@ def project(points, camera):
     return np.column_stack([.5+xy[:,0],.5-xy[:,1]])
 
 
+def illumination_axis(camera, screen_direction):
+    """Lift a screen light direction above the horizon without rotating its projection."""
+    right, up, forward = np.asarray(camera['basis'], dtype=float)
+    dx, dy = screen_direction
+    axis = right*dx-up*dy
+    toward_camera = max(.45, (.25-axis[2])/max(-forward[2], .05))
+    axis -= forward*toward_camera
+    return axis/np.linalg.norm(axis)
+
+
 def contact_world(points, faces, band=.008, normal=(0,0,1)):
     # Clip each original triangle to the real ground band. Separate feet remain separate.
     normal=np.asarray(normal,dtype=float);normal/=np.linalg.norm(normal)

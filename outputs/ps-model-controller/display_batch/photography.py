@@ -7,7 +7,7 @@ import numpy as np
 from .common import BLENDER
 from .schema import TONE_PROFILES, PHOTO_CONTROLS
 
-VERSION='scrap-gray-camera-v7'
+VERSION='scrap-gray-camera-v8-atmosphere'
 REFERENCE_VERSION='scrap-gray-linear-v4-materials'
 LUMA=np.array([.2126,.7152,.0722],np.float32)
 
@@ -86,22 +86,31 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     median=np.median(pixels,axis=0)
     cast=np.clip(median/max(1.,median.mean()),.87,1.13)
     extra_ev,temperature=TONE_PROFILES[params.get('tone','scene')]
+    calibration=environment.get('calibration')
+    if calibration:
+        cast=np.asarray(calibration['white_balance'],np.float32)
     cast*=np.array([1+temperature*.008,1,1-temperature*.008])
     # Solve exposure in radiance, evaluating but never recursively re-applying AgX.
     sample=raw[lit][::max(1,int(lit.sum()/1024))]*cast
     scene_weight=.8 if reference else .70
     goal=scene_weight*target+(1-scene_weight)*before
     low,high=-1.5,2.
-    for _ in range(9):
-        middle=(low+high)/2
-        if np.median(display(sample*2**middle)@LUMA)<goal:low=middle
-        else:high=middle
-    base_ev=(low+high)/2
+    if calibration:
+        base_ev=calibration['exposure_ev']
+    else:
+        for _ in range(9):
+            middle=(low+high)/2
+            if np.median(display(sample*2**middle)@LUMA)<goal:low=middle
+            else:high=middle
+        base_ev=(low+high)/2
     ev=float(base_ev+extra_ev if reference else np.clip(base_ev+extra_ev,-1.5,2.))
     exposure_error=float(np.median(display(sample*2**ev)@LUMA)-goal)
     exposure_limited=bool(abs(exposure_error)>.035 and (ev>1.99 or ev<-1.49))
+    if calibration:
+        exposure_error=0.
+        exposure_limited=calibration['limited']
     radiance=np.maximum(raw,0)*cast*2**ev
-    haze_base=environment.get('haze',0)*(1 if reference else .42)
+    haze_base=0. if calibration else environment.get('haze',0)*(1 if reference else .42)
     haze_limit=.3 if reference else .16
     haze=float(np.clip(haze_base*control(params,'haze'),0,haze_limit))
     veil=linear(median/255)
@@ -124,6 +133,7 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     luma_iqr=float(np.diff(np.percentile(low_l[surface],[25,75]))[0])
     scene_iqr=float(np.diff(np.percentile(scene_lab[:,0],[25,75]))[0])
     base_contrast=float(np.clip(scene_iqr/max(luma_iqr,1),(.82 if polymer else .60) if reference else .88,1.10))
+    if calibration:base_contrast=1.
     contrast=1+(base_contrast-1)*control(params,'contrast')
     med_l=float(np.median(low_l[surface]))
     protected=highlight*np.clip((lab[:,:,0]-med_l)/20,0,1)
@@ -190,7 +200,8 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
             'chroma':float(np.clip(base_gain/value,.20,.55 if gray_style else 1.)) if chroma_mask[core].max()>.01 else 1.,
             'contrast':1+(base_contrast-1)*value,'sharpness':blur if blur>.05 else 0.}
     return rgb,{'version':REFERENCE_VERSION if reference else VERSION,
-        'color_pipeline':'scene_linear_EXR_exposure_WB_haze_then_OCIO_AgX_once',
+        'color_pipeline':'scene_linear_EXR_calibration_AgX_once_camera_linear_atmosphere' if calibration else 'scene_linear_EXR_exposure_WB_haze_then_OCIO_AgX_once',
+        'calibration':calibration,
         'exposure_ev':ev,'white_balance':cast.tolist(),'chroma_gain':gain,'contrast_gain':contrast,
         'exposure_limited':exposure_limited,'exposure_error':exposure_error,'effective_controls':effective,
         'dust_mean':dust_mean,'haze':haze,'noise_sigma':noise,'added_noise_sigma':added,
