@@ -190,6 +190,18 @@ class WebTests(unittest.TestCase):
 
 
 class APITests(unittest.IsolatedAsyncioTestCase):
+    async def test_wrapped_transport_error_pauses_after_one_retry(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d);provider=root/'provider.json'
+            atomic_json(provider,{'vision':{'url':'http://127.0.0.1:9999/v1/chat/completions','model':'fake','key_env':None}})
+            vision=Vision(BatchConfig(backgrounds=d,output=d,provider_config=str(provider)),root/'cache',root/'usage.json')
+            def unavailable(request):raise httpx.ConnectError('offline fixture',request=request)
+            await vision.http.aclose();vision.http=httpx.AsyncClient(transport=httpx.MockTransport(unavailable))
+            with self.assertRaises(ProviderUnavailable):await vision.ask('test',Probe,'Test',{})
+            self.assertEqual(len(vision.calls),2)
+            self.assertTrue(all(c['transport_error']=='ConnectError' for c in vision.calls))
+            await vision.close()
+
     async def test_global_outage_stops_after_one_retry(self):
         for status in (429,503):
             with self.subTest(status=status),tempfile.TemporaryDirectory() as d:

@@ -233,6 +233,7 @@ class ModelClient:
             response = await self.http.post(endpoint.url, json=request, headers=headers,
                                             timeout=endpoint.timeout_seconds)
         except httpx.HTTPError as error:
+            log['transport_error']=type(error).__name__
             raise RuntimeError(f"{role} request failed ({type(error).__name__})") from None
         log["http_status"] = response.status_code
         if response.status_code != 200:

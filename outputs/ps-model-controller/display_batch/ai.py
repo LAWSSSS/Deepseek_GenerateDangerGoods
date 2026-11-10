@@ -111,6 +111,7 @@ class Vision:
                                     seconds=round(time.monotonic()-start, 3))
                         self.calls.append(call)
                     atomic_json(self.usage_path, self.usage())
-            if isinstance(last_error,httpx.TransportError) or code in (429,500,502,503,504):
+            transport_failed=bool(report['calls'] and report['calls'][-1].get('transport_error'))
+            if transport_failed or isinstance(last_error,httpx.TransportError) or code in (429,500,502,503,504):
                 raise ProviderUnavailable(f'视觉服务暂不可用：{code or type(last_error).__name__}，已用完一次重试') from None
             raise RuntimeError(f"{role} 两次请求未得到有效结果：{type(last_error).__name__}") from None
