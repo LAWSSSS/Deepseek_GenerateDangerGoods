@@ -27,7 +27,7 @@ from .store import Store
 from .worker import Blender, RenderUnavailable
 
 RENDER_VERSION='pbr-linear-patina-v9'
-COMPOSE_VERSION='scrap-gray-pile-v4'
+COMPOSE_VERSION='scrap-gray-pile-v5'
 
 
 def final_resolution(candidate):

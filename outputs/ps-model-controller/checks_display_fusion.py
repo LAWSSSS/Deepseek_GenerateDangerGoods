@@ -112,6 +112,14 @@ class PileTests(unittest.TestCase):
         self.assertEqual(near['status'],'pass');self.assertEqual(far['status'],'unknown')
         self.assertEqual(far['rejected_reference_reason'],'cross_depth_reference')
 
+    def test_support_membership_does_not_erase_foreground(self):
+        scene,candidate=self.fixture()
+        scene['supports'][0]['mask'][10:35,10:35]=True
+        scene['depth_native'][10:35,10:35]=.95
+        alpha=np.zeros((100,100),np.float32);alpha[10:45,10:90]=1
+        front,info=depth_order(scene,candidate,candidate['bounds'],np.full((100,100),12,np.float32),alpha)
+        self.assertTrue(front[20,20]);self.assertFalse(front[20,70])
+
     def test_unknown_is_better_than_fail_but_never_pass(self):
         unknown={'support':{'status':'unknown'}};failed={'support':{'status':'fail'}}
         self.assertGreater(version_rank(unknown,None),version_rank(failed,None))

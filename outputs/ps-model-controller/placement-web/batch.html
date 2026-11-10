@@ -18,7 +18,18 @@
 </main><script>
 const $=id=>document.getElementById(id);let batch=localStorage.getItem('displayBatchId');let timer;
 $('backgrounds').value=localStorage.getItem('displayBackgrounds')||'';
-async function update(){if(!batch)return;try{const r=await fetch('/api/batches/'+batch);const data=await r.json();if(!r.ok)throw Error(data.error);const c=data.counts||{};const stages={asset:'准备模型',scene:'分析背景',review:'复核成图',review_request:'复核图片',queued:'等待执行'};const active=(data.active||[]).map(x=>x.id+'：'+(stages[x.stage]||x.stage)).join('\n');$('progress').textContent=['展示合格 '+(c.accepted_display||0)+' 张 · 待审 '+(c.review||0)+' 张 · 失败 '+(c.failed||0)+' 个','排队 '+(c.queued||0)+' 个 · 执行中 '+(c.running||0)+' 个',active,data.run?.error||data.process_error||'',data.run?.seconds?'本次耗时 '+Math.round(data.run.seconds)+' 秒':'','保存位置：'+data.output].filter(Boolean).join('\n\n');$('resume').disabled=!data.resumable;$('start').disabled=data.running;$('results').hidden=!data.has_results;$('results').href='/api/batches/'+batch+'/files/index.html';clearTimeout(timer);if(data.running)timer=setTimeout(update,2500);}catch(e){$('message').textContent=e.message;}}
+async function update(){if(!batch)return;try{
+const r=await fetch('/api/batches/'+batch);const data=await r.json();if(!r.ok)throw Error(data.error);
+const c=data.counts||{};const stages={asset:'准备模型',scene:'分析背景',review:'复核成图',review_request:'复核图片',queued:'等待执行'};
+const active=(data.active||[]).map(x=>x.id+'：'+(stages[x.stage]||x.stage)).join('\n');
+const total=Object.values(c).reduce((a,b)=>a+b,0);
+const images=data.generated_pngs==null?'':`已出图 ${data.generated_pngs} 张 · 有图率 ${(100*(data.image_rate||0)).toFixed(1)}%`;
+$('progress').textContent=[images,`展示合格 ${c.accepted_display||0} 张（${(100*(c.accepted_display||0)/Math.max(1,total)).toFixed(1)}%） · 待审 ${c.review||0} 项 · 失败 ${c.failed||0} 项`,
+'排队 '+(c.queued||0)+' 个 · 执行中 '+(c.running||0)+' 个',active,data.run?.error||data.process_error||'',
+data.run?.seconds?'本次耗时 '+Math.round(data.run.seconds)+' 秒':'','保存位置：'+data.output].filter(Boolean).join('\n\n');
+$('resume').disabled=!data.resumable;$('start').disabled=data.running;$('results').hidden=!data.has_results;
+$('results').href='/api/batches/'+batch+'/files/index.html';clearTimeout(timer);if(data.running)timer=setTimeout(update,2500);
+}catch(e){$('message').textContent=e.message;}}
 $('form').onsubmit=async e=>{e.preventDefault();$('start').disabled=true;$('message').textContent='正在创建批次…';try{const data={backgrounds:$('backgrounds').value.trim(),count:Number($('count').value),max_iterations:Number($('iterations').value),assets:$('assets').value.split(',').map(x=>x.trim()).filter(Boolean),seed:Number($('seed').value),render_device:$('device').value,photo_style:$('photoStyle').value,placement_mode:$('placementMode').value,uncertain_policy:$('uncertainPolicy').value};const r=await fetch('/api/batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const result=await r.json();if(!r.ok)throw Error(result.error);batch=result.id;localStorage.setItem('displayBatchId',batch);localStorage.setItem('displayBackgrounds',data.backgrounds);$('message').textContent='批次已启动';await update();}catch(e){$('message').textContent=e.message;$('start').disabled=false;}};
 $('resume').onclick=async()=>{const r=await fetch('/api/batches/'+batch+'/resume',{method:'POST'});const d=await r.json();$('message').textContent=r.ok?'正在继续批次':d.error;await update();};update();
 </script></body></html>

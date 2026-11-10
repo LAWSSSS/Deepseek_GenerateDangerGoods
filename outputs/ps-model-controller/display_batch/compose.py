@@ -185,6 +185,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         coords=(np.asarray(poly)*candidate['full_px']+offset-[x,y])*16
         cv2.fillConvexPoly(foot,np.rint(coords).astype(np.int32),255,shift=4)
     cover=contact_support(foot,support)
+    hidden_contacts=float(((foot>0)&foreground).sum()/max(1,(foot>0).sum()))
     anchor_error=float(np.linalg.norm(offset+np.asarray(render_meta['anchor_uv'])*candidate['full_px']-candidate['anchor_px']))
     expected_offset=np.asarray(candidate['offset'])
     projection_error=float(np.linalg.norm(offset-expected_offset))
@@ -200,9 +201,9 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     checks={
       'lying':{'status':'pass' if tilt is not None and tilt<=15 else 'unknown',
                'measurement_deg':tilt,'threshold_deg':15,'basis':'compound_simulation_on_estimated_plane'},
-      'support':{'status':('unknown' if 'support_geometry_uncertain' in candidate.get('uncertainties',[]) else 'pass')
+      'support':{'status':('unknown' if hidden_contacts>.10 or 'support_geometry_uncertain' in candidate.get('uncertainties',[]) else 'pass')
                  if cover and min(cover)>=.9 else 'unknown' if candidate.get('allow_uncertain') else 'fail',
-                 'measurements':cover,'threshold':.9,'basis':'estimated_surface'},
+                 'measurements':cover,'threshold':.9,'basis':'estimated_surface','hidden_contact_fraction':hidden_contacts},
       'camera_clearance':{'status':'unknown' if candidate.get('camera_risks') else 'pass',
                  'risks':candidate.get('camera_risks',[]),'elevation_interval':candidate['elevation_interval'],'basis':'interval_projection'},
       'physics':{'status':physics.get('status','pass' if physics.get('stable') else 'unknown'),'evidence':physics,

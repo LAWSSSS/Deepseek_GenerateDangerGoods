@@ -8,7 +8,7 @@ from numba import njit
 from .common import signature
 from .geometry import project,contact_support,scale_from_reference
 
-VERSION='piecewise-pile-v2-rectangles'
+VERSION='piecewise-pile-v3-depth-order'
 _grab_lock=threading.Lock()
 
 
@@ -85,7 +85,9 @@ def depth_order(scene,candidate,bounds,object_z,alpha,*,refine=False):
             b0=float(np.median(values-a*inv))
     actual=np.where(object_z>0,object_z,ground)
     object_depth=a/np.maximum(actual,1e-6)+b0
-    front=(depth>object_depth+residual)&~support
+    # A supporting piece can rise in front of another part of the object. Membership
+    # in the receiver set is not a blanket exemption from pixel-level occlusion.
+    front=depth>object_depth+residual
     # A thin front bar is allowed; the background behind the object is never restored.
     front &= ~scene['protected'][y:y+h,x:x+w]
     if refine and front.any() and not front.all() and h*w<2_000_000:
@@ -98,9 +100,9 @@ def depth_order(scene,candidate,bounds,object_z,alpha,*,refine=False):
                 cv2.setRNGSeed(17)
                 cv2.grabCut(np.asarray(scene['frame'])[y:y+h,x:x+w].copy(),labels,None,
                     np.zeros((1,65)),np.zeros((1,65)),1,cv2.GC_INIT_WITH_MASK)
-            front=np.isin(labels,[cv2.GC_FGD,cv2.GC_PR_FGD])&~support
+            front=np.isin(labels,[cv2.GC_FGD,cv2.GC_PR_FGD])
     fraction=float((alpha*front).sum()/max(alpha.sum(),1e-6))
-    uncertain=((abs(depth-object_depth)<=residual)&(alpha>.5)&~support)
+    uncertain=((abs(depth-object_depth)<=residual)&(alpha>.5))
     return front,{'basis':'local_inverse_depth_fit','confidence':confidence,'scale':float(a),
         'offset':float(b0),'uncertainty':float(residual),'occluded_fraction':fraction,
         'ambiguous_fraction':float(uncertain.sum()/max(1,(alpha>.5).sum()))}
@@ -289,9 +291,8 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                                 reason_counts[reason]=reason_counts.get(reason,0)+1;continue
                             support=union[y:b,x:r];cover=contact_support(fit['contact'],support)
                             minimum=min(cover) if cover else 0
-                            front=(scene['depth_native'][y:b,x:r]>site['depth']+.035)&~support
+                            front=scene['depth_native'][y:b,x:r]>site['depth']+.035
                             fraction=float((front&mask).sum()/area)
-                            if fraction>.65:continue
                             if minimum<.20 and fraction<.10:
                                 reason_counts['visible_contact_without_support']=reason_counts.get('visible_contact_without_support',0)+1;continue
                             uncertain=[]
@@ -300,7 +301,6 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                             if any(s.get('evidence_status')=='unknown' for s in group):uncertain.append('support_geometry_uncertain')
                             if uncertain and config.uncertain_policy=='skip':continue
                             if mode=='embedded' and fraction<.05:continue
-                            if mode=='surface' and fraction>.40:continue
                             bonus=.30 if mode=='embedded' and .10<=fraction<=.40 else .08 if mode=='combined' else 0
                             score=site['confidence']*.5+minimum*.7+bonus-.18*len(uncertain)-max(0,fraction-.4)*2
                             score-=abs(target-math.sqrt(low*high))/max(high,1)*.1
@@ -332,11 +332,19 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
         geom=geometries[row.pop('projection_key')]
         row['contact_polygons']=[p.tolist() for p in geom['contacts']]
         fit=fitted_masks(geom,row['anchor_px'],row['full_px'],scene)
+        # Only pieces touched by actual contact clusters receive the object. Nearby
+        # steel with no contact remains an independent potential foreground occluder.
+        x,y,r,b=fit['bounds']
+        touched=[s['id'] for s in scene['supports'] if s['id'] in row['support_ids'] and
+                 np.any((fit['contact']>0)&s['mask'][y:b,x:r])]
+        if touched:row['support_ids']=touched
         front,depth_info=depth_order(scene,row,fit['bounds'],fit['depth'],fit['hull'].astype(float))
         fraction=depth_info['occluded_fraction'];row['depth_order']=depth_info;row['foreground_fraction']=fraction
         if fraction>.45:
             reject.append({'candidate':row['id'],'reason':'excessive_foreground_occlusion','fraction':fraction});continue
         if row['placement']=='embedded' and fraction<.10:row['placement']='combined' if len(row['support_ids'])>1 else 'surface'
+        elif config.placement_mode=='auto' and .10<=fraction<=.40:row['placement']='embedded'
+        elif row['placement']=='combined' and len(row['support_ids'])<2:row['placement']='surface'
         if depth_info['confidence']=='unknown' or depth_info['ambiguous_fraction']>.25:
             row['uncertainties'].append('occlusion_order_uncertain')
         if config.uncertain_policy=='skip' and row['uncertainties']:continue

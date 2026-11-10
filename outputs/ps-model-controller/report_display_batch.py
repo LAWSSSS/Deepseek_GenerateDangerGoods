@@ -19,6 +19,7 @@ REASONS={
     'repeated_parameters':'建议参数重复，已停止',
     'no_improvement':'连续修正没有改善',
     'no_effective_image_change':'参数变化未改变实际图片，停止重复复核',
+    'final_program_checks_failed':'最终尺寸图片未通过程序检查',
     'no_valid_action':'没有可执行的修正建议',
     'invalid_ai_action':'模型建议超出允许范围',
 }
@@ -35,7 +36,8 @@ def report(batches,out):
                      'run':summary['run'],'api_calls':summary['usage_current_run']['api_calls'],
                      'tokens':summary['usage_current_run'].get('total_tokens'),
                      'implementation_hash':file_hash(folder/'implementation.json')})
-        records.extend(json.loads(line) for line in (folder/'results.jsonl').read_text(encoding='utf8').splitlines())
+        records.extend({**json.loads(line),'_batch_folder':str(folder.resolve())}
+                       for line in (folder/'results.jsonl').read_text(encoding='utf8').splitlines())
     groups={};failures=Counter();by_background=defaultdict(list)
     for record in records:
         g=groups.setdefault(record['group'],Counter());g['total']+=1;g[record['status']]+=1
@@ -82,6 +84,17 @@ def report(batches,out):
                 target=Path(os.path.relpath(r['image'],out)).as_posix()
                 links.append(f'<a href="{html.escape(target,quote=True)}">{title}</a>')
             else:links.append('<span>'+title+'</span>')
+            import os
+            job=Path(r['_batch_folder'])/'jobs'/r['job_id']
+            artifacts=[('候选与拒绝依据',job/'candidates.json'),('完整记录',job/'result.json')]
+            if r.get('best_iteration') is not None:
+                selected=next(v for v in r['iterations'] if v['iteration']==r['best_iteration'])
+                artifacts.extend([('承托与接触斑',job/(selected['params']['candidate']+'-geometry.jpg')),
+                    ('前后遮挡',Path(selected['image']).with_suffix('.occlusion.png'))])
+            for label,path in artifacts:
+                if path.is_file():
+                    relative=Path(os.path.relpath(path,out)).as_posix()
+                    links.append(f'<a href="{html.escape(relative,quote=True)}">{r["asset_id"]} {label}</a>')
         sections.append(f'<section><img loading="lazy" src="{image_name}"><div>'+''.join(links)+'</div></section>')
     pages=[]
     for start in range(0,len(overview),6):
