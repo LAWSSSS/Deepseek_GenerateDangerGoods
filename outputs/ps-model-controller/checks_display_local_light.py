@@ -174,6 +174,13 @@ for name,weights,expected in [('paint',[0,1,0,0],.47),('metal',[1,0,0,0],.94)]:
  coverage=material.node_tree.nodes['Matte dust coverage']
  value=evaluate(coverage.inputs[0])*evaluate(coverage.inputs[1])
  assert abs(value-expected)<1e-5,(name,value)
+ # Half the approved surface coverage, without adding a second dust layer.
+ reduced=(material,shader,partitions,env,['paint','steel'],{{'paint_dust_scale':.5,'dust_scale':.5}})
+ assert matte_dust_surface(*reduced) and len(material.node_tree.nodes)==nodes
+ half=evaluate(coverage.inputs[0])*evaluate(coverage.inputs[1])
+ assert abs(half-expected*.5)<1e-5,(name,half)
+ assert matte_dust_surface(*args) and len(material.node_tree.nodes)==nodes
+ assert abs(evaluate(coverage.inputs[0])*evaluate(coverage.inputs[1])-expected)<1e-5
  dust=material.node_tree.nodes['Matte dust surface']
  assert dust.inputs['Metallic'].default_value==0 and dust.inputs['Specular IOR Level'].default_value==0
 print('PAINT_HALF_AND_IDEMPOTENCE_OK')

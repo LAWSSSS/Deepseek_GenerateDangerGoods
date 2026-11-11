@@ -72,6 +72,9 @@ def opaque_surface_output(tree, shader):
 
 def matte_dust_surface(material, shader, partitions, environment, classes, profile=None):
     """Cover known metal and painted metal with a rough dielectric dust surface."""
+    dust_scale = float((profile or {}).get('dust_scale', 1.))
+    if not np.isfinite(dust_scale) or not 0 <= dust_scale <= 1:
+        raise ValueError('invalid_surface_dust_scale')
     tree = material.node_tree
     name = re.sub(r'\.\d{3}$', '', material.name)
     entry = partitions['materials'].get(name)
@@ -86,6 +89,11 @@ def matte_dust_surface(material, shader, partitions, environment, classes, profi
     color = tree.nodes.get('Matte dust color')
     if color:
         color.outputs[0].default_value = (*tint, 1.)
+        strength = tree.nodes.get('Matte dust strength')
+        if strength:
+            strength.inputs[1].default_value = dust_scale
+        elif dust_scale != 1.:
+            raise ValueError('legacy_dust_material_requires_reimport')
         return True
     output = opaque_surface_output(tree, shader)
     if output is None:
@@ -115,6 +123,8 @@ def matte_dust_surface(material, shader, partitions, environment, classes, profi
     noise.inputs['Detail'].default_value = 2.
     tree.links.new(coords.outputs['Object'], noise.inputs['Vector'])
     opacity = math_node(tree, 'ADD', .90, math_node(tree, 'MULTIPLY', noise.outputs['Fac'], .08))
+    coverage = math_node(tree, 'MULTIPLY', coverage, dust_scale, clamp=True)
+    coverage.node.name = 'Matte dust strength'
     amount = math_node(tree, 'MULTIPLY', coverage, opacity, clamp=True)
     amount.node.name = 'Matte dust coverage'
     color = tree.nodes.new('ShaderNodeRGB')

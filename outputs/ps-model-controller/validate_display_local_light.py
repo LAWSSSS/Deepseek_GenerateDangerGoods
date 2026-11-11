@@ -54,6 +54,12 @@ def combined_output(kernel):
     return f'outputs/{kernel}格池化叠加35薄雾-20261111'
 
 
+def dust_output(scale):
+    if not np.isfinite(scale) or not 0 <= scale <= 1:
+        raise ValueError('invalid_surface_dust_scale')
+    return f'outputs/浮灰{scale:g}-3格池化35薄雾-20261111-v2'
+
+
 def frame(image, title, bounds, core):
     pixels = read_rgb(image)
     preview = Path(image).with_suffix('.jpg')
@@ -63,7 +69,7 @@ def frame(image, title, bounds, core):
             **frame_stats(pixels, bounds, core)}
 
 
-async def render_fixed(row, asset, scene, source, archived, renders, cache, photo_env, masks, local=False):
+async def render_fixed(row, asset, scene, source, archived, renders, cache, photo_env, masks, local=False,matte_profile=None):
     legacy = row['archived_window'] is None
     resolution = archived['resolution'] if legacy else final_resolution(row['pose'])
     environment = photo_env if local or not legacy else sample_environment(scene, row['pose'])[0]
@@ -73,7 +79,7 @@ async def render_fixed(row, asset, scene, source, archived, renders, cache, phot
         partitions, _ = await asyncio.to_thread(prepare_uv_masks, asset, cache/'scanned-uv')
     directory, meta, hit = await renders.get(asset, row['pose'], row['params'], environment,
         scene['size'], resolution, appearance='local', full_frame=legacy, matte_partitions=partitions,
-        matte_profile=PROFILE if partitions else None, object_only=not local)
+        matte_profile=(matte_profile or PROFILE) if partitions else None, object_only=not local)
     geo = geometry_check(row['pose'], meta, archived, masks[0], row['baseline']['edit_bounds'], directory, masks[3])
     if not geo['pass']:
         raise ValueError(f'changed_geometry: {geo}')
@@ -196,6 +202,7 @@ def report(out,cases,summary):
     wide=summary.get('experiment')=='wide'
     fine=summary.get('experiment')=='fine'
     combined=summary.get('experiment')=='combined'
+    dust=summary.get('experiment')=='dust'
     pool_kernel=summary.get('pool_kernel',6)
     def link(path):
         return html.escape(Path(os.path.relpath(path,out)).as_posix(),quote=True)
@@ -210,6 +217,13 @@ def report(out,cases,summary):
             parts.append(f'<section id="sample-{c["number"]:02d}"><h3>{c["number"]:02d} · {html.escape(c["name"])}</h3>')
             if c.get('error'):
                 parts.append(f'<p>{html.escape(c["error"])}</p></section>');continue
+            if dust:
+                parts.append('<div class="frames">'+picture({**c['previous'],'title':'已确认成像 · 原浮灰覆盖'})+
+                             picture(c['material'])+'</div>')
+                parts.append('<p>3×3 池化、35% 追加薄雾与全图均光一致。'+
+                    (f'仅将额外表面粉尘层的覆盖乘 {c["surface_dust"]["relative_scale"]:g}。' if c['surface_dust']['applied'] else '塑料没有额外粉尘层，本组保持原样。')+
+                    '</p></section>')
+                continue
             if combined:
                 control=c.get('pool_comparison',{**c['material'],'title':'仅追加 35% 薄雾 · 不池化'})
                 parts.append('<div class="frames">'+picture(control)+
@@ -278,13 +292,21 @@ def report(out,cases,summary):
                           f'固定上一轮全图均光与 35% 追加雾层，测试 {pool_kernel}×{pool_kernel} 全强度均匀池化。'+
                           ('主对照为上一轮 6×6 与本轮池化，雾量一致。' if pool_kernel!=6 else '主对照为仅加雾与池化叠雾。'))
         head+='<p>复用上一轮物体和阴影渲染。位置、尺寸、相机、材质与前景遮挡一致；本轮只重做合成。</p>'
+    if dust:
+        scale=summary['surface_dust_scale']
+        head=head.replace('加强池化薄雾与局部受光',f'表面浮灰 ×{scale:g} · 保持 3×3 池化与35%薄雾')
+        head=head.replace('先比较材质和受光，再分别查看池化、薄雾。两个梯度的零档相同；每组只改变一个因素。',
+                          '用户已确认上一轮成像效果。本轮只改变表面浮灰覆盖，让原材质更多露出；空气薄雾、池化、光照和摄影参数均固定。')
+        head+='<p>金属重新渲染对应材质及阴影，塑料作为原样对照。旧材质和源模型保留，新浮灰效果待点评。</p>'
     (out/'index.html').write_text(head+''.join(parts),encoding='utf8')
 
 
 async def run(args):
     experiment=getattr(args,'experiment','local')
     kernel=getattr(args,'pool_kernel',6)
-    start = time.monotonic();out = resolve(args.out or {'wide':WIDE_OUTPUT,'fine':FINE_OUTPUT,'combined':combined_output(kernel),'local':OUTPUT}[experiment])
+    scale=getattr(args,'dust_scale',.5)
+    start = time.monotonic();out = resolve(args.out or {'wide':WIDE_OUTPUT,'fine':FINE_OUTPUT,'combined':combined_output(kernel),
+                                                     'dust':dust_output(scale),'local':OUTPUT}[experiment])
     if out.exists() and any(out.iterdir()) and not (out/'inputs.json').is_file():
         raise ValueError('fresh_output_directory_required')
     out.mkdir(parents=True,exist_ok=True)
@@ -296,9 +318,11 @@ async def run_locked(args,out,start):
     wide=getattr(args,'experiment','local')=='wide'
     fine=getattr(args,'experiment','local')=='fine'
     combined=getattr(args,'experiment','local')=='combined'
+    dust=getattr(args,'experiment','local')=='dust'
+    scale=getattr(args,'dust_scale',.5)
     kernel=getattr(args,'pool_kernel',6)
-    experiment='combined' if combined else 'fine' if fine else 'wide' if wide else 'local'
-    previous_root=resolve(FINE_OUTPUT if combined else WIDE_OUTPUT if fine else WIDE_PREVIOUS if wide else PREVIOUS)
+    experiment='dust' if dust else 'combined' if combined else 'fine' if fine else 'wide' if wide else 'local'
+    previous_root=resolve(combined_output(3) if dust else FINE_OUTPUT if combined else WIDE_OUTPUT if fine else WIDE_PREVIOUS if wide else PREVIOUS)
     if combined and read(previous_root/'inputs.json')['renderer']!=render_dependencies():
         raise ValueError('cached_renderer_changed')
     rollback = resolve(ROLLBACK)
@@ -317,8 +341,8 @@ async def run_locked(args,out,start):
     passes = {r['number']:frozen_passes(r,history,resolve(SIZED),cache) for r in rows}
     previous = {r['number']:r for r in read(previous_root/'results.json')}
     comparison_rows={r['number']:r for r in read(resolve(COMBINED_OUTPUT)/'results.json')} if combined and kernel!=6 else {}
-    pool_levels=(kernel,) if combined else FINE_POOL if fine else WIDE_POOL if wide else POOL
-    fog_levels=(.35,) if combined else FINE_FOG if fine else WIDE_FOG if wide else FOG
+    pool_levels=(3,) if dust else (kernel,) if combined else FINE_POOL if fine else WIDE_POOL if wide else POOL
+    fog_levels=(.35,) if combined or dust else FINE_FOG if fine else WIDE_FOG if wide else FOG
     inputs = {'cohort':file_hash(rollback/'cases.json'),'pool':pool_levels,
         'fog':fog_levels,'profile':PROFILE,'experiment':experiment,
         'device':args.device,'renderer':render_dependencies(),'sources':{name:file_hash(HERE/name) for name in
@@ -326,6 +350,12 @@ async def run_locked(args,out,start):
          'display_batch/photography.py','display_batch/surface_maps.py','validate_display_gradients.py','display_batch/wide_trial.py')},
         'passes':{str(i):v[3] for i,v in passes.items()},'previous':file_hash(previous_root/'results.json')}
     if fine:inputs['sources']['display_batch/global_light.py']=file_hash(HERE/'display_batch/global_light.py')
+    if dust:
+        from display_batch.surface_dust_trial import dust_profile
+        inputs['profile']=dust_profile(scale)
+        for name in ('display_batch/global_light.py','display_batch/surface_dust_trial.py'):
+            inputs['sources'][name]=file_hash(HERE/name)
+        inputs['user_confirmed_style']={'pool_kernel':3,'fog_extra':.35}
     if combined:
         for name in ('display_batch/global_light.py','display_batch/combined_trial.py'):
             inputs['sources'][name]=file_hash(HERE/name)
@@ -358,7 +388,16 @@ async def run_locked(args,out,start):
                     source,archived,shadow_hash,_ = passes[number]
                     masks = placement_masks(scene,row['pose'],source,row['archived_window'],archived,row['baseline']['edit_bounds'])
                     environment,samples = sample_environment(scene,row['pose'],local=True)
-                    if combined:
+                    if dust:
+                        from display_batch.surface_dust_trial import compose_surface_dust,frozen_environment
+                        lighting=frozen_environment(scene,row,environment,previous[number])
+                        rendered=None
+                        if row['asset_id']!='13':
+                            rendered=await render_fixed(row,asset,scene,source,archived,renders,cache,lighting,masks,
+                                                        local=True,matte_profile=dust_profile(scale))
+                        case=await asyncio.to_thread(compose_surface_dust,folder,row,scene,source,archived,shadow_hash,
+                            environment,samples,masks,previous[number],lighting,rendered,scale)
+                    elif combined:
                         from display_batch.combined_trial import compose_combined
                         case=await asyncio.to_thread(compose_combined,folder,row,scene,source,archived,shadow_hash,
                             environment,samples,masks,previous[number],kernel,
@@ -403,6 +442,7 @@ async def run_locked(args,out,start):
         'render_counts':dict(renders.totals),'timings':dict(renders.timings),
         'seconds':round(time.monotonic()-start,3),'composition_cache_hits':reused,'cost_total':cumulative(out)}
     if combined:summary['pool_kernel']=kernel
+    if dust:summary['surface_dust_scale']=scale
     atomic_json(out/f'run-{run_id}.json',summary)
     runs = [read(p) for p in out.glob('run-*.json')]
     ledger = {'runs':len(runs),'seconds':sum(r['seconds'] for r in runs),'cost_total':cumulative(out),
@@ -411,6 +451,25 @@ async def run_locked(args,out,start):
         'timings':{k:sum(r['timings'].get(k,0) for r in runs) for k in
                    ('object_seconds','with_shadow_seconds','without_shadow_seconds','asset_import_seconds')},
         'local_compute_price':None,'comparison_only':True}
+    # Repair attempts remain in their own directories; carry their actual cost forward.
+    saved_ledger=read(out/'cost-ledger.json') if (out/'cost-ledger.json').is_file() else {}
+    prior_paths=getattr(args,'cost_prior',[]) or [p['output'] for p in saved_ledger.get('prior_attempts',[])]
+    prior=[]
+    for path in dict.fromkeys(str(resolve(p)) for p in prior_paths):
+        if resolve(path)==out:raise ValueError('cost_prior_cannot_reference_current_output')
+        entry=read(resolve(path)/'cost-ledger.json')
+        total=entry.get('task_totals',entry)
+        prior.append({'output':path,**{k:total[k] for k in ('seconds','render_counts','cost_total')}})
+    if prior:
+        totals=[ledger,*prior]
+        costs=[v['cost_total'] for v in totals]
+        task_cost={**ledger['cost_total'],
+            **{k:sum(v.get(k,0) for v in costs) for k in
+               ('actual_requests','reported_tokens','unpriced_or_unreported_calls','estimated_api_min','estimated_api_max')},
+            'complete':all(v.get('complete',False) for v in costs)}
+        ledger.update(prior_attempts=prior,task_totals={'seconds':sum(v['seconds'] for v in totals),
+            'render_counts':{k:sum(v['render_counts'].get(k,0) for v in totals) for k in ledger['render_counts']},
+            'cost_total':task_cost})
     atomic_json(out/'cost-ledger.json',ledger);atomic_json(out/'summary.json',summary);atomic_json(out/'results.json',cases)
     report(out,cases,summary)
     return summary
@@ -419,9 +478,11 @@ async def run_locked(args,out,start):
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out')
-    parser.add_argument('--experiment',choices=('local','wide','fine','combined'),default='local')
+    parser.add_argument('--experiment',choices=('local','wide','fine','combined','dust'),default='local')
     parser.add_argument('--pool-kernel',type=int,choices=range(1,65),default=6,metavar='1..64',
                         help='combined 模式的均匀池化格大小，默认 6')
+    parser.add_argument('--dust-scale',type=float,default=.5,help='dust 模式的表面粉尘覆盖倍率，默认 0.5')
+    parser.add_argument('--cost-prior',action='append',default=[],help='将既有尝试的成本账本计入本轮总成本')
     parser.add_argument('--device',choices=('OPTIX','CUDA','CPU'),default='OPTIX')
     result = asyncio.run(run(parser.parse_args()))
     print(json.dumps(result,ensure_ascii=False))
