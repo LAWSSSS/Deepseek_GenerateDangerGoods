@@ -56,6 +56,20 @@ class FullMeanTests(unittest.TestCase):
 
 
 class FineOpticsTests(unittest.TestCase):
+    def test_pool6_then_fog35_attenuates_pooled_detail_once(self):
+        rgb,alpha,env=checks_display_local.ForegroundDustTests().fixture()
+        before=alpha.copy()
+        veiled,air=local_veil(rgb,{**env,'haze':.24},{'photo_style':'dusty_scrap'})
+        effect,info=foreground_dust(rgb,veiled,alpha,env,air,300,pool_weight=1.,pool_kernel=6,
+                                    fog_weight=.35,uniform=True,fog_profile='wide')
+        pooled=pool_object_rgb(linear(rgb),alpha,6)
+        base=pooled*(1-air['amount'])+np.float32(air['color_linear'])*air['amount']
+        expected=(base*.65+np.float32(air['color_linear'])*.35-linear(veiled))*(alpha>0)[...,None]
+        np.testing.assert_allclose(effect,expected,atol=1e-6)
+        self.assertEqual(info['pool_weight_max'],1.)
+        self.assertAlmostEqual(info['fog_extra_max'],.35,places=6)
+        np.testing.assert_array_equal(alpha,before)
+
     def test_twelve_pool_and_five_percent_fog_steps_keep_alpha(self):
         self.assertEqual(FINE_POOL,(12,))
         self.assertEqual(FINE_FOG,(.25,.30,.35,.40,.45,.50,.55))
