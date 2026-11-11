@@ -42,6 +42,9 @@ WIDE_OUTPUT = 'outputs/大梯度池化薄雾与均值光场-20261111'
 WIDE_PREVIOUS = OUTPUT
 WIDE_POOL = (16,32,64)
 WIDE_FOG = (.30,.60,.85)
+FINE_OUTPUT = 'outputs/细梯度薄雾12格池化与全图均光-20261111'
+FINE_POOL = (12,)
+FINE_FOG = (.25,.30,.35,.40,.45,.50,.55)
 
 
 def frame(image, title, bounds, core):
@@ -183,6 +186,7 @@ def frames(case):
 
 def report(out,cases,summary):
     wide=summary.get('experiment')=='wide'
+    fine=summary.get('experiment')=='fine'
     def link(path):
         return html.escape(Path(os.path.relpath(path,out)).as_posix(),quote=True)
     def picture(item):
@@ -196,16 +200,20 @@ def report(out,cases,summary):
             parts.append(f'<section id="sample-{c["number"]:02d}"><h3>{c["number"]:02d} · {html.escape(c["name"])}</h3>')
             if c.get('error'):
                 parts.append(f'<p>{html.escape(c["error"])}</p></section>');continue
-            if wide:
+            if fine:
+                parts.append('<details open><summary>局部均值与全图均值 · 相同光源方向和材质</summary><div class="frames">'+
+                    picture({**c['previous'],'title':'上一轮扩大范围局部均值'})+picture(c['material'])+'</div></details>')
+            elif wide:
                 parts.append('<details open><summary>扩大范围并改用均值 · 相同材质</summary><div class="frames">'+
                     picture({**c['previous'],'title':'上一轮局部光照'})+picture(c['material'])+'</div></details>')
             elif c['material_info']['profile']:
                 parts.append('<details><summary>材质对照 · 相同原受光</summary><div class="frames">'+
                              picture({**c['previous'],'title':'上一轮积灰哑光'})+picture(c['material'])+'</div></details>')
-            light_title='均值照明与近似光场重建 · 相同采样' if wide else '局部受光对照 · 相同新材质'
-            parts.append(f'<details open><summary>{light_title}</summary><div class="frames">'+
-                         picture({**c['material'],'title':'扩大范围均值照明' if wide else '原受光'})+
-                         picture(c['groups']['pool'][0])+'</div></details>')
+            if not fine:
+                light_title='均值照明与近似光场重建 · 相同采样' if wide else '局部受光对照 · 相同新材质'
+                parts.append(f'<details open><summary>{light_title}</summary><div class="frames">'+
+                             picture({**c['material'],'title':'扩大范围均值照明' if wide else '原受光'})+
+                             picture(c['groups']['pool'][0])+'</div></details>')
             for kind,title in (('pool','池化加强 · 附加薄雾关闭'),('fog','薄雾加强 · 池化关闭')):
                 images = []
                 for item in c['groups'][kind]:
@@ -214,8 +222,11 @@ def report(out,cases,summary):
                         caption += f' · 实际追加峰值 {item["fog_extra"]:.1%} · 总雾量中位数 {item["fog_total"]:.1%}'
                     images.append(picture({**item,'title':caption}))
                 parts.append(f'<details><summary>{title}</summary><div class="frames">'+''.join(images)+'</div></details>')
-            parts.append(f'<details><summary>局部光照取样范围</summary><img src="{link(c["light_samples"])}" '
-                         'loading="lazy" width="1600" height="900"><p>绿色为同层局部中性表面样本。光向证据不足时使用柔和环境光。</p></details></section>')
+            sample_title='全图平均取样范围' if fine else '局部光照取样范围'
+            sample_caption=('全部原背景像素参与均值。黄色框为旧局部范围，绿色框为全图。平均值只控制亮度与色偏，光向沿用局部对照。' if fine else
+                            '绿色为同层局部中性表面样本。光向证据不足时使用柔和环境光。')
+            parts.append(f'<details><summary>{sample_title}</summary><img src="{link(c["light_samples"])}" '
+                         f'loading="lazy" width="1600" height="900"><p>{sample_caption}</p></details></section>')
     head = ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
         '<title>加强池化薄雾与局部受光</title><style>body{font:16px system-ui;background:#192329;color:#edf3f5;margin:24px}'
         'a{color:#a9dfca}section{max-width:1800px;border-bottom:1px solid #41555d;padding:12px 0}'
@@ -234,11 +245,19 @@ def report(out,cases,summary):
                '附加雾层为 30%、60%、85%，按原透明度过渡。最高档用于检查强度上限。</p>'
                '<p>照明采样边距扩大到 1.75 倍，使用有效像素算术均值。'
                '光场重建属于局部低频估计，未恢复实测 HDR 或不可见光源。</p>')
+    if fine:
+        head=head.replace('加强池化薄雾与局部受光','25%–55% 细梯度薄雾、12×12 池化与全图均光')
+        head=head.replace('先比较材质和受光','先比较局部均值和全图均值受光')
+        head+=('<p>薄雾为追加层的实际 25%、30%、35%、40%、45%、50%、55%，池化关闭。'
+               '池化组单独比较关闭与 12×12 全强度均匀池化，追加薄雾关闭。</p>'
+               '<p>全图每个像素等权参与解码线性均值，包括料斗外区域及文字；不按深度、材质或亮度筛选。'
+               '仅改变平均亮度和色偏，光源方向与柔和度沿用局部均值对照。它是试验估计，不是实测光照。</p>')
     (out/'index.html').write_text(head+''.join(parts),encoding='utf8')
 
 
 async def run(args):
-    start = time.monotonic();out = resolve(args.out or (WIDE_OUTPUT if getattr(args,'experiment','local')=='wide' else OUTPUT))
+    experiment=getattr(args,'experiment','local')
+    start = time.monotonic();out = resolve(args.out or {'wide':WIDE_OUTPUT,'fine':FINE_OUTPUT,'local':OUTPUT}[experiment])
     if out.exists() and any(out.iterdir()) and not (out/'inputs.json').is_file():
         raise ValueError('fresh_output_directory_required')
     out.mkdir(parents=True,exist_ok=True)
@@ -248,7 +267,9 @@ async def run(args):
 
 async def run_locked(args,out,start):
     wide=getattr(args,'experiment','local')=='wide'
-    previous_root=resolve(WIDE_PREVIOUS if wide else PREVIOUS)
+    fine=getattr(args,'experiment','local')=='fine'
+    experiment='fine' if fine else 'wide' if wide else 'local'
+    previous_root=resolve(WIDE_OUTPUT if fine else WIDE_PREVIOUS if wide else PREVIOUS)
     rollback = resolve(ROLLBACK)
     config = BatchConfig(backgrounds='.',output=str(out),offline=True,render_device=args.device,
                          photo_style='dusty_scrap',max_iterations=0)
@@ -264,12 +285,15 @@ async def run_locked(args,out,start):
     history = {int(r['job_id'].split('-')[0]):r for r in records(resolve(BASELINE))}
     passes = {r['number']:frozen_passes(r,history,resolve(SIZED),cache) for r in rows}
     previous = {r['number']:r for r in read(previous_root/'results.json')}
-    inputs = {'cohort':file_hash(rollback/'cases.json'),'pool':WIDE_POOL if wide else POOL,
-        'fog':WIDE_FOG if wide else FOG,'profile':PROFILE,'experiment':'wide' if wide else 'local',
+    pool_levels=FINE_POOL if fine else WIDE_POOL if wide else POOL
+    fog_levels=FINE_FOG if fine else WIDE_FOG if wide else FOG
+    inputs = {'cohort':file_hash(rollback/'cases.json'),'pool':pool_levels,
+        'fog':fog_levels,'profile':PROFILE,'experiment':experiment,
         'device':args.device,'renderer':render_dependencies(),'sources':{name:file_hash(HERE/name) for name in
         (Path(__file__).name,'display_batch/compose.py','display_batch/local.py','display_batch/local_light.py',
          'display_batch/photography.py','display_batch/surface_maps.py','validate_display_gradients.py','display_batch/wide_trial.py')},
         'passes':{str(i):v[3] for i,v in passes.items()},'previous':file_hash(previous_root/'results.json')}
+    if fine:inputs['sources']['display_batch/global_light.py']=file_hash(HERE/'display_batch/global_light.py')
     inputs = json.loads(json.dumps(inputs))
     if (out/'inputs.json').is_file() and read(out/'inputs.json')!=inputs:
         raise ValueError('frozen_inputs_changed_use_new_directory')
@@ -298,16 +322,22 @@ async def run_locked(args,out,start):
                     source,archived,shadow_hash,_ = passes[number]
                     masks = placement_masks(scene,row['pose'],source,row['archived_window'],archived,row['baseline']['edit_bounds'])
                     environment,samples = sample_environment(scene,row['pose'],local=True)
-                    if wide:
+                    if wide or fine:
                         from display_batch.wide_trial import compose_wide
                         mean_env,light_samples=estimate_local_light(scene,row['pose'],environment,statistic='mean',margin_scale=1.75)
-                        probe_env=reconstruct_probe(mean_env,row['pose'])
+                        if fine:
+                            from display_batch.global_light import estimate_global_mean
+                            global_env,light_samples=estimate_global_mean(scene,mean_env)
+                            planned=(('global',global_env),)
+                        else:
+                            probe_env=reconstruct_probe(mean_env,row['pose'])
+                            planned=(('mean',mean_env),('probe',probe_env))
                         variants={}
-                        for label,env in (('mean',mean_env),('probe',probe_env)):
+                        for label,env in planned:
                             rendered=await render_fixed(row,asset,scene,source,archived,renders,cache,env,masks,local=True)
                             variants[label]=(env,rendered)
                         case=await asyncio.to_thread(compose_wide,folder,row,scene,source,archived,shadow_hash,
-                            variants,environment,samples,light_samples,masks,previous[number],WIDE_POOL,WIDE_FOG)
+                            variants,environment,samples,light_samples,masks,previous[number],pool_levels,fog_levels,experiment)
                     else:
                         new_env,light_samples = estimate_local_light(scene,row['pose'],environment)
                         old_render = None
@@ -327,7 +357,7 @@ async def run_locked(args,out,start):
         raise ValueError('source_model_changed')
     complete = [c for c in cases if c['status']=='review']
     all_frames = {p:v for c in complete for p,v in frames(c).items()}
-    summary = {'cases_pass':len(complete),'full_frames':len(all_frames),'experiment':'wide' if wide else 'local',
+    summary = {'cases_pass':len(complete),'full_frames':len(all_frames),'experiment':experiment,
         'new_pngs':sum(Path(p).is_relative_to(out) for p in all_frames),'source_models':len(hashes),
         'render_counts':dict(renders.totals),'timings':dict(renders.timings),
         'seconds':round(time.monotonic()-start,3),'composition_cache_hits':reused,'cost_total':cumulative(out)}
@@ -347,7 +377,7 @@ async def run_locked(args,out,start):
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out')
-    parser.add_argument('--experiment',choices=('local','wide'),default='local')
+    parser.add_argument('--experiment',choices=('local','wide','fine'),default='local')
     parser.add_argument('--device',choices=('OPTIX','CUDA','CPU'),default='OPTIX')
     result = asyncio.run(run(parser.parse_args()))
     print(json.dumps(result,ensure_ascii=False))

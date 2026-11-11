@@ -18,8 +18,9 @@ from validate_display_local_light import audit_geometry, frame, PROFILE
 
 
 def compose_wide(folder,row,scene,source,archived,shadow_hash,variants,environment,samples,
-                 light_samples,masks,previous,pool_levels,fog_levels):
+                 light_samples,masks,previous,pool_levels,fog_levels,experiment='wide'):
     start=time.monotonic()
+    fine=experiment=='fine'
     bounds=row['baseline']['edit_bounds'];x,y,r,b=bounds
     visible=masks[2]
     core=cv2.erode(np.uint8(visible>.9),np.ones((5,5),np.uint8))>0
@@ -49,12 +50,14 @@ def compose_wide(folder,row,scene,source,archived,shadow_hash,variants,environme
             Image.fromarray(output).save(result['image'],compress_level=2)
             audit=audit_geometry(result,row,scene,masks)
             result['photo']['frozen_sensor']=optics
-            outputs[label]=frame(result['image'],'扩大范围均值照明' if label=='mean' else '局部近似光场重建',bounds,core)
+            titles={'mean':'扩大范围均值照明','probe':'局部近似光场重建','global':'全图平均照明 · 池化关闭 · 追加薄雾关闭'}
+            outputs[label]=frame(result['image'],titles[label],bounds,core)
             details[label]={'render':info,'calibration':calibration,'photo':result['photo'],
                             'checks':result['checks'],'audit':audit,'light_evidence':env['local_irradiance']}
             rendered_layers[label]=(appearance,sensor,delta,output)
-        appearance,sensor,delta,complete=rendered_layers['probe']
-        zero=outputs['probe']
+        active='global' if fine else 'probe'
+        appearance,sensor,delta,complete=rendered_layers[active]
+        zero=outputs[active]
         zero.update(pool_kernel=1,pool_weight=0.,fog_weight=0.,fog_extra=0.,fog_total=layers['air']['amount'])
         groups={'pool':[zero],'fog':[zero]}
         for kind,levels in (('pool',pool_levels),('fog',fog_levels)):
@@ -69,27 +72,29 @@ def compose_wide(folder,row,scene,source,archived,shadow_hash,variants,environme
                 item.update(pool_kernel=kernel,pool_weight=measurements['pool_weight_max'],fog_weight=fog,
                     fog_extra=measurements['fog_extra_max'],fog_total=measurements['fog_total_median'],effects=measurements)
                 groups[kind].append(item)
-            if len({v['image_hash'] for v in groups[kind]})!=4:
+            if len({v['image_hash'] for v in groups[kind]})!=len(levels)+1:
                 raise ValueError('identical_optical_levels')
-        initial=previous['groups']['pool'][0]
+        initial=previous['material'] if fine else previous['groups']['pool'][0]
         if file_hash(initial['image'])!=initial['image_hash']:
             raise ValueError('previous_full_frame_changed')
         diagnostic=np.asarray(scene['frame']).copy()
         diagnostic[light_samples]=np.uint8(diagnostic[light_samples]*.6+np.array([30,210,140])*.4)
-        mean_evidence=variants['mean'][0]['local_irradiance']
+        mean_evidence=variants['global' if fine else 'mean'][0]['local_irradiance']
         for box,color in ((mean_evidence['original_bounds'],(240,190,30)),(mean_evidence['bounds'],(20,240,110))):
             lx,ly,rr,bb=box;cv2.rectangle(diagnostic,(lx,ly),(rr-1,bb-1),color,4)
         full_preview(diagnostic,folder/'light-samples.jpg')
         # Preserve the floating probe as data. The user report uses full scene images only.
-        probe=np.asarray(variants['probe'][0]['reflection_probe'],np.float32)
-        np.save(folder/'estimated-light-probe.npy',probe)
+        if not fine:
+            probe=np.asarray(variants['probe'][0]['reflection_probe'],np.float32)
+            np.save(folder/'estimated-light-probe.npy',probe)
         result={'number':row['number'],'asset_id':row['asset_id'],'name':row['name'],'background':row['background'],
-            'experiment':'wide','previous':initial,'material':outputs['mean'],'groups':groups,
-            'lighting_variants':details,'light_evidence':details['probe']['light_evidence'],
-            'light_samples':str(folder/'light-samples.jpg'),'estimated_probe':str(folder/'estimated-light-probe.npy'),
+            'experiment':experiment,'previous':initial,'material':outputs['global' if fine else 'mean'],'groups':groups,
+            'lighting_variants':details,'light_evidence':details[active]['light_evidence'],
+            'light_samples':str(folder/'light-samples.jpg'),
             'material_info':{'profile':PROFILE if row['asset_id']!='13' else None,
-                             'new_light':variants['probe'][1][2],'calibration':details['probe']['calibration']},
-            'photo':details['probe']['photo'],'checks':details['probe']['checks'],'audit':details['probe']['audit'],
+                             'new_light':variants[active][1][2],'calibration':details[active]['calibration']},
+            'photo':details[active]['photo'],'checks':details[active]['checks'],'audit':details[active]['audit'],
             'status':'review','seconds':round(time.monotonic()-start,3)}
+        if not fine:result['estimated_probe']=str(folder/'estimated-light-probe.npy')
     atomic_json(folder/'result.json',result)
     return result
