@@ -66,7 +66,7 @@ def control(params,name):
 
 
 def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metallic=None,upward=None,
-                 *,reference=False,camera_capture=True):
+                 *,reference=False,camera_capture=True,surface_weathering=True):
     classes=set(environment.get('material_classes',[]))
     polymer=bool(classes) and classes.issubset({'plastic','rubber'})
     core=alpha>.85
@@ -159,7 +159,7 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     rgb=np.clip(cv2.cvtColor(lab,cv2.COLOR_LAB2RGB),0,1)
     rng=np.random.default_rng(seed)
     dust_mean=wear_rms=0.
-    if reference:
+    if reference and surface_weathering:
         # Historical photographic treatment for reproducible comparison boards.
         field=cv2.resize(rng.random((9,9)).astype(np.float32),alpha.shape[::-1],interpolation=cv2.INTER_CUBIC)
         orientation=np.clip(upward if upward is not None else .45+.3*field,0,1)

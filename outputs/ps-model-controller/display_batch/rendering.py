@@ -52,7 +52,8 @@ def reference_path(cache,asset,candidate,params,environment,device='OPTIX',resol
 @lru_cache(maxsize=1)
 def render_dependencies():
     files=['blender_display_worker.py','blender_worker.py','display_batch/geometry.py',
-           'display_batch/framing.py','display_batch/materials.py','display_batch/rendering.py']
+           'display_batch/framing.py','display_batch/materials.py','display_batch/rendering.py',
+           'display_batch/scanned_shader.py']
     return signature('blender-4.5.3',{name:file_hash(HERE/name) for name in files})
 
 
@@ -68,6 +69,10 @@ def part_keys(request, device, dependencies):
              request['dust_gain'],request['dust_control'],request['material_classes'],
              environment.get('dust_color'),environment.get('haze') if request['appearance']!='native' else None,
              environment.get('local_context',{}).get('surface_texture_rms'))
+    if request.get('scanned_hdri'):
+        shared=(*shared,request['scanned_hdri'])
+    if request.get('surface_scans'):
+        surface=(*surface,request['surface_scans']['signature'])
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),
@@ -96,7 +101,7 @@ class RenderCache:
         return None,'incomplete_entry'
 
     async def get(self, asset, candidate, params, environment, size, resolution, *,
-                  appearance='scene', full_frame=False):
+                  appearance='scene', full_frame=False, surface_scans=None, scanned_hdri=None):
         if not candidate.get('camera'):
             raise ValueError('cropped_render_requires_fixed_camera')
         request=render_request(asset,candidate,params,environment)
@@ -104,6 +109,10 @@ class RenderCache:
         request.update(mesh_hash=asset['mesh_hash'],appearance=appearance,windows=windows,
                        material_classes=asset['semantic']['material_classes'],
                        dust_control=PHOTO_CONTROLS['dust'][params.get('dust','auto')] if appearance in ('scene','native') else 1.)
+        if surface_scans is not None:
+            request['surface_scans']=surface_scans
+        if scanned_hdri is not None:
+            request['scanned_hdri']=scanned_hdri
         keys=part_keys(request,self.worker.device,render_dependencies())
         queued=time.monotonic()
         async with self.lock:
@@ -140,6 +149,11 @@ class RenderCache:
                             raise ValueError('unexpected_render_window_size')
                 info={'path':path,'camera':response['camera'],'device':response['device'],
                       'anchor_uv':response['anchor_uv'],'contact_polygons':response['contact_polygons']}
+                if part=='object' and request.get('surface_scans'):
+                    info['scanned_materials']=response['scanned_materials']
+                if part=='with_shadow' and request.get('scanned_hdri'):
+                    info.update(shadow_basis=response['shadow_basis'],
+                                shadow_catcher_fallback=response['shadow_catcher_fallback'])
                 entries[part]=info
                 atomic_json(folders[part]/'result.json',info)
                 self.totals[part+'_renders']+=1
@@ -153,4 +167,8 @@ class RenderCache:
                     object_window=windows['object'],shadow_window=windows['shadow'],
                     legacy_grid=full_frame,part_paths={k:v['path'] for k,v in entries.items()},
                     render_cache=cache,render_timings=timings,asset_imports=imports)
+        if request.get('surface_scans'):
+            meta['scanned_materials']=obj.get('scanned_materials',[])
+        if request.get('scanned_hdri'):
+            meta.update({k:entries['with_shadow'].get(k) for k in ('shadow_basis','shadow_catcher_fallback')})
         return Path(obj['path']),meta,not missing

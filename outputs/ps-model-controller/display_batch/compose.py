@@ -233,7 +233,8 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     native=params.get('photo_model')=='native'
     reference_pixels=np.asarray(scene['frame'])[samples]
     rgb,photo=match_linear(raw,alpha,reference_pixels,highlight,params,seed,photo_environment,
-                           reference=reference,camera_capture=not (native or local),**channels)
+                           reference=reference,camera_capture=not (native or local),
+                           surface_weathering='scanned_materials' not in render_meta,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     if local:
         rgb,local_air=local_veil(rgb,environment,params)
@@ -267,13 +268,14 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     if with_path.is_file() and without_path.is_file():
         a=cv2.imread(str(with_path),cv2.IMREAD_UNCHANGED)[:,:,:3].mean(axis=2)
         base=cv2.imread(str(without_path),cv2.IMREAD_UNCHANGED)[:,:,:3].mean(axis=2)
-        shadow_basis='scene_linear_EXR_ratio'
+        shadow_basis=render_meta.get('shadow_basis') or 'scene_linear_EXR_ratio'
     else:
         with_shadow=np.asarray(Image.open(shadow_dir/'with-shadow.png').convert('RGB'),dtype=np.float32)/255
         without_shadow=np.asarray(Image.open(shadow_dir/'without-shadow.png').convert('RGB'),dtype=np.float32)/255
         a=linear(with_shadow).mean(axis=2);base=linear(without_shadow).mean(axis=2)
         shadow_basis='legacy_sRGB_decoded_ratio'
-    loss=np.clip(1-a/np.maximum(base,.015),0,.65)
+    ratio=a if shadow_basis=='cycles_shadow_catcher_ratio' else a/np.maximum(base,.015)
+    loss=np.clip(1-ratio,0,.65)
     loss[base<.015]=0
     shadow_window=render_meta.get('shadow_window') if window is not None and parts else None
     loss=warp(loss,full,offset,bounds,window=shadow_window)

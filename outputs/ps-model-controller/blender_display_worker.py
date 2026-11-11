@@ -16,6 +16,7 @@ import blender_worker as legacy
 from display_batch.geometry import camera_for, contact_geometry, horizontal_angle, pose_points, transformed, material_detail_allowed
 from display_batch.common import atomic_json
 from display_batch.materials import material_kind, SURFACE_DUST
+from display_batch.scanned_shader import overcast_pixels, scanned_surface
 
 BASE = None
 BASE_PATH = None
@@ -346,6 +347,8 @@ def shadow_output(scene,folder,name):
 
 
 def configure_materials(obj,request,reference=True):
+    scans=request.get('surface_scans')
+    adapted=set()
     for material in obj.data.materials:
         if not material or not material.use_nodes:continue
         for node in list(material.node_tree.nodes):
@@ -360,6 +363,10 @@ def configure_materials(obj,request,reference=True):
                     dot=tree.nodes.new('ShaderNodeVectorMath');dot.operation='DOT_PRODUCT';dot.inputs[1].default_value=(0,0,1)
                     tree.links.new(geometry.outputs['Normal'],dot.inputs[0])
                     upward=tree.nodes.new('ShaderNodeOutputAOV');upward.aov_name='upward';tree.links.new(dot.outputs['Value'],upward.inputs['Value'])
+                if scans is not None:
+                    if obj.data.uv_layers.active and scanned_surface(material,node,scans,request['environment']['dust_color']):
+                        adapted.add(material.name)
+                    continue
                 if reference:
                     surface_detail(material,node,request['environment'],request.get('dust_gain',1.))
                 else:
@@ -377,6 +384,7 @@ def configure_materials(obj,request,reference=True):
             elif node.type=='BSDF_PRINCIPLED':
                 base=BASE_ROUGHNESS[(material.name,node.name)]
                 node.inputs['Roughness'].default_value=max(.08,min(.95,base+request.get('roughness_delta',0)))
+    return sorted(adapted)
 
 
 def render(request):
@@ -601,9 +609,9 @@ def scene_surface(material, bsdf, request):
         rough.inputs[1].default_value=adjustment
 
 
-def scene_lighting(state, camera, environment, gain, reference):
+def scene_lighting(state, camera, environment, gain, reference, hdri=None):
     scene=bpy.context.scene
-    key=(camera if not reference else None,environment,gain,reference)
+    key=(camera if not reference else None,environment,gain,reference,hdri)
     if state.get('lighting_key')==key:return
     state['lighting_key']=key
     if 'world_image' not in state:
@@ -656,7 +664,10 @@ def scene_lighting(state, camera, environment, gain, reference):
             offset,power,size=lights[1]
             lights[1]=(offset,power*(1.12 if gain<1 else .85 if gain>1 else 1.),size)
     pixels=np.ones((128,256,4),np.float32)
-    if probe is not None:
+    if hdri is not None:
+        pixels[:,:,:3]=overcast_pixels(state,hdri,environment)
+        lights=[(offset,power*.55,size*1.20) for offset,power,size in lights]
+    elif probe is not None:
         pixels[:,:,:3]=np.repeat(np.repeat(np.asarray(probe,np.float32),2,axis=0),2,axis=1)
         if environment.get('calibration'):
             pixels[:,:,:3]*=gain
@@ -682,18 +693,54 @@ def set_window(scene, window):
         render.border_min_y=(frame-b+.01)/frame;render.border_max_y=min(1.,(frame-y+.01)/frame)
 
 
+def shadow_catcher(scene,ground,path):
+    """Export the Cycles multiplicative pass in linear RGB."""
+    layer=scene.view_layers[0]
+    ground.is_shadow_catcher=True
+    layer.cycles.use_pass_shadow_catcher=True
+    try:
+        scene.use_nodes=True
+        tree=scene.node_tree
+        tree.nodes.clear()
+        source=tree.nodes.new('CompositorNodeRLayers')
+        composite=tree.nodes.new('CompositorNodeComposite')
+        tree.links.new(source.outputs['Image'],composite.inputs[0])
+        output=tree.nodes.new('CompositorNodeOutputFile')
+        output.base_path=str(path.parent)
+        output.format.file_format='OPEN_EXR'
+        output.format.color_mode='RGB'
+        output.format.color_depth='16'
+        output.file_slots[0].path='with-shadow-linear'
+        tree.links.new(source.outputs['Shadow Catcher'],output.inputs[0])
+        bpy.ops.render.render(write_still=False)
+        image=bpy.data.images.load(str(path),check_existing=False)
+        try:
+            data=np.empty(image.size[0]*image.size[1]*4,np.float32)
+            image.pixels.foreach_get(data)
+            rgb=data.reshape(-1,4)[:,:3]
+            if not np.isfinite(rgb).all() or int((rgb.mean(axis=1)<.98).sum())<12:
+                raise ValueError('shadow_catcher_pass_missing_finite_contrast')
+        finally:
+            bpy.data.images.remove(image)
+    finally:
+        ground.is_shadow_catcher=False
+        layer.cycles.use_pass_shadow_catcher=False
+        scene.use_nodes=False
+
+
 def render_parts(request):
     global LIVE_RENDER, BASE, BASE_PATH
     started=time.monotonic()
     reference=request['appearance'] in ('reference','local')
-    if LIVE_RENDER is None or LIVE_RENDER['appearance']!=request['appearance']:
+    mode=(request['appearance'],bool(request.get('surface_scans')))
+    if LIVE_RENDER is None or LIVE_RENDER['mode']!=mode:
         scene=reset(request['device'])
         for obj in list(scene.objects):bpy.data.objects.remove(obj,do_unlink=True)
         if BASE is not None:BASE.use_fake_user=False
         BASE=BASE_PATH=None
         bpy.data.orphans_purge(do_recursive=True)
         cam=legacy.make_camera(scene,(0,-10,8),(0,0,0))
-        LIVE_RENDER={'camera':cam,'appearance':request['appearance']}
+        LIVE_RENDER={'camera':cam,'mode':mode}
     scene=bpy.context.scene;state=LIVE_RENDER
     scene.render.use_persistent_data=request.get('persistent_data',True)
     imported=0.;import_seconds=0.
@@ -716,8 +763,9 @@ def render_parts(request):
     cam=state['camera'];cam.location=camera['eye']
     cam.rotation_euler=(Vector(camera['target'])-cam.location).to_track_quat('-Z','Y').to_euler()
     cam.data.angle=math.radians(camera['fov'])
-    scene_lighting(state,camera,request['environment'],request.get('light_gain',1.),reference)
-    configure_materials(obj,request,reference)
+    hdri=request.get('scanned_hdri')
+    scene_lighting(state,camera,request['environment'],request.get('light_gain',1.),reference and not hdri,hdri)
+    adapted=configure_materials(obj,request,reference)
     normal=np.asarray(request.get('plane_normal',[0,0,1]),dtype=float)
     receiver_key=(request.get('receiver',{}).get('patches',[]),normal.tolist())
     if state.get('receiver_key')!=receiver_key:
@@ -739,6 +787,8 @@ def render_parts(request):
     timings={'asset_import_seconds':import_seconds,'scene_setup_seconds':time.monotonic()-started-import_seconds}
     scene.render.image_settings.color_mode='RGBA'
     scene.cycles.use_denoising=True
+    shadow_basis='scene_linear_EXR_ratio'
+    catcher_fallback=None
     for part,path in request['parts'].items():
         folder=Path(path)
         begin=time.monotonic()
@@ -760,10 +810,22 @@ def render_parts(request):
             scene.render.image_settings.file_format='OPEN_EXR'
             scene.render.image_settings.color_depth='16'
             filename=part.replace('_','-')+'-linear0001.exr'
-            legacy.render(scene,folder/filename)
+            if part=='with_shadow' and hdri and request.get('receiver',{}).get('patches'):
+                catcher_start=time.monotonic()
+                try:
+                    shadow_catcher(scene,ground,folder/filename)
+                    shadow_basis='cycles_shadow_catcher_ratio'
+                except (KeyError,RuntimeError,ValueError,OSError) as error:
+                    catcher_fallback=str(error)[:200]
+                timings['shadow_catcher_seconds']=time.monotonic()-catcher_start
+            elif part=='with_shadow' and hdri:
+                catcher_fallback='finite_receiver_unavailable'
+            if part!='with_shadow' or shadow_basis!='cycles_shadow_catcher_ratio':
+                legacy.render(scene,folder/filename)
         timings[part+'_seconds']=time.monotonic()-begin
     return {'anchor_uv':anchor.tolist() if anchor is not None else None,
             'contact_polygons':[q.tolist() for q in polys],'camera':camera,'device':DEVICE,
+            'scanned_materials':adapted,'shadow_basis':shadow_basis,'shadow_catcher_fallback':catcher_fallback,
             'imports':int(imported),'timings':timings}
 
 
