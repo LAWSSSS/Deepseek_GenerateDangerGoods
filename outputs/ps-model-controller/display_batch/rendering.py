@@ -53,13 +53,13 @@ def reference_path(cache,asset,candidate,params,environment,device='OPTIX',resol
 def render_dependencies():
     files=['blender_display_worker.py','blender_worker.py','display_batch/geometry.py',
            'display_batch/framing.py','display_batch/materials.py','display_batch/rendering.py',
-           'display_batch/scanned_shader.py']
+           'display_batch/scanned_shader.py','display_batch/local_light.py']
     return signature('blender-4.5.3',{name:file_hash(HERE/name) for name in files})
 
 
 def part_keys(request, device, dependencies):
     windows=request['windows']
-    fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe')
+    fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe','local_irradiance')
     environment=request['environment']
     light={k:environment[k] for k in fields if k in environment}
     light['calibrated']=bool(environment.get('calibration'))
@@ -75,6 +75,8 @@ def part_keys(request, device, dependencies):
         surface=(*surface,request['surface_scans']['signature'])
     if request.get('matte_partitions'):
         surface=(*surface,request['matte_partitions']['signature'])
+    if request.get('matte_profile'):
+        surface=(*surface,request['matte_profile'])
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),
@@ -104,7 +106,7 @@ class RenderCache:
 
     async def get(self, asset, candidate, params, environment, size, resolution, *,
                   appearance='scene', full_frame=False, surface_scans=None, scanned_hdri=None,
-                  matte_partitions=None, object_only=False):
+                  matte_partitions=None, object_only=False, matte_profile=None):
         if not candidate.get('camera'):
             raise ValueError('cropped_render_requires_fixed_camera')
         request=render_request(asset,candidate,params,environment)
@@ -118,6 +120,8 @@ class RenderCache:
             request['scanned_hdri']=scanned_hdri
         if matte_partitions is not None:
             request['matte_partitions']=matte_partitions
+        if matte_profile is not None:
+            request['matte_profile']=matte_profile
         keys=part_keys(request,self.worker.device,render_dependencies())
         if object_only:
             keys={'object':keys['object']}
@@ -180,6 +184,8 @@ class RenderCache:
             meta['scanned_materials']=obj.get('scanned_materials',[])
         if request.get('matte_partitions'):
             meta['matte_materials']=obj.get('matte_materials',[])
+        if request.get('matte_profile'):
+            meta['matte_profile']=request['matte_profile']
         if request.get('scanned_hdri') and 'with_shadow' in entries:
             meta.update({k:entries['with_shadow'].get(k) for k in ('shadow_basis','shadow_catcher_fallback')})
         return Path(obj['path']),meta,not missing

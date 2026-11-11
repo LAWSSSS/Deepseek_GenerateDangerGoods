@@ -90,7 +90,8 @@ def frame_stats(rgb, bounds, core):
 
 def apply_camera(layers, effect, environment, params, seed):
     value, _, optics = camera_residual(layers["shaded"], layers["rgb"], layers["alpha"], layers["background"],
-                                        environment, params, seed, layers["writable"], object_delta=effect)
+                                        environment, params, seed, layers["writable"], object_delta=effect,
+                                        fixed_sensor=layers.get("fixed_sensor"))
     return np.uint8(np.rint(np.clip(value, 0, 1) * 255)), optics
 
 

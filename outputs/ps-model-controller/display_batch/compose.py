@@ -237,7 +237,8 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     reference_pixels=np.asarray(scene['frame'])[samples]
     rgb,photo=match_linear(raw,alpha,reference_pixels,highlight,params,seed,photo_environment,
                            reference=reference,camera_capture=not (native or local),
-                           surface_weathering='scanned_materials' not in render_meta,fixed_tone=fixed_tone,**channels)
+                           surface_weathering='scanned_materials' not in render_meta and 'matte_profile' not in render_meta,
+                           fixed_tone=fixed_tone,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     if local:
         clear_rgb=rgb

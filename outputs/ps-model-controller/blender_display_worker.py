@@ -368,6 +368,11 @@ def configure_materials(obj,request,reference=True):
                     if obj.data.uv_layers.active and scanned_surface(material,node,scans,request['environment']['dust_color']):
                         adapted.add(material.name)
                     continue
+                if matte is not None and request.get('matte_profile'):
+                    if obj.data.uv_layers.active and matte_dust_surface(material,node,matte,
+                            request['environment'],request['material_classes'],request['matte_profile']):
+                        adapted.add(material.name)
+                    continue
                 if reference:
                     surface_detail(material,node,request['environment'],request.get('dust_gain',1.))
                 else:
@@ -615,7 +620,8 @@ def scene_surface(material, bsdf, request):
 
 def scene_lighting(state, camera, environment, gain, reference, hdri=None):
     scene=bpy.context.scene
-    key=(camera if not reference else None,environment,gain,reference,hdri)
+    local_light=environment.get('local_irradiance')
+    key=(camera if not reference or local_light else None,environment,gain,reference,hdri)
     if state.get('lighting_key')==key:return
     state['lighting_key']=key
     if 'world_image' not in state:
@@ -635,7 +641,11 @@ def scene_lighting(state, camera, environment, gain, reference, hdri=None):
     direction=environment.get('key_direction')
     color=np.asarray(environment['world_color'])
     probe=environment.get('reflection_probe')
-    if reference:
+    if local_light:
+        from display_batch.local_light import light_rig
+        sky, lights = light_rig(environment, camera, gain, (128,256))
+        target=Vector(camera['target'])
+    elif reference:
         sky=.12+.55*(yy/128)**2
         reflection=np.exp(-((xx/256-.24)/.035)**2-((yy/128-.60)/.23)**2)
         reflection+=.5*np.exp(-((xx/256-.76)/.14)**2-((yy/128-.52)/.22)**2)
@@ -749,7 +759,8 @@ def render_parts(request):
     scene=bpy.context.scene;state=LIVE_RENDER
     scene.render.use_persistent_data=request.get('persistent_data',True)
     imported=0.;import_seconds=0.
-    mesh_key=(request['mesh'],request['mesh_hash'],matte['signature'] if matte is not None else None)
+    mesh_key=(request['mesh'],request['mesh_hash'],matte['signature'] if matte is not None else None,
+              request.get('matte_profile'))
     if state.get('mesh_key')!=mesh_key:
         begin=time.monotonic()
         if 'asset' in state:

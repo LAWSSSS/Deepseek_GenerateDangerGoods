@@ -98,19 +98,23 @@ def local_veil(rgb,environment,params):
         'limit':.32 if dusty else .16,'mode':params.get('atmosphere','auto')}
 
 
-def pool_object_rgb(rgb, alpha):
-    """Average 2×2 premultiplied cells once and reconstruct at the input grid."""
+def pool_object_rgb(rgb, alpha, kernel=2):
+    """Average premultiplied cells once; empty cells never contaminate covered RGB."""
+    if not isinstance(kernel, int) or not 1 <= kernel <= 8:
+        raise ValueError('pool_kernel_must_be_integer_1_to_8')
+    if kernel == 1:
+        return rgb.copy()
     h, w = alpha.shape
     rgba = np.dstack((rgb * alpha[..., None], alpha))
-    rgba = np.pad(rgba, ((0, h % 2), (0, w % 2), (0, 0)))
+    rgba = np.pad(rgba, ((0, -h % kernel), (0, -w % kernel), (0, 0)))
     ph, pw = rgba.shape[:2]
-    pooled = cv2.resize(rgba, (pw // 2, ph // 2), interpolation=cv2.INTER_AREA)
+    pooled = cv2.resize(rgba, (pw // kernel, ph // kernel), interpolation=cv2.INTER_AREA)
     restored = cv2.resize(pooled, (pw, ph), interpolation=cv2.INTER_LINEAR)[:h, :w]
     return restored[..., :3] / np.maximum(restored[..., 3:], 1e-6)
 
 
 def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target_px,
-                    *, pool_weight=None, fog_fraction=None):
+                    *, pool_weight=None, fog_fraction=None, pool_kernel=2, fog_weight=None):
     """Return only the change in linear object RGB for the fixed-placement trial."""
     clear = linear(clear_rgb)
     veiled = linear(veiled_rgb)
@@ -123,6 +127,8 @@ def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target
     sampled = context['confidence'] == 'estimated' and context['sample_pixels'] >= 20
     if pool_weight is None:
         pool_weight = float(np.clip(.20 + .40 * (optics['sigma_px'] - .65), .15, .35))
+    if not 0 <= pool_weight <= 1 or (fog_weight is not None and not 0 <= fog_weight <= .36):
+        raise ValueError('effect_weight_out_of_range')
     if not sampled or optics['edge_samples'] < 12:
         pool_weight = 0.
     fade = np.minimum(interior / 2., 1.)
@@ -130,11 +136,15 @@ def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target
     base = local_air['amount']
     delta = np.zeros_like(clear)
     if pool_weight:
-        delta = (pool_object_rgb(clear, alpha) - clear) * pool[..., None] * (1 - base)
+        delta = (pool_object_rgb(clear, alpha, pool_kernel) - clear) * pool[..., None] * (1 - base)
 
     radius = int(np.clip(round(target_px * .012), 2, 6))
     extra_limit = max(0., min(.09, (.32 - base) / max(1 - base, 1e-6)))
     extra = min(.35 * base, extra_limit) if fog_fraction is None else min(.65 * base, extra_limit) * fog_fraction
+    if fog_weight is not None:
+        # Explicit stronger diagnostic ladder. A clear neighbourhood remains clear.
+        local_strength = float(np.clip(base / .15, 0., 1.25))
+        extra = min(fog_weight * local_strength, max(0., (.55 - base) / max(1 - base, 1e-6)))
     if not sampled:
         extra = 0.
     fade = np.minimum(interior / radius, 1.)
@@ -143,7 +153,7 @@ def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target
     delta += (air - veiled - delta) * haze[..., None]
 
     total = base + (1 - base) * haze[core]
-    return delta, {'pool_kernel': [2, 2], 'pool_weight': pool_weight,
+    return delta, {'pool_kernel': [pool_kernel, pool_kernel], 'pool_weight': pool_weight,
                    'pool_weight_max': float(pool.max()), 'edge_samples': optics['edge_samples'],
                    'camera_sigma_px': optics['sigma_px'], 'fog_color_linear': local_air['color_linear'],
                    'fog_feather_px': radius, 'fog_base': base, 'fog_extra_max': float(haze.max()),
@@ -161,7 +171,8 @@ def seam_measurement(loss, receiver, alpha):
             'basis':'receiver_boundary_outside_object_not_object_edge'}
 
 
-def camera_residual(shaded, rgb, alpha, background, environment, params, seed, writable, *, object_delta=None):
+def camera_residual(shaded, rgb, alpha, background, environment, params, seed, writable, *, object_delta=None,
+                    fixed_sensor=None):
     """Filter only the inserted radiance difference, never a pasted rectangular background."""
     from .schema import PHOTO_CONTROLS
     sharpness=PHOTO_CONTROLS['sharpness'][params.get('sharpness','auto')]
@@ -191,6 +202,11 @@ def camera_residual(shaded, rgb, alpha, background, environment, params, seed, w
     existing=float(np.median(abs(residual[flat]-np.median(residual[flat])))*1.4826) if flat.any() else 0.
     target_noise=min(.012,environment['sensor']['noise_sigma'])
     added=math.sqrt(max(0,target_noise**2-existing**2))
+    if fixed_sensor is not None:
+        existing=float(fixed_sensor['existing_noise_sigma'])
+        added=float(fixed_sensor['added_noise_sigma'])
+        if not np.isfinite([existing,added]).all() or min(existing,added)<0:
+            raise ValueError('invalid_fixed_sensor_statistics')
     noise=np.random.default_rng(seed).normal(0,added,alpha.shape).astype(np.float32)
     if object_delta is not None:
         extra=object_delta*alpha[...,None]

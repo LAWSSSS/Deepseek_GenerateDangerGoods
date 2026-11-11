@@ -70,7 +70,7 @@ def opaque_surface_output(tree, shader):
     return output
 
 
-def matte_dust_surface(material, shader, partitions, environment, classes):
+def matte_dust_surface(material, shader, partitions, environment, classes, profile=None):
     """Cover known metal and painted metal with a rough dielectric dust surface."""
     tree = material.node_tree
     name = re.sub(r'\.\d{3}$', '', material.name)
@@ -80,6 +80,9 @@ def matte_dust_surface(material, shader, partitions, environment, classes):
     dust_color = np.asarray(environment['dust_color'], np.float32)
     gray = float(dust_color @ np.float32([.2126, .7152, .0722]))
     tint = (.62 * (.86 * gray + .14 * dust_color)).tolist()
+    if profile:
+        # Dust albedo and measured incident brightness must not be multiplied twice.
+        tint = (.26 * np.clip((.86*gray+.14*dust_color)/max(gray, .005), .85, 1.15)).tolist()
     color = tree.nodes.get('Matte dust color')
     if color:
         color.outputs[0].default_value = (*tint, 1.)
@@ -90,11 +93,22 @@ def matte_dust_surface(material, shader, partitions, environment, classes):
     coords = tree.nodes.new('ShaderNodeTexCoord')
     metallic = shader.inputs['Metallic']
     kind = material_kind(name, metallic.default_value, metallic.is_linked, classes)
-    if kind == 'metal':
+    weights = material_weights(tree, entry, coords.outputs['UV'])
+    if profile:
+        coverage = math_node(tree, 'ADD', weights[0], weights[2], clamp=True)
+        coverage = math_node(tree, 'ADD', coverage,
+                             math_node(tree, 'MULTIPLY', weights[1], profile['paint_dust_scale']), clamp=True)
+        # Less powder must not expose a polished lacquer highlight. Preserve paint colour.
+        rough = original(shader.inputs['Roughness'])
+        dull = math_node(tree, 'MAXIMUM', rough, .78)
+        assign(tree, mix(tree, weights[1], rough, dull), shader.inputs['Roughness'])
+        specular = original(shader.inputs['Specular IOR Level'])
+        assign(tree, mix(tree, weights[1], specular, .15), shader.inputs['Specular IOR Level'])
+    elif kind == 'metal':
         coverage = 1.
     else:
         coverage = 0.
-        for weight in material_weights(tree, entry, coords.outputs['UV']):
+        for weight in weights:
             coverage = math_node(tree, 'ADD', coverage, weight, clamp=True)
     noise = tree.nodes.new('ShaderNodeTexNoise')
     noise.inputs['Scale'].default_value = 94.
@@ -102,6 +116,7 @@ def matte_dust_surface(material, shader, partitions, environment, classes):
     tree.links.new(coords.outputs['Object'], noise.inputs['Vector'])
     opacity = math_node(tree, 'ADD', .90, math_node(tree, 'MULTIPLY', noise.outputs['Fac'], .08))
     amount = math_node(tree, 'MULTIPLY', coverage, opacity, clamp=True)
+    amount.node.name = 'Matte dust coverage'
     color = tree.nodes.new('ShaderNodeRGB')
     color.name = 'Matte dust color'
     color.outputs[0].default_value = (*tint, 1.)
