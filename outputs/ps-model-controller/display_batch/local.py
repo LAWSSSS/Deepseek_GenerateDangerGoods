@@ -100,21 +100,27 @@ def local_veil(rgb,environment,params):
 
 def pool_object_rgb(rgb, alpha, kernel=2):
     """Average premultiplied cells once; empty cells never contaminate covered RGB."""
-    if not isinstance(kernel, int) or not 1 <= kernel <= 8:
-        raise ValueError('pool_kernel_must_be_integer_1_to_8')
+    if not isinstance(kernel, int) or not 1 <= kernel <= 64:
+        raise ValueError('pool_kernel_must_be_integer_1_to_64')
     if kernel == 1:
         return rgb.copy()
     h, w = alpha.shape
     rgba = np.dstack((rgb * alpha[..., None], alpha))
     rgba = np.pad(rgba, ((0, -h % kernel), (0, -w % kernel), (0, 0)))
     ph, pw = rgba.shape[:2]
-    pooled = cv2.resize(rgba, (pw // kernel, ph // kernel), interpolation=cv2.INTER_AREA)
+    if kernel > 8:
+        # Large cells accumulate thousands of weights. Double precision keeps a
+        # constant surface constant even when most of the cell is transparent.
+        pooled = rgba.reshape(ph//kernel,kernel,pw//kernel,kernel,4).mean(axis=(1,3),dtype=np.float64)
+    else:
+        pooled = cv2.resize(rgba, (pw // kernel, ph // kernel), interpolation=cv2.INTER_AREA)
     restored = cv2.resize(pooled, (pw, ph), interpolation=cv2.INTER_LINEAR)[:h, :w]
-    return restored[..., :3] / np.maximum(restored[..., 3:], 1e-6)
+    return np.float32(restored[..., :3] / np.maximum(restored[..., 3:], 1e-6))
 
 
 def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target_px,
-                    *, pool_weight=None, fog_fraction=None, pool_kernel=2, fog_weight=None):
+                    *, pool_weight=None, fog_fraction=None, pool_kernel=2, fog_weight=None,
+                    uniform=False, fog_profile='local'):
     """Return only the change in linear object RGB for the fixed-placement trial."""
     clear = linear(clear_rgb)
     veiled = linear(veiled_rgb)
@@ -127,12 +133,17 @@ def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target
     sampled = context['confidence'] == 'estimated' and context['sample_pixels'] >= 20
     if pool_weight is None:
         pool_weight = float(np.clip(.20 + .40 * (optics['sigma_px'] - .65), .15, .35))
-    if not 0 <= pool_weight <= 1 or (fog_weight is not None and not 0 <= fog_weight <= .36):
+    if fog_profile not in ('local','wide'):
+        raise ValueError('unknown_fog_profile')
+    fog_max = .85 if fog_profile == 'wide' else .36
+    if not 0 <= pool_weight <= 1 or (fog_weight is not None and not 0 <= fog_weight <= fog_max):
         raise ValueError('effect_weight_out_of_range')
     if not sampled or optics['edge_samples'] < 12:
         pool_weight = 0.
     fade = np.minimum(interior / 2., 1.)
     pool = pool_weight * fade * fade * (3 - 2 * fade)
+    if uniform:
+        pool = np.float32(alpha > 0) * pool_weight
     base = local_air['amount']
     delta = np.zeros_like(clear)
     if pool_weight:
@@ -145,18 +156,26 @@ def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target
         # Explicit stronger diagnostic ladder. A clear neighbourhood remains clear.
         local_strength = float(np.clip(base / .15, 0., 1.25))
         extra = min(fog_weight * local_strength, max(0., (.55 - base) / max(1 - base, 1e-6)))
+        if fog_profile == 'wide':
+            # Explicit review ladder: actual extra-layer opacity, no hidden local multiplier.
+            extra = min(fog_weight, max(0., (.90-base)/max(1-base,1e-6))) if base > 0 else 0.
     if not sampled:
         extra = 0.
     fade = np.minimum(interior / radius, 1.)
     haze = extra * fade * fade * (3 - 2 * fade)
+    if fog_profile == 'wide':
+        # Geometric alpha already feathers the true edge. An unfogged inner rim
+        # would become a conspicuous dark outline at this diagnostic strength.
+        haze = np.float32(alpha > 0) * extra
     air = np.asarray(local_air['color_linear'], np.float32)
     delta += (air - veiled - delta) * haze[..., None]
 
     total = base + (1 - base) * haze[core]
     return delta, {'pool_kernel': [pool_kernel, pool_kernel], 'pool_weight': pool_weight,
+                   'pool_uniform': uniform, 'fog_profile': fog_profile,
                    'pool_weight_max': float(pool.max()), 'edge_samples': optics['edge_samples'],
                    'camera_sigma_px': optics['sigma_px'], 'fog_color_linear': local_air['color_linear'],
-                   'fog_feather_px': radius, 'fog_base': base, 'fog_extra_max': float(haze.max()),
+                   'fog_feather_px': 0 if fog_profile=='wide' else radius, 'fog_base': base, 'fog_extra_max': float(haze.max()),
                    'fog_total_median': float(np.median(total)) if total.size else base,
                    'fog_total_max': float(total.max()) if total.size else base,
                    'sample_basis': context['basis'], 'sample_pixels': context['sample_pixels']}

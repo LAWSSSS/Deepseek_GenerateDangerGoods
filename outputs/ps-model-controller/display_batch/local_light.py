@@ -44,10 +44,17 @@ def fit_direction(centers, luminance):
             'split_agreement': agreement, 'gradient_log': strength}
 
 
-def estimate_local_light(scene, candidate, environment):
+def estimate_local_light(scene, candidate, environment, *, statistic='median', margin_scale=1.):
     import cv2
     from .photography import linear
+    if statistic not in ('median','mean') or not 1 <= margin_scale <= 2.5:
+        raise ValueError('invalid_local_light_sampling')
     x, y, r, b = environment['local_context']['bounds']
+    original_bounds = [x,y,r,b]
+    if margin_scale != 1.:
+        w,h = scene['size'];left,top,right,bottom=candidate['bounds']
+        x=max(0,round(left-(left-x)*margin_scale));y=max(0,round(top-(top-y)*margin_scale))
+        r=min(w,round(right+(r-right)*margin_scale));b=min(h,round(bottom+(b-bottom)*margin_scale))
     rgb = np.float32(np.asarray(scene['frame'])[y:b, x:r]) / 255
     gray = rgb @ LUMA
     site = next(s for s in scene['supports'] if s['id'] == candidate['site_id'])
@@ -71,8 +78,9 @@ def estimate_local_light(scene, candidate, environment):
         basis = 'local_under_object_neutral_support_estimate'
     if selected.sum() < 40:
         raise ValueError('insufficient_local_neutral_light_evidence')
-    lo, hi = np.percentile(gray[selected], [12, 88])
-    selected &= (gray >= lo) & (gray <= hi)
+    if statistic == 'median':
+        lo, hi = np.percentile(gray[selected], [12, 88])
+        selected &= (gray >= lo) & (gray <= hi)
     # Erode metal boundaries so adjacent gaps and bright edges cannot bias a tile.
     eroded = cv2.erode(selected.astype(np.uint8), np.ones((3, 3), np.uint8)) > 0
     if eroded.sum() >= 40:
@@ -90,15 +98,16 @@ def estimate_local_light(scene, candidate, environment):
             mask = selected[t:bb, l:rr]
             if mask.sum() < 12:
                 continue
-            color = np.median(clear[t:bb, l:rr][mask], axis=0)
+            reducer = np.mean if statistic == 'mean' else np.median
+            color = reducer(clear[t:bb, l:rr][mask], axis=0)
             center = [(l+rr)/w-1, (t+bb)/h-1]
             colors.append(color); centers.append(center); counts.append(int(mask.sum()))
             tiles.append({'bounds': [x+l,y+t,x+rr,y+bb], 'pixels': int(mask.sum()), 'rgb_linear': color.tolist()})
     if len(tiles) < 3:
-        colors = [np.median(clear[selected], axis=0)]
+        colors = [(np.mean if statistic == 'mean' else np.median)(clear[selected], axis=0)]
         centers = [[0., 0.]]
     # Equal tile voting prevents one large sheet from dominating many smaller pieces.
-    color = np.median(colors, axis=0)
+    color = np.mean(clear[selected],axis=0) if statistic == 'mean' else np.median(colors, axis=0)
     luminance = float(color @ LUMA)
     tint = np.clip(color / max(luminance, .01), .85, 1.15)
     direction = fit_direction(centers, np.asarray(colors) @ LUMA)
@@ -112,6 +121,10 @@ def estimate_local_light(scene, candidate, environment):
                 'target_clear_rgb_linear': color.tolist(), 'direction': direction,
                 'level': level, 'fill_ratio': fill, 'depth_tolerance': .085, 'global_fallback': False,
                 'assumptions': ['same_depth_neutral_surface', 'receiver_reflectance_0.3', 'unknown_HDR_and_surface_normals']}
+    if statistic != 'median' or margin_scale != 1.:
+        evidence.update(statistic='arithmetic_mean',margin_scale=margin_scale,original_bounds=original_bounds,
+                        aggregation='equal_weight_per_valid_pixel_in_camera_linear_space',
+                        version='local-mean-expanded-v2')
     result = {**environment, 'world_color': (.20 * level * tint).tolist(), 'light_color': (tint/tint.max()).tolist(),
               'key_direction': direction['direction'], 'light_level': level, 'local_irradiance': evidence,
               'lighting_basis': 'bounded_local_tiles_and_diffuse_receiver_calibration'}
@@ -143,6 +156,9 @@ def light_rig(environment, camera, gain=1., shape=(128, 256)):
     toward[2]=max(.5,abs(toward[2]))
     toward=tuple(toward/max(np.linalg.norm(toward),1e-6)*4.)
     lights = [(offset, key, 7.5 - 2 * confidence), (toward, key * fill * 1.2, 8.)]
+    if evidence.get('reconstruction'):
+        # World radiance now supplies directional fill; avoid counting it twice.
+        lights = [(offset,power*.40,size*1.15) for offset,power,size in lights]
     return np.float32(sky), lights
 
 
@@ -159,7 +175,8 @@ def receiver_calibration(render_dir, meta, environment):
     usable = np.isfinite(rgb).all(axis=2) & ((rgb @ LUMA) > .015)
     if usable.sum() < 40:
         raise ValueError('insufficient_local_light_receiver_reference')
-    sample = np.median(rgb[usable], axis=0)[None, None, :]
+    reducer = np.mean if environment['local_irradiance'].get('statistic')=='arithmetic_mean' else np.median
+    sample = reducer(rgb[usable], axis=0)[None, None, :]
     target = np.asarray(environment['local_irradiance']['target_clear_rgb_linear'], np.float32)
     from .compose import srgb
     target_luma = float(srgb(target) @ LUMA)
@@ -176,3 +193,59 @@ def receiver_calibration(render_dir, meta, environment):
             'basis': 'same_light_0.3_diffuse_receiver_not_object_median', 'reference_pixels': int(usable.sum()),
             'target_luma': target_luma, 'fitted_luma': fitted, 'receiver_rgb_linear': sample[0,0].tolist(),
             'uncertainty': 'neutral_reflectance_and_surface_normal_assumptions'}
+
+
+def reconstruct_probe(environment, candidate):
+    """Fit a broad local reflection field, with an explicit unobserved-sky prior.
+
+    This is an appearance-conditioned light estimate, not recovery of measured HDR
+    or inversion of unknown scene albedos and normals. No scene pixels become texture.
+    """
+    evidence = environment['local_irradiance']
+    camera=candidate['camera']
+    right,up,_=np.asarray(camera['basis'],np.float64)
+    target=np.asarray(candidate['anchor_px'],np.float64)
+    x,y,r,b=evidence['bounds']
+    directions=[];ratios=[];sectors=set()
+    mean=np.maximum(evidence['target_clear_rgb_linear'],.005)
+    for tile in evidence['tiles']:
+        l,t,rr,bb=tile['bounds']
+        delta=(np.array([(l+rr)/2,(t+bb)/2])-target)/[max(1,r-x),max(1,b-y)]
+        axis=right*delta[0]-up*delta[1]
+        axis[2]=0.
+        length=float(np.linalg.norm(axis))
+        if length<.025:continue
+        axis/=length
+        axis[2]=.28
+        axis/=np.linalg.norm(axis)
+        directions.append(axis)
+        ratios.append(np.clip(np.asarray(tile['rgb_linear'])/mean,.4,1.8)-1.)
+        sectors.add(int((math.atan2(delta[1],delta[0])+math.pi)/math.pi*4)%8)
+    height,width=64,128
+    yy,xx=np.mgrid[:height,:width]
+    # Blender image buffers use a bottom-left origin for equirectangular textures.
+    latitude=(yy+.5)/height*math.pi-math.pi/2
+    longitude=math.pi-(xx+.5)/width*2*math.pi
+    rays=np.stack((np.cos(latitude)*np.cos(longitude),np.cos(latitude)*np.sin(longitude),np.sin(latitude)),axis=-1)
+    total=np.zeros((height,width,3),np.float64);weight=np.zeros((height,width),np.float64)
+    for axis,ratio in zip(directions,ratios):
+        influence=np.exp(3.*(rays@axis-1.))
+        total+=influence[...,None]*ratio
+        weight+=influence
+    confidence=min(.65,len(sectors)/8*.65)*min(1.,len(directions)/12)
+    field=1+confidence*total/np.maximum(weight[...,None],1e-6)
+    dome=.65+.70*np.clip(rays[...,2],0,1)
+    field*=dome[...,None]
+    solid_angle=np.cos(latitude)
+    field/=np.sum(field*solid_angle[...,None],axis=(0,1))/solid_angle.sum()
+    probe=np.float32(field*np.asarray(environment['world_color']))
+    info={'method':'local_low_frequency_spherical_lobes', 'status':'estimated',
+          'confidence':confidence,'observed_sectors':len(sectors),'observed_tiles':len(directions),
+          'shape':[width,height],'lobe_concentration':3.,
+          'unobserved_sky':'diffuse_dome_prior_not_measured',
+          'absolute_radiance':'unknown','scene_albedo_and_normals':'unknown',
+          'sha256':hashlib.sha256(probe.tobytes()).hexdigest(),
+          'basis':'mean_local_reflected_radiance_not_measured_incident_HDR'}
+    return {**environment,'reflection_probe':probe.tolist(),
+            'local_irradiance':{**evidence,'reconstruction':info},
+            'lighting_basis':'local_mean_conditioned_low_frequency_environment_reconstruction'}

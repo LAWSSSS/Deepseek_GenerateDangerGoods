@@ -17,7 +17,7 @@ from display_batch.compose import compose, cv2, sample_environment
 from display_batch.costs import cumulative
 from display_batch.framing import final_resolution
 from display_batch.local import foreground_dust
-from display_batch.local_light import estimate_local_light, receiver_calibration
+from display_batch.local_light import estimate_local_light, receiver_calibration, reconstruct_probe
 from display_batch.photography import linear, LUMA
 from display_batch.pipeline import batch_lock
 from display_batch.rendering import RenderCache, render_dependencies
@@ -38,6 +38,10 @@ PREVIOUS = 'outputs/薄雾池化梯度与积灰哑光-20261111-v2'
 PROFILE = {'version': 'half-paint-dust-v1', 'paint_dust_scale': .5, 'single_deposit': True}
 POOL = (2, 4, 6)
 FOG = (.12, .24, .36)
+WIDE_OUTPUT = 'outputs/大梯度池化薄雾与均值光场-20261111'
+WIDE_PREVIOUS = OUTPUT
+WIDE_POOL = (16,32,64)
+WIDE_FOG = (.30,.60,.85)
 
 
 def frame(image, title, bounds, core):
@@ -178,6 +182,7 @@ def frames(case):
 
 
 def report(out,cases,summary):
+    wide=summary.get('experiment')=='wide'
     def link(path):
         return html.escape(Path(os.path.relpath(path,out)).as_posix(),quote=True)
     def picture(item):
@@ -191,11 +196,16 @@ def report(out,cases,summary):
             parts.append(f'<section id="sample-{c["number"]:02d}"><h3>{c["number"]:02d} · {html.escape(c["name"])}</h3>')
             if c.get('error'):
                 parts.append(f'<p>{html.escape(c["error"])}</p></section>');continue
-            if c['material_info']['profile']:
+            if wide:
+                parts.append('<details open><summary>扩大范围并改用均值 · 相同材质</summary><div class="frames">'+
+                    picture({**c['previous'],'title':'上一轮局部光照'})+picture(c['material'])+'</div></details>')
+            elif c['material_info']['profile']:
                 parts.append('<details><summary>材质对照 · 相同原受光</summary><div class="frames">'+
                              picture({**c['previous'],'title':'上一轮积灰哑光'})+picture(c['material'])+'</div></details>')
-            parts.append('<details open><summary>局部受光对照 · 相同新材质</summary><div class="frames">'+
-                         picture({**c['material'],'title':'原受光'})+picture(c['groups']['pool'][0])+'</div></details>')
+            light_title='均值照明与近似光场重建 · 相同采样' if wide else '局部受光对照 · 相同新材质'
+            parts.append(f'<details open><summary>{light_title}</summary><div class="frames">'+
+                         picture({**c['material'],'title':'扩大范围均值照明' if wide else '原受光'})+
+                         picture(c['groups']['pool'][0])+'</div></details>')
             for kind,title in (('pool','池化加强 · 附加薄雾关闭'),('fog','薄雾加强 · 池化关闭')):
                 images = []
                 for item in c['groups'][kind]:
@@ -217,11 +227,18 @@ def report(out,cases,summary):
         '<p>漆面粉尘覆盖系数减半，漆面保持粗糙；裸金属保留哑光粉尘，塑料保持原材质。局部光照和尺度仍为估计。</p>'
         f'<p>{summary["cases_pass"]}/10 组程序检查通过，{summary["full_frames"]} 张全景。API ¥0；本机时间见账本。</p>'
         '<p><a href="cost-ledger.json">累计成本与耗时</a> · <a href="results.json">完整参数和检查</a></p>')
+    if wide:
+        head=head.replace('加强池化薄雾与局部受光','16/32/64 均匀池化、大梯度薄雾与均值光场')
+        head=head.replace('先比较材质和受光','先比较扩大范围均值照明和近似光场重建')
+        head+=('<p>池化档位是最终原图上的 16×16、32×32、64×64 像素，100% 等权平均处理。'
+               '附加雾层为 30%、60%、85%，按原透明度过渡。最高档用于检查强度上限。</p>'
+               '<p>照明采样边距扩大到 1.75 倍，使用有效像素算术均值。'
+               '光场重建属于局部低频估计，未恢复实测 HDR 或不可见光源。</p>')
     (out/'index.html').write_text(head+''.join(parts),encoding='utf8')
 
 
 async def run(args):
-    start = time.monotonic();out = resolve(args.out)
+    start = time.monotonic();out = resolve(args.out or (WIDE_OUTPUT if getattr(args,'experiment','local')=='wide' else OUTPUT))
     if out.exists() and any(out.iterdir()) and not (out/'inputs.json').is_file():
         raise ValueError('fresh_output_directory_required')
     out.mkdir(parents=True,exist_ok=True)
@@ -230,6 +247,8 @@ async def run(args):
 
 
 async def run_locked(args,out,start):
+    wide=getattr(args,'experiment','local')=='wide'
+    previous_root=resolve(WIDE_PREVIOUS if wide else PREVIOUS)
     rollback = resolve(ROLLBACK)
     config = BatchConfig(backgrounds='.',output=str(out),offline=True,render_device=args.device,
                          photo_style='dusty_scrap',max_iterations=0)
@@ -244,12 +263,13 @@ async def run_locked(args,out,start):
         raise ValueError('expected_five_by_two_frozen_cohort')
     history = {int(r['job_id'].split('-')[0]):r for r in records(resolve(BASELINE))}
     passes = {r['number']:frozen_passes(r,history,resolve(SIZED),cache) for r in rows}
-    previous = {r['number']:r for r in read(resolve(PREVIOUS)/'results.json')}
-    inputs = {'cohort':file_hash(rollback/'cases.json'),'pool':POOL,'fog':FOG,'profile':PROFILE,
+    previous = {r['number']:r for r in read(previous_root/'results.json')}
+    inputs = {'cohort':file_hash(rollback/'cases.json'),'pool':WIDE_POOL if wide else POOL,
+        'fog':WIDE_FOG if wide else FOG,'profile':PROFILE,'experiment':'wide' if wide else 'local',
         'device':args.device,'renderer':render_dependencies(),'sources':{name:file_hash(HERE/name) for name in
         (Path(__file__).name,'display_batch/compose.py','display_batch/local.py','display_batch/local_light.py',
-         'display_batch/photography.py','display_batch/surface_maps.py','validate_display_gradients.py')},
-        'passes':{str(i):v[3] for i,v in passes.items()},'previous':file_hash(resolve(PREVIOUS)/'results.json')}
+         'display_batch/photography.py','display_batch/surface_maps.py','validate_display_gradients.py','display_batch/wide_trial.py')},
+        'passes':{str(i):v[3] for i,v in passes.items()},'previous':file_hash(previous_root/'results.json')}
     inputs = json.loads(json.dumps(inputs))
     if (out/'inputs.json').is_file() and read(out/'inputs.json')!=inputs:
         raise ValueError('frozen_inputs_changed_use_new_directory')
@@ -278,13 +298,24 @@ async def run_locked(args,out,start):
                     source,archived,shadow_hash,_ = passes[number]
                     masks = placement_masks(scene,row['pose'],source,row['archived_window'],archived,row['baseline']['edit_bounds'])
                     environment,samples = sample_environment(scene,row['pose'],local=True)
-                    new_env,light_samples = estimate_local_light(scene,row['pose'],environment)
-                    old_render = None
-                    if row['asset_id']!='13':
-                        old_render = await render_fixed(row,asset,scene,source,archived,renders,cache,environment,masks)
-                    light_render = await render_fixed(row,asset,scene,source,archived,renders,cache,new_env,masks,local=True)
-                    case = await asyncio.to_thread(compose_all,folder,row,scene,source,archived,shadow_hash,
-                        old_render,light_render,environment,samples,new_env,light_samples,masks,previous[number])
+                    if wide:
+                        from display_batch.wide_trial import compose_wide
+                        mean_env,light_samples=estimate_local_light(scene,row['pose'],environment,statistic='mean',margin_scale=1.75)
+                        probe_env=reconstruct_probe(mean_env,row['pose'])
+                        variants={}
+                        for label,env in (('mean',mean_env),('probe',probe_env)):
+                            rendered=await render_fixed(row,asset,scene,source,archived,renders,cache,env,masks,local=True)
+                            variants[label]=(env,rendered)
+                        case=await asyncio.to_thread(compose_wide,folder,row,scene,source,archived,shadow_hash,
+                            variants,environment,samples,light_samples,masks,previous[number],WIDE_POOL,WIDE_FOG)
+                    else:
+                        new_env,light_samples = estimate_local_light(scene,row['pose'],environment)
+                        old_render = None
+                        if row['asset_id']!='13':
+                            old_render = await render_fixed(row,asset,scene,source,archived,renders,cache,environment,masks)
+                        light_render = await render_fixed(row,asset,scene,source,archived,renders,cache,new_env,masks,local=True)
+                        case = await asyncio.to_thread(compose_all,folder,row,scene,source,archived,shadow_hash,
+                            old_render,light_render,environment,samples,new_env,light_samples,masks,previous[number])
             except (ValueError,OSError,RuntimeError,cv2.error) as error:
                 case = {k:row[k] for k in ('number','asset_id','name','background')}
                 case.update(status='failed',error=str(error))
@@ -296,7 +327,7 @@ async def run_locked(args,out,start):
         raise ValueError('source_model_changed')
     complete = [c for c in cases if c['status']=='review']
     all_frames = {p:v for c in complete for p,v in frames(c).items()}
-    summary = {'cases_pass':len(complete),'full_frames':len(all_frames),
+    summary = {'cases_pass':len(complete),'full_frames':len(all_frames),'experiment':'wide' if wide else 'local',
         'new_pngs':sum(Path(p).is_relative_to(out) for p in all_frames),'source_models':len(hashes),
         'render_counts':dict(renders.totals),'timings':dict(renders.timings),
         'seconds':round(time.monotonic()-start,3),'composition_cache_hits':reused,'cost_total':cumulative(out)}
@@ -315,7 +346,8 @@ async def run_locked(args,out,start):
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--out',default=OUTPUT)
+    parser.add_argument('--out')
+    parser.add_argument('--experiment',choices=('local','wide'),default='local')
     parser.add_argument('--device',choices=('OPTIX','CUDA','CPU'),default='OPTIX')
     result = asyncio.run(run(parser.parse_args()))
     print(json.dumps(result,ensure_ascii=False))
