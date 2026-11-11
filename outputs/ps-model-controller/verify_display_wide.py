@@ -14,7 +14,7 @@ from display_batch.common import atomic_json,file_hash,load_catalog,resolve
 from display_batch.schema import BatchConfig
 from display_batch.scene import Scenes
 from feedback_rollback import placement_masks,ROLLBACK
-from validate_display_local_light import frames,WIDE_OUTPUT,FINE_OUTPUT,FINE_POOL,FINE_FOG,COMBINED_OUTPUT
+from validate_display_local_light import frames,WIDE_OUTPUT,FINE_OUTPUT,FINE_POOL,FINE_FOG,COMBINED_OUTPUT,combined_output
 
 
 class Links(HTMLParser):
@@ -26,7 +26,7 @@ class Links(HTMLParser):
         if tag=='a':self.links.append(attributes['href'])
 
 
-async def verify(out,experiment='wide'):
+async def verify(out,experiment='wide',pool_kernel=6):
     start=time.monotonic()
     fine=experiment=='fine'
     combined=experiment=='combined'
@@ -44,6 +44,7 @@ async def verify(out,experiment='wide'):
     records=[];unique=set()
     previous_root=resolve(FINE_OUTPUT if combined else WIDE_OUTPUT)
     previous={c['number']:c for c in json.loads((previous_root/'results.json').read_text(encoding='utf8'))} if global_mean else {}
+    comparisons={c['number']:c for c in json.loads((resolve(COMBINED_OUTPUT)/'results.json').read_text(encoding='utf8'))} if combined and pool_kernel!=6 else {}
     try:
         for case in cases:
             row=rows[case['number']];scene=await scenes.prepare(row['background'])
@@ -68,7 +69,7 @@ async def verify(out,experiment='wide'):
                     changed=np.any(rgb!=base,axis=2)
                     if changed[~permitted].any():raise ValueError('optical_effect_leaked_outside_visible_object')
                     if combined:
-                        if item['pool_kernel']!=(1,6)[i] or item['pool_weight']!=(0.,1.)[i] or abs(item['fog_extra']-.35)>1e-6:
+                        if item['pool_kernel']!=(1,pool_kernel)[i] or item['pool_weight']!=(0.,1.)[i] or abs(item['fog_extra']-.35)>1e-6:
                             raise ValueError('combined_pool_or_fog_strength_changed')
                         if i==1 and not item['effects']['pool_uniform']:
                             raise ValueError('combined_pool_is_not_uniform')
@@ -108,6 +109,18 @@ async def verify(out,experiment='wide'):
                         raise ValueError('combined_control_changed')
                     if evidence!=prior or case['current_render_count']!=0 or case['replayed_controls']!=2:
                         raise ValueError('combined_did_not_reuse_exact_frozen_lighting')
+                    if comparisons:
+                        reference=comparisons[case['number']]['groups']['combined'][-1]
+                        if comparisons[case['number']]['light_evidence']!=evidence or reference['pool_kernel']!=6:
+                            raise ValueError('previous_pool_lighting_or_kernel_changed')
+                        if case['pool_comparison']['image_hash']!=reference['image_hash']:
+                            raise ValueError('previous_pool_comparison_changed')
+                        if abs(case['groups']['combined'][-1]['fog_total']-reference['fog_total'])>1e-6:
+                            raise ValueError('fog_changed_between_pool_sizes')
+                        with Image.open(reference['image']) as image:reference_rgb=np.asarray(image.convert('RGB'))
+                        with Image.open(case['groups']['combined'][-1]['image']) as image:result_rgb=np.asarray(image.convert('RGB'))
+                        if np.any(result_rgb[~permitted]!=reference_rgb[~permitted]):
+                            raise ValueError('pool_comparison_changed_outside_object')
             else:
                 probe=np.load(case['estimated_probe'],allow_pickle=False)
                 import hashlib
@@ -129,7 +142,7 @@ async def verify(out,experiment='wide'):
     for path in links.images:
         with Image.open(out/path) as image:
             if image.size!=(1600,900):raise ValueError('report_image_not_full_frame')
-    expected_count=30 if combined else 100 if fine else 90
+    expected_count=(40 if comparisons else 30) if combined else 100 if fine else 90
     if len(unique)!=expected_count:raise ValueError(f'expected_{expected_count}_unique_full_frames')
     catalog=load_catalog()
     hashes={k:file_hash(v['mesh']) for k,v in catalog.items() if v['available']}
@@ -145,6 +158,7 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out')
     parser.add_argument('--experiment',choices=('wide','fine','combined'),default='wide')
+    parser.add_argument('--pool-kernel',type=int,choices=range(1,65),default=6,metavar='1..64')
     args=parser.parse_args()
-    output={'wide':WIDE_OUTPUT,'fine':FINE_OUTPUT,'combined':COMBINED_OUTPUT}[args.experiment]
-    print(json.dumps(asyncio.run(verify(resolve(args.out or output),args.experiment)),ensure_ascii=False))
+    output={'wide':WIDE_OUTPUT,'fine':FINE_OUTPUT,'combined':combined_output(args.pool_kernel)}[args.experiment]
+    print(json.dumps(asyncio.run(verify(resolve(args.out or output),args.experiment,args.pool_kernel)),ensure_ascii=False))

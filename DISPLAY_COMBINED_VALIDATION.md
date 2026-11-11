@@ -1,4 +1,23 @@
-# 6×6 均匀池化与 35% 薄雾叠加
+# 均匀池化与 35% 薄雾叠加
+
+## 最新续测：3×3 与 6×6，雾量保持一致
+
+[3 格完整画面对照](outputs/3格池化叠加35薄雾-20261111/index.html) · [独立检查](outputs/3格池化叠加35薄雾-20261111/independent-validation.json) · [成本账本](outputs/3格池化叠加35薄雾-20261111/cost-ledger.json)
+
+按用户要求，在同一五件 × 两背景上将池化改为 **3×3**，35% 追加薄雾、全图均光、材质、位置、尺寸、相机、阴影和遮挡均沿用上一轮。新增 10 张原尺寸 PNG，每组以 6 格和 3 格并排作为主对照，另附仅加雾与零档，共 40 张不同全景。所有报告预览为完整 1600×900，链接 3840×2160 原图。
+
+135 项批量回归通过，组合运算检查同时覆盖 3 格和 6 格。20 张原控制图逐像素复现；独立读回十组、40 张全景和全部图片链接，通过尺寸、孔洞、前景和保护像素检查。与 6 格主对照的雾量及照明依据一致，全部差异限于可见物品。44 个源模型散列保持不变。总雾量仍为 39.8%–51.0%；没有新增 AI 评分，十组保持 `review`，等待用户点评，批量默认继续使用回退版。
+
+本次生成 **82.812 秒**，缓存续跑 **1.813 秒**，合计 **84.625 秒**。新增物体/阴影渲染、API 请求和 token 均为 **0**，API 费用 **¥0**，本机计算未定价。回归与独立读回另计，后者耗时 25.422 秒。
+
+组合入口现在可以指定池化格大小，并按参数使用独立输出目录：
+
+```powershell
+& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/validate_display_local_light.py --experiment combined --pool-kernel 3
+& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/verify_display_wide.py --experiment combined --pool-kernel 3
+```
+
+## 上轮：6×6 池化与 35% 薄雾
 
 [完整画面对照](outputs/6格池化叠加35薄雾-20261111/index.html) · [独立检查](outputs/6格池化叠加35薄雾-20261111/independent-validation.json) · [成本账本](outputs/6格池化叠加35薄雾-20261111/cost-ledger.json)
 

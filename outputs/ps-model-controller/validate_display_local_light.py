@@ -48,6 +48,12 @@ FINE_FOG = (.25,.30,.35,.40,.45,.50,.55)
 COMBINED_OUTPUT = 'outputs/6格池化叠加35薄雾-20261111'
 
 
+def combined_output(kernel):
+    if not isinstance(kernel,int) or not 1 <= kernel <= 64:
+        raise ValueError('invalid_combined_pool_kernel')
+    return f'outputs/{kernel}格池化叠加35薄雾-20261111'
+
+
 def frame(image, title, bounds, core):
     pixels = read_rgb(image)
     preview = Path(image).with_suffix('.jpg')
@@ -180,6 +186,7 @@ def compose_all(folder, row, scene, source, archived, shadow_hash, old_render, l
 
 def frames(case):
     values = [case['previous'],case['material']]
+    if case.get('pool_comparison'):values.append(case['pool_comparison'])
     for group in case['groups'].values():
         values.extend(group)
     return {v['image']:v for v in values}
@@ -189,6 +196,7 @@ def report(out,cases,summary):
     wide=summary.get('experiment')=='wide'
     fine=summary.get('experiment')=='fine'
     combined=summary.get('experiment')=='combined'
+    pool_kernel=summary.get('pool_kernel',6)
     def link(path):
         return html.escape(Path(os.path.relpath(path,out)).as_posix(),quote=True)
     def picture(item):
@@ -203,8 +211,11 @@ def report(out,cases,summary):
             if c.get('error'):
                 parts.append(f'<p>{html.escape(c["error"])}</p></section>');continue
             if combined:
-                parts.append('<div class="frames">'+picture({**c['material'],'title':'仅追加 35% 薄雾 · 不池化'})+
+                control=c.get('pool_comparison',{**c['material'],'title':'仅追加 35% 薄雾 · 不池化'})
+                parts.append('<div class="frames">'+picture(control)+
                              picture(c['groups']['combined'][-1])+'</div>')
+                if c.get('pool_comparison'):
+                    parts.append('<details><summary>仅追加 35% 薄雾 · 不池化</summary>'+picture(c['material'])+'</details>')
                 parts.append('<details><summary>全图均光零档 · 无池化和追加雾层</summary>'+picture(c['previous'])+'</details>')
                 parts.append(f'<p>组合档实际追加雾量 {c["groups"]["combined"][-1]["fog_extra"]:.1%}，'
                              f'总雾量 {c["groups"]["combined"][-1]["fog_total"]:.1%}。</p></section>')
@@ -262,16 +273,18 @@ def report(out,cases,summary):
                '<p>全图每个像素等权参与解码线性均值，包括料斗外区域及文字；不按深度、材质或亮度筛选。'
                '仅改变平均亮度和色偏，光源方向与柔和度沿用局部均值对照。它是试验估计，不是实测光照。</p>')
     if combined:
-        head=head.replace('加强池化薄雾与局部受光','6×6 均匀池化 ＋ 35% 薄雾')
+        head=head.replace('加强池化薄雾与局部受光',f'{pool_kernel}×{pool_kernel} 均匀池化 ＋ 35% 薄雾')
         head=head.replace('先比较材质和受光，再分别查看池化、薄雾。两个梯度的零档相同；每组只改变一个因素。',
-                          '固定上一轮全图均光，比较仅加 35% 薄雾与先做 6×6 全强度均匀池化、再叠加同一雾层。')
+                          f'固定上一轮全图均光与 35% 追加雾层，测试 {pool_kernel}×{pool_kernel} 全强度均匀池化。'+
+                          ('主对照为上一轮 6×6 与本轮池化，雾量一致。' if pool_kernel!=6 else '主对照为仅加雾与池化叠雾。'))
         head+='<p>复用上一轮物体和阴影渲染。位置、尺寸、相机、材质与前景遮挡一致；本轮只重做合成。</p>'
     (out/'index.html').write_text(head+''.join(parts),encoding='utf8')
 
 
 async def run(args):
     experiment=getattr(args,'experiment','local')
-    start = time.monotonic();out = resolve(args.out or {'wide':WIDE_OUTPUT,'fine':FINE_OUTPUT,'combined':COMBINED_OUTPUT,'local':OUTPUT}[experiment])
+    kernel=getattr(args,'pool_kernel',6)
+    start = time.monotonic();out = resolve(args.out or {'wide':WIDE_OUTPUT,'fine':FINE_OUTPUT,'combined':combined_output(kernel),'local':OUTPUT}[experiment])
     if out.exists() and any(out.iterdir()) and not (out/'inputs.json').is_file():
         raise ValueError('fresh_output_directory_required')
     out.mkdir(parents=True,exist_ok=True)
@@ -283,6 +296,7 @@ async def run_locked(args,out,start):
     wide=getattr(args,'experiment','local')=='wide'
     fine=getattr(args,'experiment','local')=='fine'
     combined=getattr(args,'experiment','local')=='combined'
+    kernel=getattr(args,'pool_kernel',6)
     experiment='combined' if combined else 'fine' if fine else 'wide' if wide else 'local'
     previous_root=resolve(FINE_OUTPUT if combined else WIDE_OUTPUT if fine else WIDE_PREVIOUS if wide else PREVIOUS)
     if combined and read(previous_root/'inputs.json')['renderer']!=render_dependencies():
@@ -302,7 +316,8 @@ async def run_locked(args,out,start):
     history = {int(r['job_id'].split('-')[0]):r for r in records(resolve(BASELINE))}
     passes = {r['number']:frozen_passes(r,history,resolve(SIZED),cache) for r in rows}
     previous = {r['number']:r for r in read(previous_root/'results.json')}
-    pool_levels=(6,) if combined else FINE_POOL if fine else WIDE_POOL if wide else POOL
+    comparison_rows={r['number']:r for r in read(resolve(COMBINED_OUTPUT)/'results.json')} if combined and kernel!=6 else {}
+    pool_levels=(kernel,) if combined else FINE_POOL if fine else WIDE_POOL if wide else POOL
     fog_levels=(.35,) if combined else FINE_FOG if fine else WIDE_FOG if wide else FOG
     inputs = {'cohort':file_hash(rollback/'cases.json'),'pool':pool_levels,
         'fog':fog_levels,'profile':PROFILE,'experiment':experiment,
@@ -314,6 +329,7 @@ async def run_locked(args,out,start):
     if combined:
         for name in ('display_batch/global_light.py','display_batch/combined_trial.py'):
             inputs['sources'][name]=file_hash(HERE/name)
+        if comparison_rows:inputs['pool_comparison']=file_hash(resolve(COMBINED_OUTPUT)/'results.json')
     inputs = json.loads(json.dumps(inputs))
     if (out/'inputs.json').is_file() and read(out/'inputs.json')!=inputs:
         raise ValueError('frozen_inputs_changed_use_new_directory')
@@ -345,7 +361,8 @@ async def run_locked(args,out,start):
                     if combined:
                         from display_batch.combined_trial import compose_combined
                         case=await asyncio.to_thread(compose_combined,folder,row,scene,source,archived,shadow_hash,
-                            environment,samples,masks,previous[number])
+                            environment,samples,masks,previous[number],kernel,
+                            comparison_rows[number]['groups']['combined'][-1] if comparison_rows else None)
                     elif wide or fine:
                         from display_batch.wide_trial import compose_wide
                         mean_env,light_samples=estimate_local_light(scene,row['pose'],environment,statistic='mean',margin_scale=1.75)
@@ -385,6 +402,7 @@ async def run_locked(args,out,start):
         'new_pngs':sum(Path(p).is_relative_to(out) for p in all_frames),'source_models':len(hashes),
         'render_counts':dict(renders.totals),'timings':dict(renders.timings),
         'seconds':round(time.monotonic()-start,3),'composition_cache_hits':reused,'cost_total':cumulative(out)}
+    if combined:summary['pool_kernel']=kernel
     atomic_json(out/f'run-{run_id}.json',summary)
     runs = [read(p) for p in out.glob('run-*.json')]
     ledger = {'runs':len(runs),'seconds':sum(r['seconds'] for r in runs),'cost_total':cumulative(out),
@@ -402,6 +420,8 @@ if __name__=='__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out')
     parser.add_argument('--experiment',choices=('local','wide','fine','combined'),default='local')
+    parser.add_argument('--pool-kernel',type=int,choices=range(1,65),default=6,metavar='1..64',
+                        help='combined 模式的均匀池化格大小，默认 6')
     parser.add_argument('--device',choices=('OPTIX','CUDA','CPU'),default='OPTIX')
     result = asyncio.run(run(parser.parse_args()))
     print(json.dumps(result,ensure_ascii=False))

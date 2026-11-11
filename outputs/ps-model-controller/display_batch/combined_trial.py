@@ -17,14 +17,19 @@ from validate_display_gradients import apply_camera, export_effect
 from validate_display_local_light import audit_geometry
 
 
-def compose_combined(folder,row,scene,source,archived,shadow_hash,environment,samples,masks,previous):
+def compose_combined(folder,row,scene,source,archived,shadow_hash,environment,samples,masks,previous,
+                     pool_kernel=6,comparison=None):
     start=time.monotonic()
+    if not isinstance(pool_kernel,int) or not 1 <= pool_kernel <= 64:
+        raise ValueError('invalid_combined_pool_kernel')
     bounds=row['baseline']['edit_bounds'];x,y,r,b=bounds
     visible=masks[2]
     core=cv2.erode(np.uint8(visible>.9),np.ones((5,5),np.uint8))>0
     controls=[previous['material'],next(v for v in previous['groups']['fog'] if v['fog_weight']==.35)]
     if any(file_hash(v['image'])!=v['image_hash'] for v in controls):
         raise ValueError('previous_controls_changed')
+    if comparison and (file_hash(comparison['image'])!=comparison['image_hash'] or comparison['fog_weight']!=.35):
+        raise ValueError('previous_pool_comparison_changed')
     mean_env,_=estimate_local_light(scene,row['pose'],environment,statistic='mean',margin_scale=1.75)
     env,_=estimate_global_mean(scene,mean_env)
     if env['local_irradiance']!=previous['light_evidence']:
@@ -62,18 +67,20 @@ def compose_combined(folder,row,scene,source,archived,shadow_hash,environment,sa
         if not np.array_equal(read_rgb(replay['image']),read_rgb(controls[1]['image'])):
             raise ValueError('fog35_control_did_not_replay')
         effect,measurements=foreground_dust(appearance['clear_rgb'],appearance['rgb'],visible,environment,
-            layers['air'],row['pose']['target_px'],pool_weight=1.,pool_kernel=6,fog_weight=.35,
+            layers['air'],row['pose']['target_px'],pool_weight=1.,pool_kernel=pool_kernel,fog_weight=.35,
             uniform=True,fog_profile='wide')
-        item=export_effect(folder,'pool6-fog35','6×6 均匀池化 ＋ 35% 追加薄雾',complete,a,sensor,delta+effect,
+        item=export_effect(folder,f'pool{pool_kernel}-fog35',f'{pool_kernel}×{pool_kernel} 均匀池化 ＋ 35% 追加薄雾',complete,a,sensor,delta+effect,
                             bounds,environment,row['params'],row['seed'],core)
-        item.update(pool_kernel=6,pool_weight=measurements['pool_weight_max'],fog_weight=.35,
+        item.update(pool_kernel=pool_kernel,pool_weight=measurements['pool_weight_max'],fog_weight=.35,
             fog_extra=measurements['fog_extra_max'],fog_total=measurements['fog_total_median'],effects=measurements)
         if item['image_hash'] in {v['image_hash'] for v in controls}:
             raise ValueError('combined_effect_not_distinct')
     case={k:previous[k] for k in ('number','asset_id','name','background','light_evidence','lighting_variants')}
     case.update(experiment='combined',previous=controls[0],material=controls[1],
         groups={'combined':[controls[0],controls[1],item]},audit=audit,status='review',
+        combined_pool_kernel=pool_kernel,
         reused_render=True,current_render_count=0,replayed_controls=2,
         photo=result['photo'],checks=result['checks'],seconds=round(time.monotonic()-start,3))
+    if comparison:case['pool_comparison']=comparison
     atomic_json(folder/'result.json',case)
     return case
