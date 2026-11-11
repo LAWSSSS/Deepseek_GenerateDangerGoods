@@ -65,33 +65,6 @@ def control(params,name):
     return PHOTO_CONTROLS[name][params.get(name,'auto')]
 
 
-def capture_scrap(raw,alpha,pixels,params,environment):
-    """Render-stage colour and contrast survive a single camera display transform."""
-    core = alpha>.85
-    if core.sum()<20:
-        raise ValueError('object_too_small')
-    ev,temperature = TONE_PROFILES[params.get('tone','scene')]
-    ev = float(np.clip(ev,-.5,.5))
-    white_balance = np.float32([1+temperature*.008,1,1-temperature*.008])
-    rgb = display(raw*white_balance*2**ev)
-    after = float(np.median(rgb[core]@LUMA)*255)
-    before = float(np.median(display(raw[core])@LUMA)*255) if ev or temperature else after
-    target = float(np.median(pixels@LUMA))
-    stats = environment['sensor']
-    lab = cv2.cvtColor(np.ascontiguousarray(rgb[core][:,None,:]),cv2.COLOR_RGB2LAB)
-    chroma = float(np.median(np.linalg.norm(lab[:,0,1:],axis=1)))
-    calibration = environment['calibration']
-    classes = set(environment.get('material_classes',[]))
-    return rgb,{'version':'scrap-material-camera-v1','exposure_ev':ev,'white_balance':white_balance.tolist(),
-                'calibration':calibration,'exposure_limited':calibration['limited'] or abs(ev)>=.5,
-                'exposure_error':(after-target)/255,'before_luma':before,'target_luma':target,
-                'after_luma':after,'after_chroma':chroma,'scene_chroma':stats['chroma'],
-                'effective_controls':{name:{} for name in PHOTO_CONTROLS['haze']},
-                'alpha_unchanged':True,'specular_protection':True,'surface_wear_rms':0.,
-                'contrast_gain':1.,'sensor':stats,
-                'polymer_preservation':bool(classes) and classes.issubset({'plastic','rubber','paint'}) and 'plastic' in classes}
-
-
 def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metallic=None,upward=None,
                  *,reference=False,camera_capture=True):
     classes=set(environment.get('material_classes',[]))

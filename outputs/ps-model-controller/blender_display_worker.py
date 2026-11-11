@@ -309,7 +309,7 @@ def surface_detail(material,node,environment,dust_gain):
     tree.links.new(dust.outputs[0],node.inputs['Base Color'])
 
 
-def pass_outputs(scene, folder, *, scrap_surface=False):
+def pass_outputs(scene, folder):
     layer=scene.view_layers[0]
     layer.use_pass_diffuse_direct=True;layer.use_pass_diffuse_indirect=True;layer.use_pass_diffuse_color=True
     layer.use_pass_glossy_direct=True;layer.use_pass_glossy_indirect=True;layer.use_pass_glossy_color=True
@@ -317,14 +317,11 @@ def pass_outputs(scene, folder, *, scrap_surface=False):
     source=tree.nodes.new('CompositorNodeRLayers')
     composite=tree.nodes.new('CompositorNodeComposite');tree.links.new(source.outputs['Image'],composite.inputs[0])
     layer.use_pass_z=True
-    channels = [('metallic','VALUE'),('upward','VALUE')]
-    if scrap_surface:
-        channels += [('surface_dust','VALUE'),('material_region','COLOR')]
-    for name,kind in channels:
-        if not layer.aovs.get(name):
-            aov=layer.aovs.add();aov.name=name;aov.type=kind
+    for label,socket in [('combined','Image'),('depth','Depth'),('metallic','metallic'),('upward','upward')]:
+        if label in ('metallic','upward') and not layer.aovs.get(label):
+            aov=layer.aovs.add();aov.name=label;aov.type='VALUE'
     bpy.context.view_layer.update()
-    for label,socket in [('combined','Image'),('depth','Depth')]+[(name,name) for name,_ in channels]:
+    for label,socket in [('combined','Image'),('depth','Depth'),('metallic','metallic'),('upward','upward')]:
         node=tree.nodes.new('CompositorNodeOutputFile');node.base_path=str(folder)
         node.format.file_format='OPEN_EXR';node.format.color_depth='32' if label=='depth' else '16'
         node.file_slots[0].path=label;tree.links.new(source.outputs[socket],node.inputs[0])
@@ -709,7 +706,6 @@ def render_parts(request):
             BASE=BASE_PATH=None
             bpy.data.orphans_purge(do_recursive=True)
         asset=normalized_mesh(request['mesh'])
-        state.pop('scrap_material_key',None)
         state.update(asset=asset,arrays=arrays(asset),mesh_key=mesh_key)
         imported=1;import_seconds=time.monotonic()-begin
     obj=state['asset'];vertices,faces=state['arrays']
@@ -721,12 +717,7 @@ def render_parts(request):
     cam.rotation_euler=(Vector(camera['target'])-cam.location).to_track_quat('-Z','Y').to_euler()
     cam.data.angle=math.radians(camera['fov'])
     scene_lighting(state,camera,request['environment'],request.get('light_gain',1.),reference)
-    scrap_surface = request['appearance']=='local_scrap'
-    if scrap_surface:
-        from display_batch.scrap_shader import configure_scrap_materials
-        configure_scrap_materials(obj,request,state)
-    else:
-        configure_materials(obj,request,reference)
+    configure_materials(obj,request,reference)
     normal=np.asarray(request.get('plane_normal',[0,0,1]),dtype=float)
     receiver_key=(request.get('receiver',{}).get('patches',[]),normal.tolist())
     if state.get('receiver_key')!=receiver_key:
@@ -761,7 +752,7 @@ def render_parts(request):
             scene.render.image_settings.file_format='PNG'
             scene.render.image_settings.color_depth='8'
             scene.view_settings.view_transform='AgX'
-            pass_outputs(scene,folder,scrap_surface=scrap_surface)
+            pass_outputs(scene,folder)
             legacy.render(scene,folder/'object.png')
         else:
             scene.use_nodes=False

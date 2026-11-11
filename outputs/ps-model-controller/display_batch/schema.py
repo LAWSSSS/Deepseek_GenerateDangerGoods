@@ -20,7 +20,6 @@ class BatchConfig(Strict):
     assets: list[str] = Field(default_factory=list)
     excluded_assets: list[str] = Field(default_factory=lambda:['5','6','7'])
     asset_scale_factors: dict[str, Annotated[float, Field(ge=.1, le=2.)]] = Field(default_factory=lambda:{'31':.375,'33':.25})
-    material_adaptation: Literal['source','local_scrap'] = 'source'
     count: int = Field(default=100, ge=1, le=1000)
     seed: int = Field(default=20261110, ge=0)
     max_iterations: int = Field(default=2, ge=0, le=10)
@@ -47,8 +46,7 @@ class BatchConfig(Strict):
     @model_validator(mode='after')
     def dust_uses_neighbourhood(self):
         # Selecting this style in either CLI or web must actually use local evidence.
-        if self.photo_style=='dusty_scrap' or self.material_adaptation=='local_scrap':
-            self.appearance='local'
+        if self.photo_style=='dusty_scrap':self.appearance='local'
         return self
 
 
@@ -138,8 +136,7 @@ class Scores(Strict):
 
 DefectCode = Literal["upright", "floating", "penetration", "occlusion", "scale", "camera",
                      "material", "lighting", "color", "shadow", "edge", "texture", "structure",
-                     "haze_clear", "haze_heavy", "light_direction", "reflection_flat", "reflection_hard",
-                     "surface_clean", "dust_heavy", "patch_seam"]
+                     "haze_clear", "haze_heavy", "light_direction", "reflection_flat", "reflection_hard", "surface_clean", "patch_seam"]
 
 
 class Defect(Strict):
@@ -167,8 +164,7 @@ class Review(Strict):
     def photo_passes(self):
         return min(self.scores.lighting,self.scores.material,self.scores.texture)>=3 and not any(
             d.severity in ('major','fatal') and d.code in ('color','lighting','material','texture',
-                'haze_clear','haze_heavy','light_direction','reflection_flat','reflection_hard',
-                'surface_clean','dust_heavy','patch_seam')
+                'haze_clear','haze_heavy','light_direction','reflection_flat','reflection_hard','surface_clean','patch_seam')
             for d in self.defects)
 
 

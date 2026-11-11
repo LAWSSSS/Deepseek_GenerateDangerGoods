@@ -23,11 +23,6 @@ PART_FILES = {
     'with_shadow': ('with-shadow-linear0001.exr',),
     'without_shadow': ('without-shadow-linear0001.exr',),
 }
-SCRAP_PASSES = ('surface_dust0001.exr','material_region0001.exr')
-
-
-def required_files(part,scrap_surface):
-    return PART_FILES[part]+(SCRAP_PASSES if part=='object' and scrap_surface else ())
 
 
 def reference_resolution(candidate):
@@ -57,8 +52,7 @@ def reference_path(cache,asset,candidate,params,environment,device='OPTIX',resol
 @lru_cache(maxsize=1)
 def render_dependencies():
     files=['blender_display_worker.py','blender_worker.py','display_batch/geometry.py',
-           'display_batch/framing.py','display_batch/materials.py','display_batch/rendering.py',
-           'display_batch/scrap_shader.py']
+           'display_batch/framing.py','display_batch/materials.py','display_batch/rendering.py']
     return signature('blender-4.5.3',{name:file_hash(HERE/name) for name in files})
 
 
@@ -74,8 +68,6 @@ def part_keys(request, device, dependencies):
              request['dust_gain'],request['dust_control'],request['material_classes'],
              environment.get('dust_color'),environment.get('haze') if request['appearance']!='native' else None,
              environment.get('local_context',{}).get('surface_texture_rms'))
-    if request['appearance']=='local_scrap':
-        surface += (environment['scrap_surface']['variant_signature'],request['surface_texture_scale'])
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),
@@ -92,12 +84,12 @@ class RenderCache:
         self.timings=Counter()
 
     @staticmethod
-    def ready(folder, part, scrap_surface=False):
+    def ready(folder, part):
         marker=folder/'result.json'
         if not marker.is_file():return None,'no_entry'
         try:
             info=json.loads(marker.read_text(encoding='utf8'))
-            if all((Path(info['path'])/name).stat().st_size>0 for name in required_files(part,scrap_surface)):
+            if all((Path(info['path'])/name).stat().st_size>0 for name in PART_FILES[part]):
                 return info,None
         except (OSError,ValueError,KeyError,TypeError):
             pass
@@ -111,10 +103,7 @@ class RenderCache:
         windows=render_windows(candidate,size,resolution,full_frame=full_frame)
         request.update(mesh_hash=asset['mesh_hash'],appearance=appearance,windows=windows,
                        material_classes=asset['semantic']['material_classes'],
-                       dust_control=PHOTO_CONTROLS['dust'][params.get('dust','auto')]
-                           if appearance in ('scene','native','local_scrap') else 1.)
-        if appearance=='local_scrap':
-            request['surface_texture_scale'] = min(7.,max(.7,candidate['target_px']/180))
+                       dust_control=PHOTO_CONTROLS['dust'][params.get('dust','auto')] if appearance in ('scene','native') else 1.)
         keys=part_keys(request,self.worker.device,render_dependencies())
         queued=time.monotonic()
         async with self.lock:
@@ -123,12 +112,11 @@ class RenderCache:
 
     async def _get(self,request,keys,timings,full_frame):
         windows=request['windows']
-        scrap_surface = request['appearance']=='local_scrap'
         entries={};cache={};missing={};folders={};imports=0
         for part,key in keys.items():
             folder=self.root/part/key
             folders[part]=folder
-            ready,reason=self.ready(folder,part,scrap_surface)
+            ready,reason=self.ready(folder,part)
             cache[part]={'signature':key,'hit':bool(ready),'miss_reason':reason}
             if ready:
                 entries[part]=ready
@@ -144,7 +132,7 @@ class RenderCache:
             self.totals['asset_imports']+=imports
             for part,path in missing.items():
                 window=windows['object' if part=='object' else 'shadow']['rect']
-                if not all((Path(path)/name).is_file() for name in required_files(part,scrap_surface)):
+                if not all((Path(path)/name).is_file() for name in PART_FILES[part]):
                     raise ValueError('render_part_missing_files: '+part)
                 if part=='object':
                     with Image.open(Path(path)/'object.png') as image:

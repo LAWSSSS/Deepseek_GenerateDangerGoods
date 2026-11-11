@@ -41,7 +41,7 @@ ACTION_CAUSES={
     'light':{'lighting','shadow','color','material','light_direction','reflection_flat','reflection_hard'},
     'tone':{'color','lighting'},
     'chroma':{'color','material'},
-    'dust':{'material','color','texture','surface_clean','dust_heavy'},
+    'dust':{'material','color','texture','surface_clean'},
     'contrast':{'lighting','texture','material'},
     'haze':{'color','lighting','texture','haze_clear','haze_heavy'},
     'sharpness':{'edge','texture'},
@@ -49,7 +49,7 @@ ACTION_CAUSES={
 CAUSE_SCORES={'upright':'support','floating':'support','penetration':'support','scale':'support',
               'camera':'support','shadow':'lighting','color':'lighting','haze_clear':'lighting',
               'haze_heavy':'lighting','light_direction':'lighting','reflection_flat':'material',
-              'reflection_hard':'material','surface_clean':'material','dust_heavy':'material'}
+              'reflection_hard':'material','surface_clean':'material'}
 
 
 def evidence_status(checks):
@@ -65,13 +65,6 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
         options.pop('material');options.pop('dust')
     elif params['photo_model']=='camera' and render_style=='reference':
         options.pop('dust')
-    if render_style=='local_scrap':
-        options['material'] = ['original','clearer','softer']
-        options.pop('contrast')
-        options.pop('chroma')
-        if not any(photo.get('surface_dust_percentiles',())):
-            options.pop('dust')
-            options.pop('material')
     if params.get('atmosphere')=='off':options.pop('haze',None)
     controls=photo.get('effective_controls',{})
     for kind,values in list(options.items()):
@@ -105,17 +98,14 @@ def fusion_actions(review, comp, allowed):
     if 'light_direction' in issues:options.append(('light','softer'))
     if 'reflection_flat' in issues:options.append(('material','clearer'))
     if 'reflection_hard' in issues:options.append(('material','softer'))
-    if 'dust_heavy' in issues:options.append(('dust','less'))
     if 'surface_clean' in issues:options.append(('dust','more'))
     if 'color' in issues and photo.get('after_chroma',0)>photo.get('scene_chroma',0)+3:
         options.append(('chroma','more'))
     if 'lighting' in issues and not photo.get('calibration'):
         difference=photo.get('after_luma',0)-photo.get('target_luma',0)
         if abs(difference)>10:options.append(('tone','darker' if difference>0 else 'brighter'))
-    error=photo.get('exposure_error',0)
-    if 'lighting' in issues and (photo.get('exposure_limited') or
-            (photo.get('surface_material') and abs(error)>.03)):
-        options.append(('light','defined' if error<0 else 'softer'))
+    if 'lighting' in issues and photo.get('exposure_limited'):
+        options.append(('light','defined'))
     if 'shadow' in issues and comp['checks'].get('physics',{}).get('status')=='pass':
         options.append(('light','defined'))
     if 'edge' in issues:
@@ -170,23 +160,6 @@ async def inspect(vision,prompt,asset,comp,params,allowed,render_dir,*,compact=F
     images=[comp['preview'],comp['crop'],asset['board']]
     native=params.get('photo_model') in ('native','local')
     if native:
-        if params.get('material_adaptation')=='local_scrap':
-            surface=comp['photo']['surface_material']
-            prompt=FUSION_PROMPT.replace(
-                'The first image is the delivered panorama and the second is its crop. Subsequent images are\nreferences for identity and structure.',
-                'Image 1 is the delivered local crop. Image 2 shows numbered nearby reference patches before insertion. '
-                'Image 3 is an identity and structure reference under different lighting.')
-            prompt += (' Weathered paint may be muted but recognizable. Check glint width and softness against nearby scrap '
-                       'of comparable material. Distinguish deposited dust from airborne haze. Use dust_heavy for a '
-                       'visible excessive surface deposit. Do not penalize small unreadable labels at the delivered scale. '
-                       'Keep plastic and rubber distinct from exposed metal.')
-            from pathlib import Path
-            context=Path(comp['image']).with_suffix('.context.jpg')
-            answer=await vision.ask('scrap-material-review',FusionObservation,prompt,
-                {'name':asset['name'],'features':asset['semantic']['key_features'],
-                 'material_classes':asset['semantic']['material_classes']},[context,surface['board'],asset['board']],
-                image_limits=[(1080,900),(760,760),(560,560)],max_output_tokens=1536,plain_json=True)
-            return answer.review()
         # The recognizer sees material references, without physics histories.
         images.insert(2,render_dir/'object.png')
         local=params.get('photo_model')=='local'

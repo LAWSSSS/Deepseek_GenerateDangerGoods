@@ -17,7 +17,6 @@ from .fusion import camera_psf, camera_tones, contact_darkening, optical_layer, 
 from .atmosphere import (calibrate_environment, transmission_fields, fogged_radiance,
                          shadowed_background)
 from .local import neighbourhood, camera_residual, seam_measurement, local_veil
-from .photography import capture_scrap
 
 
 def linear(rgb):
@@ -232,13 +231,9 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     local=params.get('photo_model')=='local'
     reference=params.get('photo_model','reference') in ('reference','local')
     native=params.get('photo_model')=='native'
-    scrap=params.get('material_adaptation')=='local_scrap'
     reference_pixels=np.asarray(scene['frame'])[samples]
-    if scrap:
-        rgb,photo=capture_scrap(raw,alpha,reference_pixels,params,photo_environment)
-    else:
-        rgb,photo=match_linear(raw,alpha,reference_pixels,highlight,params,seed,photo_environment,
-                               reference=reference,camera_capture=not (native or local),**channels)
+    rgb,photo=match_linear(raw,alpha,reference_pixels,highlight,params,seed,photo_environment,
+                           reference=reference,camera_capture=not (native or local),**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     if local:
         rgb,local_air=local_veil(rgb,environment,params)
@@ -259,31 +254,6 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     else:foreground=(scene['depth_native'][y:b,x:r]>site['depth']+.10)&~support
     foreground &= ~protected
     visible_alpha=alpha*((~foreground)&(~protected))
-    material_evidence = None
-    if scrap:
-        surface = environment['scrap_surface']
-        material_evidence = {k:surface[k] for k in ('status','basis','variant_signature','manifest','board',
-            'texture','uv_manifest','reference_cache_hit','uv_cache_hit')}
-        material_evidence['lighting_basis'] = environment['lighting_basis']
-        material_evidence['reflection_coverage'] = environment['reflection_coverage']
-        material_evidence['light_direction'] = environment['key_direction']
-        material_evidence['light_confidence'] = environment['light_confidence']
-        dust = cv2.imread(str(render_dir/'surface_dust0001.exr'),cv2.IMREAD_UNCHANGED)
-        regions = cv2.imread(str(render_dir/'material_region0001.exr'),cv2.IMREAD_UNCHANGED)
-        if dust is None or regions is None:
-            raise ValueError('missing_scrap_surface_passes')
-        dust = dust[...,0] if dust.ndim==3 else dust
-        dust = warp(dust,full,offset,bounds,window=window)/np.maximum(color_alpha,1e-6)
-        mask = visible_alpha>.85
-        photo['surface_dust_percentiles'] = np.percentile(dust[mask],[10,50,90]).tolist() if mask.any() else []
-        material_evidence['surface_dust'] = str(Path(out).with_suffix('.dust.png'))
-        material_evidence['material_regions'] = str(Path(out).with_suffix('.material.png'))
-        dust_image = np.clip(dust,0,1)*visible_alpha
-        Image.fromarray(np.uint8(np.rint(dust_image*255))).save(material_evidence['surface_dust'])
-        region_image = warp(regions[:,:,:3][:,:,::-1],full,offset,bounds,window=window)
-        region_image *= (visible_alpha/np.maximum(color_alpha,1e-6))[...,None]
-        Image.fromarray(np.uint8(np.rint(np.clip(srgb(region_image),0,1)*255))).save(material_evidence['material_regions'])
-        photo['surface_material'] = material_evidence
     occlusion_fraction=float(1-visible_alpha.sum()/max(alpha.sum(),1e-6))
     foot=np.zeros((b-y,r-x),np.uint8)
     for poly in render_meta['contact_polygons']:
@@ -452,14 +422,6 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         checks['local_samples']={'status':'unknown' if context['confidence']=='unknown' else 'pass','evidence':context}
         checks['patch_boundary']={'status':'pass' if photo['patch_boundary']['after']['loss_p95']<=.04 else 'unknown',
             'evidence':photo['patch_boundary'],'threshold_linear_loss':.04}
-    if scrap:
-        checks['scrap_reference'] = {'status':'pass' if material_evidence['status']=='estimated' else 'unknown',
-                                     'basis':material_evidence['basis']}
-    if fixed_alpha:
-        raw_mask,frozen_mask = color_alpha>.5,alpha>.5
-        overlap = float((raw_mask&frozen_mask).sum()/max(1,(raw_mask|frozen_mask).sum()))
-        checks['render_coverage'] = {'status':'pass' if overlap>=.975 else 'fail',
-                                     'iou':overlap,'threshold':.975}
     crop_image=Image.fromarray(base_rgb).crop((x,y,r,b));crop_image.thumbnail((1000,800));crop_image.save(Path(out).with_suffix('.crop.jpg'),quality=92)
     thumb=Image.fromarray(base_rgb);thumb.thumbnail((1536,1024));thumb.save(Path(out).with_suffix('.full.jpg'),quality=88)
     if candidate.get('placement'):
