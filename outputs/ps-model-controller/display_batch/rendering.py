@@ -66,7 +66,8 @@ def part_keys(request, device, dependencies):
             request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'])
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
              request['dust_gain'],request['dust_control'],request['material_classes'],
-             environment.get('dust_color'),environment.get('haze') if request['appearance']!='native' else None)
+             environment.get('dust_color'),environment.get('haze') if request['appearance']!='native' else None,
+             environment.get('local_context',{}).get('surface_texture_rms'))
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),

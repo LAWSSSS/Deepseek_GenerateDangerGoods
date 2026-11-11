@@ -28,6 +28,8 @@ Give only visible image defects. Each defect must describe the cue and where it 
 Distinguish haze_clear (object too clear for nearby haze), haze_heavy (excessive object veil),
 light_direction, reflection_flat (lost metal response), reflection_hard (studio-like reflection),
 and surface_clean (evidenced missing surface dirt). Airborne haze does not imply deposited dust.
+Use patch_seam for an artificial rectangular inserted region or shadow receiver cutoff,
+and edge for the object's own outline. These are different defects.
 Judge airlight, raised shadow levels and contrast against nearby surfaces of similar depth.
 Do not demand a hazy object to have showroom crispness or all materials to match the ground colour.
 Return JSON with trace, scores, defects and evidence. Each defect has only code, severity and evidence."""
@@ -156,12 +158,23 @@ async def inspect(vision,prompt,asset,comp,params,allowed,render_dir,*,compact=F
     payload={'name':asset['name'],'features':asset['semantic']['key_features'],'params':params,
              'allowed':allowed,'placement_options':list(candidate_evidence)}
     images=[comp['preview'],comp['crop'],asset['board']]
-    native=params.get('photo_model')=='native'
+    native=params.get('photo_model') in ('native','local')
     if native:
-        # Keep the full set of visual references. The model only recognizes, so
-        # physics histories and the allowed repair graph are unnecessary.
+        # The recognizer sees material references, without physics histories.
         images.insert(2,render_dir/'object.png')
-        answer=await vision.ask('fusion-recognition',FusionObservation,FUSION_PROMPT,
+        local=params.get('photo_model')=='local'
+        if local:
+            from pathlib import Path
+            images[1]=Path(comp['image']).with_suffix('.context.jpg')
+        prompt=FUSION_PROMPT
+        if local:
+            # Do not let distant luminance dominate the photographic decision.
+            images=[images[1],images[2],images[3]]
+            prompt=FUSION_PROMPT.replace(
+                'The first image is the delivered panorama and the second is its crop. Subsequent images are\nreferences for identity and structure. Evaluate seams on the delivered photograph only.',
+                'The first image is the delivered local neighbourhood. Images 2 and 3 are isolated material/identity references. Evaluate seams and photography only on image 1.')
+            prompt+=' Faded paint and deposited dust are intentional: do not demand the fresh saturated reference colour. Keep material differences; do not demand all materials to look like rusty steel.'
+        answer=await vision.ask('fusion-recognition',FusionObservation,prompt,
             {'name':asset['name'],'features':asset['semantic']['key_features'],
              'material_classes':asset['semantic'].get('material_classes',[])},images,plain_json=True)
         return answer.review()

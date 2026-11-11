@@ -4,7 +4,7 @@
 
 `accepted_display` 是新流程的展示状态，不改变已有 `manual_only`、模型人工确认或正式场景验收状态。已有 10 号去独立操作杆、13 号单罐、19 号拆瓶、31 号封闭缸壁修订继续由当前模型目录提供。
 
-最新无人值守实测见[场景融合验证](#场景融合验证)。历史结果见[材质摄影和按需渲染小样验证](DISPLAY_COST_VALIDATION.md)及[摄影融合与废钢堆验证](DISPLAY_FUSION_VALIDATION.md)。
+最新归档基线与局部融合对照见[本轮记录](DISPLAY_LOCAL_VALIDATION.md)。历史结果见[场景融合验证](#场景融合验证)、[材质摄影小样](DISPLAY_COST_VALIDATION.md)及[摄影融合与废钢堆验证](DISPLAY_FUSION_VALIDATION.md)。
 
 ## 使用
 
@@ -17,7 +17,26 @@ work/triposr-env/Scripts/python.exe outputs/ps-model-controller/batch_display.py
 
 复制示例 JSON 后修改 `backgrounds` 与 `output`。默认 100 个任务、初稿之后最多修正 2 轮；`count` 允许 1–1000，`max_iterations` 允许 0–10。小于 100 的任务数用于诊断。`assets` 留空使用当前全部 44 个条目；可指定 `['3','6','10','13','19-1','31']` 对应的 JSON 字符串数组。每个任务只有一个物品。
 
-网页和命令行示例采用 `appearance: "native"`。该模式从现场估计反射环境、接触阴影和边缘成像，增加插入痕迹判断。旧配置省略 `appearance` 时继续使用 `reference`。网页的“融合方式”可切换两者。
+网页和命令行示例已恢复 `appearance: "reference"`，对应用户认可的归档摄影风格。旧配置省略该字段仍使用 `reference`。新增 `local` 局部融合小样选项；此前的 `native` 薄雾模式保留供诊断。新局部策略尚未达到稳定替换门槛，不默认覆盖归档风格。
+
+## 归档基线与局部融合
+
+`appearance: "local"` 只在物品投影周围的有限邻域采样，优先同承托片、相近深度，排除文字、前景和强反光。样本不足时在同一邻域回退或记录未知，不能转成全图取色。数值采样与视觉摄影复核都使用邻域，复核参考图只提供材质类别、身份和结构依据，不要求褪色漆面恢复原图鲜艳颜色。
+
+在归档材质基础上，用本地样本限制积灰颜色、补充纹理与凹凸强度，保留源 PBR、UV、模型和几何轮廓。局部图不能确定真实 HDR 环境，因此仍保留归档版的估计反射分布，仅按邻域调色；不会把它写成已测得的光照。新模式对有限阴影接收面的截断边界作承托区内渐隐；接触暗部仅按原有可靠接触证据生成。
+
+模糊只处理“插入造成的颜色差”，不粘贴或整体模糊一块背景矩形；噪声只补足本地平坦区域的方差差额。小孔或细杆限制模糊时自动减弱，前景和保护区恢复原像素。`atmosphere: auto|off` 在显示转换后控制受限局部遮蔽，不改变材质积灰或触发重新落稳。实际参数、采样图和边界诊断写入结果。
+
+小批自动执行可使用 `outputs/ps-model-controller/display-batch.local.example.json`。其默认 12 项用于检查，不代表阶段门槛已通过。位置、材质和修正继续由程序自动处理，不使用逐图手调参数。
+
+固定摆位的可复现对照入口如下；`--audit` 扫描归档批次，按接收面边界风险最高和中位背景冻结六类物品共 12 项，不按生成效果挑选。
+
+```powershell
+work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/validate_display_local.py --audit --out outputs/局部融合诊断
+work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/validate_display_local.py --selection outputs/局部融合诊断/selection.json --rerender --out outputs/局部融合对照
+```
+
+不加 `--rerender` 复用归档 EXR，只验证摄影调整；加上后调用正式批量渲染路径，冻结归档 alpha、姿态、尺度与遮挡，不重新落稳。`--offline` 要求相关模型复核已有缓存，新目录可验证逐字节复现。输出 `index.html`、原尺寸 PNG、局部采样图、逐项结果、耗时及用量。单项复核格式失败后保留未审结果，不冒充通过；全局服务故障仍停止。代码签名变化必须使用新目录。
 
 以下选项同样适用于旧配置。
 

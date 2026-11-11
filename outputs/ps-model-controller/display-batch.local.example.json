@@ -1,0 +1,17 @@
+{
+  "backgrounds": "C:/Users/zhaoc/Desktop/背景图",
+  "output": "outputs/局部融合小批检查",
+  "assets": ["3", "6", "10", "13", "19-1", "31"],
+  "count": 12,
+  "seed": 20261111,
+  "max_iterations": 2,
+  "render_device": "OPTIX",
+  "cache": "work/display-batch-cache",
+  "ai_concurrency": 2,
+  "cpu_concurrency": 2,
+  "photo_style": "scrap_gray",
+  "appearance": "local",
+  "placement_mode": "auto",
+  "uncertain_policy": "render_review",
+  "atmosphere": "auto"
+}

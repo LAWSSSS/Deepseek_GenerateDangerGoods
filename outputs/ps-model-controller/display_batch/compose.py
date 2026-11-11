@@ -9,13 +9,14 @@ import numpy as np
 from PIL import Image
 
 from .geometry import contact_support
-from .schema import TONE_PROFILES
+from .schema import TONE_PROFILES, PHOTO_CONTROLS
 from .photography import match_linear, sensor_statistics
 from .pile import depth_order
 from .framing import edit_bounds
 from .fusion import camera_psf, camera_tones, contact_darkening, optical_layer, reflection_probe
 from .atmosphere import (calibrate_environment, transmission_fields, fogged_radiance,
                          shadowed_background)
+from .local import neighbourhood, camera_residual, seam_measurement, local_veil
 
 
 def linear(rgb):
@@ -28,7 +29,9 @@ def srgb(rgb):
     return np.where(rgb<=.0031308,rgb*12.92,1.055*rgb**(1/2.4)-.055)
 
 
-def sample_environment(scene, candidate, *, scene_lighting=False, native=False):
+def sample_environment(scene, candidate, *, scene_lighting=False, native=False, local=False):
+    if local:
+        return neighbourhood(scene,candidate)
     site=next(s for s in scene['supports'] if s['id']==candidate['site_id'])
     w,h=scene['size'];x,y,r,b=candidate['bounds'];pad=round(max(r-x,b-y)*.8)
     l,t,rr,bb=max(0,x-pad),max(0,y-pad),min(w,r+pad),min(h,b+pad)
@@ -225,12 +228,18 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             if value.ndim==3:value=value[:,:,0]
             channels[name]=warp(value,full,offset,bounds,window=window)/np.maximum(color_alpha,1e-6)
     photo_environment={**environment,'material_classes':candidate.get('material_classes',[])}
-    reference=params.get('photo_model','reference')=='reference'
+    local=params.get('photo_model')=='local'
+    reference=params.get('photo_model','reference') in ('reference','local')
     native=params.get('photo_model')=='native'
     reference_pixels=np.asarray(scene['frame'])[samples]
     rgb,photo=match_linear(raw,alpha,reference_pixels,highlight,params,seed,photo_environment,
-                           reference=reference,camera_capture=not native,**channels)
+                           reference=reference,camera_capture=not (native or local),**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
+    if local:
+        rgb,local_air=local_veil(rgb,environment,params)
+        photo.update(local_air=local_air,haze=local_air['amount'])
+        for label,value in PHOTO_CONTROLS['haze'].items():
+            photo['effective_controls'][label]['haze']=float(np.clip(environment['haze']*value,0,.16)) if params.get('atmosphere','auto')!='off' else 0.
     site=next(s for s in scene['supports'] if s['id']==candidate['site_id'])
     support=np.logical_or.reduce([s['mask'][y:b,x:r] for s in scene['supports']
         if s['id'] in candidate.get('support_ids',[site['id']])]);protected=scene['protected'][y:b,x:r]
@@ -269,11 +278,22 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     shadow_window=render_meta.get('shadow_window') if window is not None and parts else None
     loss=warp(loss,full,offset,bounds,window=shadow_window)
     loss *= support & ~foreground & ~protected
-    if not reference:
+    if not reference or local:
         # A finite, image-derived receiver is not an observed cast-shadow edge.
         # Fade its cutoff inside the support without adding shadow to unsupported pixels.
         receiver=warp(np.float32(base>=.015),full,offset,bounds,window=shadow_window)>.6
-        loss=taper_shadow(loss,max(5,min(28,round(candidate['target_px']*.036))),receiver&support)
+        receiver &= support & ~foreground & ~protected
+        before_seam=seam_measurement(loss,receiver,alpha)
+        width=max(24,min(96,round(candidate['target_px']*.10))) if local else max(5,min(28,round(candidate['target_px']*.036)))
+        loss=taper_shadow(loss,width,receiver)
+        if local:
+            photo['patch_boundary']={'before':before_seam,'after':seam_measurement(loss,receiver,alpha),
+                'feather_px':width,'object_alpha_changed':False}
+            physics=candidate.get('terrain_physics',{})
+            supported=bool(cover and min(cover)>=.9 and physics.get('stable') and physics.get('status')=='pass')
+            contact=contact_darkening(foot,support,foreground|protected,candidate['target_px'],supported)
+            loss=np.maximum(loss,contact)
+            photo['contact_ambient_loss']=float(contact.max())
     base_rgb=np.asarray(scene['frame']).copy();crop=base_rgb[y:b,x:r].astype(np.float32)/255
     if native:
         physics=candidate.get('terrain_physics',{})
@@ -288,7 +308,6 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             # A nearby foreground face screens a small amount of diffuse light.
             distance=cv2.distanceTransform((~foreground).astype(np.uint8),cv2.DIST_L2,cv2.DIST_MASK_PRECISE)
             rgb*=1-.07*np.exp(-distance[...,None]/max(2.,min(7.,candidate['target_px']*.012)))
-        from .schema import PHOTO_CONTROLS
         atmospheric=None
         if scene.get('atmosphere'):
             object_t,background_t,airlight,depth_basis=transmission_fields(scene,bounds,object_z,order,
@@ -326,6 +345,9 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     if native:
         photo['visible_shadow_pixels']=int(((loss>.025)&(optical_alpha<.10)).sum())
     shaded=shadowed_background(linear(crop),loss,*atmospheric) if native and atmospheric is not None else linear(crop)*(1-loss[:,:,None])
+    if local:
+        shaded=shadowed_background(linear(crop),loss,np.full(alpha.shape,1-local_air['amount'],np.float32),
+                                   np.asarray(local_air['color_linear'],np.float32))
     result=srgb(shaded*(1-optical_alpha[:,:,None])+premult)
     if native:
         noise=float(np.clip(environment['sensor']['noise_sigma'],0,.012))
@@ -333,6 +355,14 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         result+=residual[...,None]*optical_alpha[...,None]
         photo['added_noise_sigma']=noise
     edited=(optical_alpha>0)|(loss>0)
+    if local:
+        writable=(~foreground)&(~protected)&(scene['allowed'][y:b,x:r] | (alpha>0))
+        result,edited,imaging=camera_residual(shaded,rgb,visible_alpha,linear(crop),environment,params,seed,writable)
+        photo.update(imaging,local_context=environment['local_context'])
+        photo['after_luma']=float(np.median((np.clip(result,0,1)@np.float32([.2126,.7152,.0722]))[visible_alpha>.85])*255)
+        photo['color_pipeline']='scene_linear_EXR_exposure_WB_AgX_once_local_camera_veil_residual_filter'
+        for label,value in PHOTO_CONTROLS['sharpness'].items():
+            photo['effective_controls'][label]['sharpness']=math.sqrt(max(environment['camera_psf']['sigma_px']**2-.38**2,0))/value
     crop_out=np.uint8(np.rint(np.clip(result,0,1)*255))
     original=base_rgb[y:b,x:r].copy()
     base_rgb[y:b,x:r][edited]=crop_out[edited]
@@ -387,7 +417,12 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         atmosphere=photo['atmosphere']
         checks['atmosphere']={'status':'pass' if atmosphere['confidence']=='estimated' and atmosphere['mode']=='auto' else 'unknown',
             'basis':'image_estimated_airlight_and_transmission','evidence':atmosphere}
-    local=Image.fromarray(base_rgb).crop((x,y,r,b));local.thumbnail((1000,800));local.save(Path(out).with_suffix('.crop.jpg'),quality=92)
+    if local:
+        context=environment['local_context']
+        checks['local_samples']={'status':'unknown' if context['confidence']=='unknown' else 'pass','evidence':context}
+        checks['patch_boundary']={'status':'pass' if photo['patch_boundary']['after']['loss_p95']<=.04 else 'unknown',
+            'evidence':photo['patch_boundary'],'threshold_linear_loss':.04}
+    crop_image=Image.fromarray(base_rgb).crop((x,y,r,b));crop_image.thumbnail((1000,800));crop_image.save(Path(out).with_suffix('.crop.jpg'),quality=92)
     thumb=Image.fromarray(base_rgb);thumb.thumbnail((1536,1024));thumb.save(Path(out).with_suffix('.full.jpg'),quality=88)
     if candidate.get('placement'):
         overlay=np.asarray(scene['frame'])[y:b,x:r].copy()
@@ -395,6 +430,14 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         overlay[foreground]=np.uint8(overlay[foreground]*.5+np.array([65,140,255])*.5)
         overlay[foot>0]=[255,170,40]
         Image.fromarray(overlay).save(Path(out).with_suffix('.occlusion.png'))
+    if local:
+        l,t,rr,bb=environment['local_context']['bounds']
+        context_image=Image.fromarray(base_rgb).crop((l,t,rr,bb));context_image.thumbnail((1200,900))
+        context_image.save(Path(out).with_suffix('.context.jpg'),quality=94)
+        overlay=np.asarray(scene['frame'])[t:bb,l:rr].copy()
+        mask=samples[t:bb,l:rr]
+        overlay[mask]=np.uint8(overlay[mask]*.45+np.array([30,210,140])*.55)
+        Image.fromarray(overlay).save(Path(out).with_suffix('.samples.png'))
     placement=candidate.get('placement','surface')
     if native:
         # Report the observed final coverage after local settling, not the rough shortlist label.

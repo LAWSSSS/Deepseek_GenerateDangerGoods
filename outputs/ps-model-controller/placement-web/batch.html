@@ -11,7 +11,7 @@
 <label>渲染设备<select id="device"><option value="OPTIX">NVIDIA OptiX</option><option value="CUDA">NVIDIA CUDA</option><option value="CPU">CPU</option></select></label>
 <label>摄影风格<select id="photoStyle"><option value="scrap_gray">废钢灰强融合</option><option value="retain_color">保留更多本色</option></select></label>
 <label>摆放方式<select id="placementMode"><option value="auto">自动选择承托与嵌入</option><option value="surface">表面放置</option><option value="combined">组合承托</option><option value="embedded">局部嵌入</option></select></label>
-<label class="wide">融合方式<select id="appearance"><option value="native">场景融合与插入痕迹识别</option><option value="reference">旧版摄影融合</option></select></label>
+<label class="wide">融合方式<select id="appearance"><option value="reference">归档版摄影风格</option><option value="local">局部环境融合（小样验证中）</option><option value="native">上一版薄雾融合（诊断）</option></select></label>
 <label class="wide">空气与薄雾<select id="atmosphere"><option value="auto">自动适配局部薄雾与眩光</option><option value="off">关闭空气遮蔽（诊断）</option></select></label>
 <label class="wide">证据不足时<select id="uncertainPolicy"><option value="render_review">生成效果图并标注待审</option><option value="skip">跳过不确定候选</option></select></label>
 <button id="start" type="submit">开始批量生成</button><button id="resume" type="button" class="secondary" disabled>继续此批次</button></form>

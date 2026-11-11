@@ -205,20 +205,22 @@ class Pipeline:
         if style=='native':
             scene['atmosphere']=await self.atmospheres.prepare(scene)
         environment,samples=await asyncio.to_thread(sample_environment,scene,candidate,
-            scene_lighting=style in ('scene','native'),native=style=='native')
+            scene_lighting=style in ('scene','native'),native=style=='native',local=self.config.appearance=='local')
         render_candidate=candidate
         if style=='native':
             # Cast onto the visible neighboring support as well. Physics retains
             # its original finite contact receiver and its separate evidence.
             receiver=await asyncio.to_thread(receiver_mesh,scene,candidate,bounds=edit_bounds(candidate,scene['size']))
             render_candidate={**candidate,'receiver':receiver}
-        folder,meta,hit=await self.renders.get(asset,render_candidate,params,environment,scene['size'],resolution,
+        render_environment={**environment,'haze':0.} if self.config.appearance=='local' else environment
+        folder,meta,hit=await self.renders.get(asset,render_candidate,params,render_environment,scene['size'],resolution,
                                              appearance=style)
         return folder,meta,environment,samples,hit
 
     @property
     def render_style(self):
         if self.config.appearance=='native':return 'native'
+        if self.config.appearance=='local':return 'local'
         return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
 
     async def choose_placements(self,asset,scene,seed):
@@ -350,7 +352,7 @@ class Pipeline:
         atomic_json(answer_path,answer.model_dump());return answer
 
     def default_params(self,candidate):
-        photo_model={'native':'native','camera':'camera','scene':'camera'}.get(self.config.appearance,'reference')
+        photo_model={'native':'native','local':'local','camera':'camera','scene':'camera'}.get(self.config.appearance,'reference')
         return {'candidate':candidate,'material':'original','light':'scene','tone':'scene','photo_model':photo_model,
                 'photo_style':self.config.photo_style,'atmosphere':self.config.atmosphere,
                 **{k:'auto' for k in PHOTO_CONTROLS}}
@@ -440,6 +442,7 @@ class Pipeline:
                     save_candidates()
                 if cid not in invalid:
                     candidate=ready[cid]
+                    candidate['material_classes']=asset.get('semantic',{}).get('material_classes',[])
                     render_fields=['candidate','material','light']
                     if self.render_style in ('scene','native'):render_fields.append('dust')
                     rkey=tuple(params[k] for k in render_fields)
@@ -620,7 +623,7 @@ class Pipeline:
                     with Image.open(jobs[0]['background']) as im:
                         im=im.convert('RGB');im.thumbnail((512,512));im.save(probe_path,quality=80)
                     probe=await self.vision.ask('capability',Probe,'Confirm the supplied image is visible; describe it briefly.',{},[probe_path],
-                                                plain_json=self.config.appearance=='native')
+                                                plain_json=self.config.appearance in ('native','local'))
                     if not probe.image_visible:raise ProviderUnavailable('视觉服务未确认图像可见')
                 stop=asyncio.Event()
                 async def consumer():

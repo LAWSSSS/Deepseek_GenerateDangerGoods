@@ -249,13 +249,20 @@ def surface_detail(material,node,environment,dust_gain):
     """Bounded shader-only wear shared by material classes, preserving UV maps and geometry."""
     if not material_detail_allowed(material.name,node.inputs['Metallic'].is_linked):return
     tree=material.node_tree
+    local=environment.get('local_context')
+    detail=local.get('surface_texture_rms',.018) if local else .025
+    deposit=(.12+min(.08,detail*1.5)) if local else (.12+environment.get('haze',0)*.55)
+    base_bump=.08 if re.search(r'steel|chrome|metal|atlas',material.name,re.I) else .16
+    bump_strength=base_bump*float(np.clip(detail/.025,.8,1.)) if local else base_bump
     if tree.nodes.get('batch_micrograin'):
-        tree.nodes['batch_dust_strength'].inputs[1].default_value=min(.38,(.12+environment.get('haze',0)*.55)*dust_gain)
+        tree.nodes['batch_dust_strength'].inputs[1].default_value=min(.38,deposit*dust_gain)
         tree.nodes['batch_dust_tint'].inputs[2].default_value=(*environment.get('dust_color',[.16,.145,.12]),1)
+        if tree.nodes.get('batch_micro_bump'):
+            tree.nodes['batch_micro_bump'].inputs['Strength'].default_value=bump_strength
         return
     noise=tree.nodes.new('ShaderNodeTexNoise');noise.name='batch_micrograin'
     noise.inputs['Scale'].default_value=160;noise.inputs['Detail'].default_value=3
-    bump=tree.nodes.new('ShaderNodeBump');bump.inputs['Strength'].default_value=.08 if re.search(r'steel|chrome|metal|atlas',material.name,re.I) else .16
+    bump=tree.nodes.new('ShaderNodeBump');bump.name='batch_micro_bump';bump.inputs['Strength'].default_value=bump_strength
     bump.inputs['Distance'].default_value=.002
     tree.links.new(noise.outputs['Fac'],bump.inputs['Height'])
     if node.inputs['Normal'].is_linked:tree.links.new(node.inputs['Normal'].links[0].from_socket,bump.inputs['Normal'])
@@ -288,7 +295,7 @@ def surface_detail(material,node,environment,dust_gain):
     upward=tree.nodes.new('ShaderNodeVectorMath');upward.operation='DOT_PRODUCT';upward.inputs[1].default_value=(0,0,1)
     tree.links.new(geometry.outputs['Normal'],upward.inputs[0])
     strength=tree.nodes.new('ShaderNodeMath');strength.name='batch_dust_strength';strength.operation='MULTIPLY';strength.use_clamp=True
-    strength.inputs[1].default_value=min(.38,(.12+environment.get('haze',0)*.55)*dust_gain)
+    strength.inputs[1].default_value=min(.38,deposit*dust_gain)
     metal_mask=tree.nodes.new('ShaderNodeMath');metal_mask.operation='MULTIPLY_ADD'
     metal_mask.inputs[1].default_value=-.75;metal_mask.inputs[2].default_value=1.
     if node.inputs['Metallic'].is_linked:tree.links.new(node.inputs['Metallic'].links[0].from_socket,metal_mask.inputs[0])
@@ -678,7 +685,7 @@ def set_window(scene, window):
 def render_parts(request):
     global LIVE_RENDER, BASE, BASE_PATH
     started=time.monotonic()
-    reference=request['appearance']=='reference'
+    reference=request['appearance'] in ('reference','local')
     if LIVE_RENDER is None or LIVE_RENDER['appearance']!=request['appearance']:
         scene=reset(request['device'])
         for obj in list(scene.objects):bpy.data.objects.remove(obj,do_unlink=True)

@@ -110,7 +110,8 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         exposure_error=0.
         exposure_limited=calibration['limited']
     radiance=np.maximum(raw,0)*cast*2**ev
-    haze_base=0. if calibration else environment.get('haze',0)*(1 if reference else .42)
+    # Local camera veil belongs after display conversion, never in material radiance.
+    haze_base=0. if calibration or environment.get('local_context') else environment.get('haze',0)*(1 if reference else .42)
     haze_limit=.3 if reference else .16
     haze=float(np.clip(haze_base*control(params,'haze'),0,haze_limit))
     veil=linear(median/255)
@@ -161,7 +162,11 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         medium=cv2.GaussianBlur(micro,(0,0),1.5)
         coarse=cv2.resize(rng.normal(0,1,(18,18)).astype(np.float32),alpha.shape[::-1],interpolation=cv2.INTER_CUBIC)
         grain=fine/max(float(fine.std()),1e-5)*.65+medium/max(float(medium.std()),1e-5)*.25+coarse*.3
-        amplitude=float(np.clip(stats.get('surface_detail_rms',.018)*1.8,.025,.075))
+        if environment.get('local_context'):
+            # Neighbouring detail bounds the supplement; never copy scene pixels as texture.
+            amplitude=float(np.clip(stats.get('surface_detail_rms',.018)*.9,.006,.04))
+        else:
+            amplitude=float(np.clip(stats.get('surface_detail_rms',.018)*1.8,.025,.075))
         detail_protect=np.clip(abs(initial_luma-cv2.GaussianBlur(initial_luma,(0,0),1.))/.035,0,.8)
         wear_mask=(1-.6*metal)*(1-protected)*(1-detail_protect)*(.5+.5*field)
         if polymer:wear_mask*=.35
@@ -199,7 +204,7 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         effective[label]={'haze':float(np.clip(haze_base*value,0,haze_limit)),
             'chroma':float(np.clip(base_gain/value,.20,.55 if gray_style else 1.)) if chroma_mask[core].max()>.01 else 1.,
             'contrast':1+(base_contrast-1)*value,'sharpness':blur if blur>.05 else 0.}
-    return rgb,{'version':REFERENCE_VERSION if reference else VERSION,
+    return rgb,{'version':environment.get('local_context',{}).get('version') or (REFERENCE_VERSION if reference else VERSION),
         'color_pipeline':'scene_linear_EXR_calibration_AgX_once_camera_linear_atmosphere' if calibration else 'scene_linear_EXR_exposure_WB_haze_then_OCIO_AgX_once',
         'calibration':calibration,
         'exposure_ev':ev,'white_balance':cast.tolist(),'chroma_gain':gain,'contrast_gain':contrast,

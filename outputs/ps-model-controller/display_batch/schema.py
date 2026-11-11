@@ -35,7 +35,7 @@ class BatchConfig(Strict):
     price_input_per_million: float | None = Field(default=None, ge=0)
     price_output_per_million: float | None = Field(default=None, ge=0)
     # New photographic profiles are promoted after staged evaluation.
-    appearance: Literal['reference','camera','materials','scene','native'] = 'reference'
+    appearance: Literal['reference','camera','materials','scene','native','local'] = 'reference'
     atmosphere: Literal['auto','off'] = 'auto'
     review_format: Literal['full','compact'] = 'full'
 
@@ -126,7 +126,7 @@ class Scores(Strict):
 
 DefectCode = Literal["upright", "floating", "penetration", "occlusion", "scale", "camera",
                      "material", "lighting", "color", "shadow", "edge", "texture", "structure",
-                     "haze_clear", "haze_heavy", "light_direction", "reflection_flat", "reflection_hard", "surface_clean"]
+                     "haze_clear", "haze_heavy", "light_direction", "reflection_flat", "reflection_hard", "surface_clean", "patch_seam"]
 
 
 class Defect(Strict):
@@ -154,7 +154,7 @@ class Review(Strict):
     def photo_passes(self):
         return min(self.scores.lighting,self.scores.material,self.scores.texture)>=3 and not any(
             d.severity in ('major','fatal') and d.code in ('color','lighting','material','texture',
-                'haze_clear','haze_heavy','light_direction','reflection_flat','reflection_hard','surface_clean')
+                'haze_clear','haze_heavy','light_direction','reflection_flat','reflection_hard','surface_clean','patch_seam')
             for d in self.defects)
 
 
