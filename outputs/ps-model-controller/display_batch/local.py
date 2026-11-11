@@ -85,7 +85,7 @@ def neighbourhood(scene, candidate):
 def local_veil(rgb,environment,params):
     """A restrained neighbourhood camera estimate, independent of surface wear."""
     from .schema import PHOTO_CONTROLS
-    dusty=params.get('photo_style')=='dusty_scrap'
+    dusty=params.get('photo_style')=='dusty_scrap' or params.get('material_adaptation')=='local_scrap'
     dust=environment.get('airborne_dust',{}) if dusty else {}
     amount=float(np.clip(dust.get('amount',environment.get('haze',0))*PHOTO_CONTROLS['haze'][params.get('haze','auto')],0,.32 if dusty else .16))
     if params.get('atmosphere','auto')=='off':amount=0.

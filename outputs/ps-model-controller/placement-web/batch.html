@@ -10,6 +10,7 @@
 <label>随机种子<input id="seed" type="number" min="0" value="20261110"></label>
 <label>渲染设备<select id="device"><option value="OPTIX">NVIDIA OptiX</option><option value="CUDA">NVIDIA CUDA</option><option value="CPU">CPU</option></select></label>
 <label>摄影风格<select id="photoStyle"><option value="scrap_gray">废钢灰强融合</option><option value="dusty_scrap">低饱和与局部扬尘（点评中）</option><option value="retain_color">保留更多本色</option></select></label>
+<label>模型材质<select id="materialAdaptation"><option value="source">原材质</option><option value="local_scrap">适配附近废钢（点评中）</option></select></label>
 <label>摆放方式<select id="placementMode"><option value="auto">自动选择承托与嵌入</option><option value="surface">表面放置</option><option value="combined">组合承托</option><option value="embedded">局部嵌入</option></select></label>
 <label class="wide">融合方式<select id="appearance"><option value="reference">归档版摄影风格</option><option value="local">局部环境融合（小样验证中）</option><option value="native">上一版薄雾融合（诊断）</option></select></label>
 <label class="wide">空气与薄雾<select id="atmosphere"><option value="auto">自动适配局部薄雾与眩光</option><option value="off">关闭空气遮蔽（诊断）</option></select></label>
@@ -21,7 +22,11 @@
 const $=id=>document.getElementById(id);let batch=localStorage.getItem('displayBatchId');let timer;
 $('backgrounds').value=localStorage.getItem('displayBackgrounds')||'';
 $('photoStyle').onchange=()=>{if($('photoStyle').value==='dusty_scrap')$('appearance').value='local';};
-$('appearance').onchange=()=>{if($('appearance').value!=='local'&&$('photoStyle').value==='dusty_scrap')$('photoStyle').value='scrap_gray';};
+$('materialAdaptation').onchange=()=>{if($('materialAdaptation').value==='local_scrap')$('appearance').value='local';};
+$('appearance').onchange=()=>{if($('appearance').value!=='local'){
+if($('photoStyle').value==='dusty_scrap')$('photoStyle').value='scrap_gray';
+$('materialAdaptation').value='source';
+}};
 async function update(){if(!batch)return;try{
 const r=await fetch('/api/batches/'+batch);const data=await r.json();if(!r.ok)throw Error(data.error);
 const c=data.counts||{};const stages={asset:'准备模型',scene:'分析背景',review:'复核成图',review_request:'复核图片',queued:'等待执行'};
@@ -36,6 +41,6 @@ data.run?.seconds?'本次耗时 '+Math.round(data.run.seconds)+' 秒':'','保存
 $('resume').disabled=!data.resumable;$('start').disabled=data.running;$('results').hidden=!data.has_results;
 $('results').href='/api/batches/'+batch+'/files/index.html';clearTimeout(timer);if(data.running)timer=setTimeout(update,2500);
 }catch(e){$('message').textContent=e.message;}}
-$('form').onsubmit=async e=>{e.preventDefault();$('start').disabled=true;$('message').textContent='正在创建批次…';try{const data={backgrounds:$('backgrounds').value.trim(),count:Number($('count').value),max_iterations:Number($('iterations').value),assets:$('assets').value.split(',').map(x=>x.trim()).filter(Boolean),seed:Number($('seed').value),render_device:$('device').value,photo_style:$('photoStyle').value,appearance:$('appearance').value,atmosphere:$('atmosphere').value,placement_mode:$('placementMode').value,uncertain_policy:$('uncertainPolicy').value};const r=await fetch('/api/batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const result=await r.json();if(!r.ok)throw Error(result.error);batch=result.id;localStorage.setItem('displayBatchId',batch);localStorage.setItem('displayBackgrounds',data.backgrounds);$('message').textContent='批次已启动';await update();}catch(e){$('message').textContent=e.message;$('start').disabled=false;}};
+$('form').onsubmit=async e=>{e.preventDefault();$('start').disabled=true;$('message').textContent='正在创建批次…';try{const data={backgrounds:$('backgrounds').value.trim(),count:Number($('count').value),max_iterations:Number($('iterations').value),assets:$('assets').value.split(',').map(x=>x.trim()).filter(Boolean),seed:Number($('seed').value),render_device:$('device').value,photo_style:$('photoStyle').value,appearance:$('appearance').value,material_adaptation:$('materialAdaptation').value,atmosphere:$('atmosphere').value,placement_mode:$('placementMode').value,uncertain_policy:$('uncertainPolicy').value};const r=await fetch('/api/batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const result=await r.json();if(!r.ok)throw Error(result.error);batch=result.id;localStorage.setItem('displayBatchId',batch);localStorage.setItem('displayBackgrounds',data.backgrounds);$('message').textContent='批次已启动';await update();}catch(e){$('message').textContent=e.message;$('start').disabled=false;}};
 $('resume').onclick=async()=>{const r=await fetch('/api/batches/'+batch+'/resume',{method:'POST'});const d=await r.json();$('message').textContent=r.ok?'正在继续批次':d.error;await update();};update();
 </script></body></html>

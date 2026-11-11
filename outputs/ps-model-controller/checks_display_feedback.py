@@ -57,6 +57,13 @@ class FeedbackTests(unittest.TestCase):
             self.assertEqual(new['scale']['status'],'unknown')
             self.assertEqual(resize_candidate(asset,scene,new,.5),new)
             self.assertEqual(c['full_px'],400)
+            with patch('display_batch.policy.receiver_mesh',return_value={'signature':'quarter'}):
+                smaller=resize_candidate(asset,scene,new,.375)
+            self.assertEqual(smaller['user_scale']['previous_factor'],.5)
+            self.assertEqual(smaller['user_scale']['relative_factor'],.75)
+            self.assertAlmostEqual(smaller['expected_major_px']/c['expected_major_px'],.375)
+            self.assertEqual(smaller['anchor_px'],anchor)
+            self.assertEqual(resize_candidate(asset,scene,smaller,.375),smaller)
 
     def test_raised_local_dust_not_global_and_clear_region_stays_clear(self):
         scene,c=LocalTests().fixture();env,_=neighbourhood(scene,c)

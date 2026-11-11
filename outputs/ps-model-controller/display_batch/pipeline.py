@@ -31,6 +31,7 @@ from .materials import material_kind, SURFACE_DUST
 from .atmosphere import Atmospheres
 from .costs import cumulative, estimate, tariff, label as cost_label
 from .policy import asset_id, resize_candidate
+from .local_scrap import ScrapMaterials
 
 COMPOSE_VERSION='scrap-gray-pile-v6-window'
 
@@ -179,6 +180,7 @@ class Pipeline:
         self.renders=RenderCache(self.cache,self.blender)
         self.scenes=Scenes(self.cache,self.vision);self.assets={}
         self.atmospheres=Atmospheres(self.cache,self.vision)
+        self.scrap_materials=ScrapMaterials(self.cache,self.vision)
         self.catalog=load_catalog();self.store=Store(self.out/'jobs.sqlite')
         self.cpu=asyncio.Semaphore(config.cpu_concurrency)
         self.prepare_lock=asyncio.Lock()
@@ -214,6 +216,8 @@ class Pipeline:
             scene['atmosphere']=await self.atmospheres.prepare(scene)
         environment,samples=await asyncio.to_thread(sample_environment,scene,candidate,
             scene_lighting=style in ('scene','native'),native=style=='native',local=self.config.appearance=='local')
+        if style=='local_scrap':
+            environment=await self.scrap_materials.prepare(asset,scene,candidate,environment)
         render_candidate=candidate
         if style=='native':
             # Cast onto the visible neighboring support as well. Physics retains
@@ -227,6 +231,7 @@ class Pipeline:
 
     @property
     def render_style(self):
+        if self.config.material_adaptation=='local_scrap':return 'local_scrap'
         if self.config.appearance=='native':return 'native'
         if self.config.appearance=='local':return 'local'
         return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
@@ -235,7 +240,13 @@ class Pipeline:
         candidates,rejected=await asyncio.to_thread(choose_candidates,asset,scene,seed,self.config)
         factor=self.config.asset_scale_factors.get(str(asset.get('id','')),1.)
         if factor!=1:
-            candidates=[await asyncio.to_thread(resize_candidate,asset,scene,c,factor) for c in candidates]
+            resized=[]
+            for candidate in candidates:
+                try:
+                    resized.append(await asyncio.to_thread(resize_candidate,asset,scene,candidate,factor))
+                except ValueError as error:
+                    rejected.append({'candidate':candidate['id'],'reason':str(error)})
+            candidates=resized
         return candidates,rejected
 
     async def validate_local_pose(self,asset,scene,candidate):
@@ -297,6 +308,18 @@ class Pipeline:
         pose={'matrix':candidate['matrix'],'stable':False,'status':'unknown','axis_angle_deg':candidate['axis_angle_deg']}
         if simulated['stable']:
             pose=simulated
+            if candidate.get('fixed_pose'):
+                from .geometry import project
+                moved=transformed(data['vertices'],simulated['matrix'])
+                stride=max(1,len(original)//3000)
+                camera=candidate['camera']
+                displacement=np.linalg.norm(project(moved[::stride],camera)-project(original[::stride],camera),axis=1)
+                shift=float(displacement.max()*candidate['full_px'])
+                stable=shift<=1.5
+                pose={**simulated,'matrix':candidate['matrix'],'stable':stable,'settle_shift_px':shift}
+                if not stable:
+                    candidate['uncertainties']=list(candidate['uncertainties'])+['fixed_pose_support_not_confirmed']
+                    if not candidate['allow_uncertain']:raise ValueError('fixed_pose_support_not_confirmed')
         elif not candidate['allow_uncertain']:
             raise ValueError('estimated_support_simulation_'+','.join(simulated['failure_codes']))
         else:
@@ -365,9 +388,11 @@ class Pipeline:
 
     def default_params(self,candidate):
         photo_model={'native':'native','local':'local','camera':'camera','scene':'camera'}.get(self.config.appearance,'reference')
-        return {'candidate':candidate,'material':'original','light':'scene','tone':'scene','photo_model':photo_model,
+        result={'candidate':candidate,'material':'original','light':'scene','tone':'scene','photo_model':photo_model,
                 'photo_style':self.config.photo_style,'atmosphere':self.config.atmosphere,
                 **{k:'auto' for k in PHOTO_CONTROLS}}
+        if self.config.material_adaptation=='local_scrap':result['material_adaptation']='local_scrap'
+        return result
 
     @staticmethod
     def finish_image(out,ident,result,best):
@@ -456,7 +481,7 @@ class Pipeline:
                     candidate=ready[cid]
                     candidate['material_classes']=asset.get('semantic',{}).get('material_classes',[])
                     render_fields=['candidate','material','light']
-                    if self.render_style in ('scene','native'):render_fields.append('dust')
+                    if self.render_style in ('scene','native','local_scrap'):render_fields.append('dust')
                     rkey=tuple(params[k] for k in render_fields)
                     if rkey not in rendered_parts:
                         before=time.monotonic()
@@ -552,11 +577,11 @@ class Pipeline:
                     if structure_ok and not repairable and not any(d.code not in PLACEMENT_DEFECTS for d in unresolved):
                         reason='visual_ok_evidence_unresolved';break
                 if iteration>=self.config.max_iterations:break
-                if no_gain>=2:reason='no_improvement';break
+                if no_gain>=(1 if self.render_style=='local_scrap' else 2):reason='no_improvement';break
                 suggestions=fusion_actions(review,comp,allowed) if isinstance(review,FusionReview) else review.actions
                 if not suggestions:reason='no_valid_action';break
                 updated,actions=repair(params,review,allowed,ids,lambda p:signature(p) in seen,
-                                       dust_in_shader=self.render_style in ('scene','native'),suggestions=suggestions)
+                                       dust_in_shader=self.render_style in ('scene','native','local_scrap'),suggestions=suggestions)
                 result['actions'].append({'iteration':iteration,'decisions':actions})
                 if updated is None:
                     reason='repeated_parameters' if all(a['disposition']=='repeated_parameters' for a in actions) else 'no_effective_action'

@@ -6,7 +6,7 @@ from .geometry import project, illumination_axis
 from .photography import LUMA, linear
 
 
-def reflection_probe(frame, valid, candidate, environment):
+def reflection_probe(frame, valid, candidate, environment, *, bounds=None, airlight=None):
     """Project broad ground colors into a world-space reflection probe."""
     u, v = np.meshgrid((np.arange(128)+.5)/128, (np.arange(64)+.5)/64)
     azimuth, polar = np.pi*(1-2*u), np.pi*(1-v)
@@ -24,13 +24,18 @@ def reflection_probe(frame, valid, candidate, environment):
     # Masked low-pass field. Individual bars, markings and edges cannot become textures.
     x,y,r,b = candidate['bounds']
     pad = round(candidate['target_px']*1.2)
-    l,t = max(0,x-pad),max(0,y-pad)
-    frame = frame[t:b+pad,l:r+pad]
-    valid = valid[t:b+pad,l:r+pad]
+    l,t,rr,bb = bounds or (max(0,x-pad),max(0,y-pad),r+pad,b+pad)
+    frame = frame[t:bb,l:rr]
+    valid = valid[t:bb,l:rr]
     h,w = frame.shape[:2]
     size = (max(1,w//8),max(1,h//8))
     weight = cv2.resize(valid.astype(np.float32),size,interpolation=cv2.INTER_AREA)
-    source = cv2.resize(linear(np.float32(frame)/255)*valid[...,None],size,interpolation=cv2.INTER_AREA)
+    observed = linear(np.float32(frame)/255)
+    if airlight:
+        amount,color = airlight
+        clear = (observed-amount*np.asarray(color,np.float32))/(1-amount)
+        observed = np.clip(clear,observed*.65,observed*1.25)
+    source = cv2.resize(observed*valid[...,None],size,interpolation=cv2.INTER_AREA)
     sigma = max(1.,min(4.,candidate['target_px']*.025/8))
     weight = cv2.GaussianBlur(weight,(0,0),sigma)
     field = cv2.GaussianBlur(source,(0,0),sigma)/np.maximum(weight[...,None],1e-5)
