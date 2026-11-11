@@ -16,7 +16,7 @@ import blender_worker as legacy
 from display_batch.geometry import camera_for, contact_geometry, horizontal_angle, pose_points, transformed, material_detail_allowed
 from display_batch.common import atomic_json
 from display_batch.materials import material_kind, SURFACE_DUST
-from display_batch.scanned_shader import overcast_pixels, scanned_surface
+from display_batch.scanned_shader import matte_dust_surface, overcast_pixels, scanned_surface
 
 BASE = None
 BASE_PATH = None
@@ -348,6 +348,7 @@ def shadow_output(scene,folder,name):
 
 def configure_materials(obj,request,reference=True):
     scans=request.get('surface_scans')
+    matte=request.get('matte_partitions')
     adapted=set()
     for material in obj.data.materials:
         if not material or not material.use_nodes:continue
@@ -384,6 +385,9 @@ def configure_materials(obj,request,reference=True):
             elif node.type=='BSDF_PRINCIPLED':
                 base=BASE_ROUGHNESS[(material.name,node.name)]
                 node.inputs['Roughness'].default_value=max(.08,min(.95,base+request.get('roughness_delta',0)))
+            if matte is not None and node.type=='BSDF_PRINCIPLED' and obj.data.uv_layers.active:
+                if matte_dust_surface(material,node,matte,request['environment'],request['material_classes']):
+                    adapted.add(material.name)
     return sorted(adapted)
 
 
@@ -732,7 +736,8 @@ def render_parts(request):
     global LIVE_RENDER, BASE, BASE_PATH
     started=time.monotonic()
     reference=request['appearance'] in ('reference','local')
-    mode=(request['appearance'],bool(request.get('surface_scans')))
+    matte=request.get('matte_partitions')
+    mode=(request['appearance'],bool(request.get('surface_scans')),matte is not None)
     if LIVE_RENDER is None or LIVE_RENDER['mode']!=mode:
         scene=reset(request['device'])
         for obj in list(scene.objects):bpy.data.objects.remove(obj,do_unlink=True)
@@ -744,7 +749,7 @@ def render_parts(request):
     scene=bpy.context.scene;state=LIVE_RENDER
     scene.render.use_persistent_data=request.get('persistent_data',True)
     imported=0.;import_seconds=0.
-    mesh_key=(request['mesh'],request['mesh_hash'])
+    mesh_key=(request['mesh'],request['mesh_hash'],matte['signature'] if matte is not None else None)
     if state.get('mesh_key')!=mesh_key:
         begin=time.monotonic()
         if 'asset' in state:
@@ -825,7 +830,9 @@ def render_parts(request):
         timings[part+'_seconds']=time.monotonic()-begin
     return {'anchor_uv':anchor.tolist() if anchor is not None else None,
             'contact_polygons':[q.tolist() for q in polys],'camera':camera,'device':DEVICE,
-            'scanned_materials':adapted,'shadow_basis':shadow_basis,'shadow_catcher_fallback':catcher_fallback,
+            'scanned_materials':adapted if matte is None else [],
+            'matte_materials':adapted if matte is not None else [],
+            'shadow_basis':shadow_basis,'shadow_catcher_fallback':catcher_fallback,
             'imports':int(imported),'timings':timings}
 
 

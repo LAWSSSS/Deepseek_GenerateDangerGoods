@@ -66,7 +66,7 @@ def control(params,name):
 
 
 def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metallic=None,upward=None,
-                 *,reference=False,camera_capture=True,surface_weathering=True):
+                 *,reference=False,camera_capture=True,surface_weathering=True,fixed_tone=None):
     classes=set(environment.get('material_classes',[]))
     polymer=bool(classes) and classes.issubset({'plastic','rubber'})
     core=alpha>.85
@@ -95,7 +95,9 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     scene_weight=.8 if reference else .70
     goal=scene_weight*target+(1-scene_weight)*before
     low,high=-1.5,2.
-    if calibration:
+    if fixed_tone is not None:
+        base_ev=fixed_tone['exposure_ev']-extra_ev
+    elif calibration:
         base_ev=calibration['exposure_ev']
     else:
         for _ in range(9):
@@ -129,6 +131,8 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     ratio=(scene_chroma+2)/max(source_chroma,1)
     base_gain=float(np.clip(ratio*(.65 if dusty else 1.),chroma_floor,chroma_ceiling) if gray_style else np.clip(ratio,.6,1.))
     gain=float(np.clip(base_gain/control(params,'chroma'),chroma_floor,chroma_ceiling))
+    if fixed_tone is not None:
+        gain=fixed_tone['chroma_gain']
     # Low-frequency color is altered; original small-scale luminance detail survives.
     sigma=max(1.5,min(alpha.shape)*.018)
     smooth=normalized_blur(lab,alpha,sigma)
@@ -138,6 +142,8 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     base_contrast=float(np.clip(scene_iqr/max(luma_iqr,1),(.82 if polymer else .60) if reference else .88,1.10))
     if calibration:base_contrast=1.
     contrast=1+(base_contrast-1)*control(params,'contrast')
+    if fixed_tone is not None:
+        contrast=fixed_tone['contrast_gain']
     med_l=float(np.median(low_l[surface]))
     protected=highlight*np.clip((lab[:,:,0]-med_l)/20,0,1)
     new_l=med_l+(low_l-med_l)*contrast+(lab[:,:,0]-low_l)

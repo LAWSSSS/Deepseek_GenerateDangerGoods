@@ -190,7 +190,8 @@ def match_rgb(rgb, alpha, background_pixels, specular_weight, tone, seed):
                            'before_luma':before*255,'target_luma':target*255}
 
 
-def compose(scene,candidate,render_dir,render_meta,environment,samples,params,seed,out,*,dust_overlay=False):
+def compose(scene,candidate,render_dir,render_meta,environment,samples,params,seed,out,
+            *,dust_overlay=False,capture_local=False,fixed_tone=None):
     render_dir=Path(render_dir)
     source=np.asarray(Image.open(render_dir/'object.png').getchannel('A'),np.float32)/255
     alpha_dir=Path(candidate.get('fixed_alpha_dir',render_dir))
@@ -229,14 +230,14 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             channels[name]=warp(value,full,offset,bounds,window=window)/np.maximum(color_alpha,1e-6)
     photo_environment={**environment,'material_classes':candidate.get('material_classes',[])}
     local=params.get('photo_model')=='local'
-    if dust_overlay and not local:
-        raise ValueError('dust_overlay_requires_local_photography')
+    if (dust_overlay or capture_local) and not local:
+        raise ValueError('object_effects_require_local_photography')
     reference=params.get('photo_model','reference') in ('reference','local')
     native=params.get('photo_model')=='native'
     reference_pixels=np.asarray(scene['frame'])[samples]
     rgb,photo=match_linear(raw,alpha,reference_pixels,highlight,params,seed,photo_environment,
                            reference=reference,camera_capture=not (native or local),
-                           surface_weathering='scanned_materials' not in render_meta,**channels)
+                           surface_weathering='scanned_materials' not in render_meta,fixed_tone=fixed_tone,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     if local:
         clear_rgb=rgb
@@ -452,7 +453,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     if native:
         # Report the observed final coverage after local settling, not the rough shortlist label.
         placement='embedded' if .08<=occlusion_fraction<=.40 else ('combined' if len(candidate.get('support_ids',[]))>1 else 'surface')
-    return {'checks':checks,'photo':photo,'measured_major_px':major,'edit_bounds':bounds,
+    result = {'checks':checks,'photo':photo,'measured_major_px':major,'edit_bounds':bounds,
             'placement':placement,'support_ids':candidate.get('support_ids',[site['id']]),
             'evidence_confidence':candidate.get('evidence_confidence','estimated'),
             'uncertainties':candidate.get('uncertainties',[]),'depth_order':order,'shadow_basis':shadow_basis,
@@ -464,3 +465,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             'occlusion_fraction':occlusion_fraction,
             'image':str(out),'crop':str(Path(out).with_suffix('.crop.jpg')),
             'preview':str(Path(out).with_suffix('.full.jpg'))}
+    if capture_local:
+        result['local_layers']={'clear_rgb':clear_rgb,'rgb':rgb,'alpha':visible_alpha,'shaded':shaded,
+                                'background':linear(crop),'writable':writable,'air':local_air}
+    return result

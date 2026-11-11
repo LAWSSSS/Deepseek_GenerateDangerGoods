@@ -109,7 +109,8 @@ def pool_object_rgb(rgb, alpha):
     return restored[..., :3] / np.maximum(restored[..., 3:], 1e-6)
 
 
-def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target_px):
+def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target_px,
+                    *, pool_weight=None, fog_fraction=None):
     """Return only the change in linear object RGB for the fixed-placement trial."""
     clear = linear(clear_rgb)
     veiled = linear(veiled_rgb)
@@ -120,8 +121,10 @@ def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target
     context = environment['local_context']
     optics = environment['camera_psf']
     sampled = context['confidence'] == 'estimated' and context['sample_pixels'] >= 20
-    pool_weight = float(np.clip(.20 + .40 * (optics['sigma_px'] - .65), .15, .35)) if (
-        sampled and optics['edge_samples'] >= 12) else 0.
+    if pool_weight is None:
+        pool_weight = float(np.clip(.20 + .40 * (optics['sigma_px'] - .65), .15, .35))
+    if not sampled or optics['edge_samples'] < 12:
+        pool_weight = 0.
     fade = np.minimum(interior / 2., 1.)
     pool = pool_weight * fade * fade * (3 - 2 * fade)
     base = local_air['amount']
@@ -130,7 +133,10 @@ def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target
         delta = (pool_object_rgb(clear, alpha) - clear) * pool[..., None] * (1 - base)
 
     radius = int(np.clip(round(target_px * .012), 2, 6))
-    extra = max(0., min(.35 * base, .09, (.32 - base) / max(1 - base, 1e-6))) if sampled else 0.
+    extra_limit = max(0., min(.09, (.32 - base) / max(1 - base, 1e-6)))
+    extra = min(.35 * base, extra_limit) if fog_fraction is None else min(.65 * base, extra_limit) * fog_fraction
+    if not sampled:
+        extra = 0.
     fade = np.minimum(interior / radius, 1.)
     haze = extra * fade * fade * (3 - 2 * fade)
     air = np.asarray(local_air['color_linear'], np.float32)

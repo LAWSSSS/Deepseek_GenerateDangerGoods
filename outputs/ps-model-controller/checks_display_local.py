@@ -191,6 +191,34 @@ class ForegroundDustTests(unittest.TestCase):
         self.assertEqual(info['pool_weight'], 0.)
         self.assertEqual(info['fog_extra_max'], 0.)
 
+    def test_pool_and_fog_levels_change_independently(self):
+        rgb, alpha, env = self.fixture()
+        veiled, air = local_veil(rgb, {**env, 'haze': .15}, {'photo_style': 'dusty_scrap'})
+        args = (rgb, veiled, alpha, env, air, 300)
+        zero, _ = foreground_dust(*args, pool_weight=0., fog_fraction=0.)
+        light_pool, p = foreground_dust(*args, pool_weight=.15, fog_fraction=0.)
+        strong_pool, _ = foreground_dust(*args, pool_weight=.45, fog_fraction=0.)
+        light_fog, f = foreground_dust(*args, pool_weight=0., fog_fraction=1 / 3)
+        strong_fog, _ = foreground_dust(*args, pool_weight=0., fog_fraction=1.)
+        self.assertFalse(zero.any())
+        self.assertEqual(p['fog_extra_max'], 0.)
+        self.assertEqual(f['pool_weight'], 0.)
+        self.assertTrue(light_pool.any() and light_fog.any())
+        np.testing.assert_allclose(strong_pool, 3 * light_pool, atol=1e-6)
+        np.testing.assert_allclose(strong_fog, 3 * light_fog, atol=1e-6)
+
+    def test_fixed_tone_keeps_exposure_and_contrast_in_material_comparison(self):
+        alpha = np.ones((30, 40), np.float32)
+        raw = np.full((30, 40, 3), .4, np.float32)
+        samples = np.full((120, 3), 135, np.float32)
+        highlight = np.zeros_like(alpha)
+        env = {'material_classes': ['steel']}
+        _, before = match_linear(raw, alpha, samples, highlight, {}, 2, env, reference=True)
+        _, after = match_linear(raw * .65, alpha, samples, highlight, {}, 2, env,
+                                reference=True, fixed_tone=before)
+        for k in ('exposure_ev', 'contrast_gain', 'chroma_gain', 'white_balance'):
+            self.assertEqual(before[k], after[k])
+
     def test_added_residual_cannot_bleed_past_visible_alpha_or_change_noise(self):
         rgb, alpha, env = self.fixture()
         writable = np.ones_like(alpha, bool)

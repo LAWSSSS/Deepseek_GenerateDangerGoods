@@ -4,6 +4,8 @@ import re
 import bpy
 import numpy as np
 
+from .materials import material_kind
+
 
 def original(socket):
     if socket.is_linked:
@@ -48,6 +50,81 @@ def texture(tree, path, uv, name):
     return node
 
 
+def material_weights(tree, entry, uv):
+    if 'mask' not in entry:
+        return entry['constant'][:3]
+    part = texture(tree, entry['mask'], uv, 'Source UV material regions')
+    separate = tree.nodes.new('ShaderNodeSeparateColor')
+    tree.links.new(part.outputs['Color'], separate.inputs['Color'])
+    return [separate.outputs[channel] for channel in ('Red', 'Green', 'Blue')]
+
+
+def opaque_surface_output(tree, shader):
+    output = next((n for n in tree.nodes if n.type == 'OUTPUT_MATERIAL' and n.is_active_output), None)
+    if not output or not output.inputs['Surface'].is_linked or output.inputs['Surface'].links[0].from_node != shader:
+        return None
+    alpha = shader.inputs['Alpha']
+    transmission = shader.inputs['Transmission Weight']
+    if alpha.is_linked or alpha.default_value < .999 or transmission.is_linked or transmission.default_value > .02:
+        return None
+    return output
+
+
+def matte_dust_surface(material, shader, partitions, environment, classes):
+    """Cover known metal and painted metal with a rough dielectric dust surface."""
+    tree = material.node_tree
+    name = re.sub(r'\.\d{3}$', '', material.name)
+    entry = partitions['materials'].get(name)
+    if not entry or not any(entry['coverage'][:3]):
+        return False
+    dust_color = np.asarray(environment['dust_color'], np.float32)
+    gray = float(dust_color @ np.float32([.2126, .7152, .0722]))
+    tint = (.62 * (.86 * gray + .14 * dust_color)).tolist()
+    color = tree.nodes.get('Matte dust color')
+    if color:
+        color.outputs[0].default_value = (*tint, 1.)
+        return True
+    output = opaque_surface_output(tree, shader)
+    if output is None:
+        return False
+    coords = tree.nodes.new('ShaderNodeTexCoord')
+    metallic = shader.inputs['Metallic']
+    kind = material_kind(name, metallic.default_value, metallic.is_linked, classes)
+    if kind == 'metal':
+        coverage = 1.
+    else:
+        coverage = 0.
+        for weight in material_weights(tree, entry, coords.outputs['UV']):
+            coverage = math_node(tree, 'ADD', coverage, weight, clamp=True)
+    noise = tree.nodes.new('ShaderNodeTexNoise')
+    noise.inputs['Scale'].default_value = 94.
+    noise.inputs['Detail'].default_value = 2.
+    tree.links.new(coords.outputs['Object'], noise.inputs['Vector'])
+    opacity = math_node(tree, 'ADD', .90, math_node(tree, 'MULTIPLY', noise.outputs['Fac'], .08))
+    amount = math_node(tree, 'MULTIPLY', coverage, opacity, clamp=True)
+    color = tree.nodes.new('ShaderNodeRGB')
+    color.name = 'Matte dust color'
+    color.outputs[0].default_value = (*tint, 1.)
+    base = mix(tree, .10, color.outputs[0], original(shader.inputs['Base Color']))
+    detail = math_node(tree, 'ADD', .88, math_node(tree, 'MULTIPLY', noise.outputs['Fac'], .20))
+    dust = tree.nodes.new('ShaderNodeBsdfPrincipled')
+    dust.name = 'Matte dust surface'
+    dust['display_deposit'] = True
+    assign(tree, mix(tree, 1., base, detail, blend='MULTIPLY'), dust.inputs['Base Color'])
+    dust.inputs['Metallic'].default_value = 0.
+    dust.inputs['Roughness'].default_value = .95
+    dust.inputs['Specular IOR Level'].default_value = 0.
+    dust.inputs['Emission Strength'].default_value = 0.
+    if shader.inputs['Normal'].is_linked:
+        assign(tree, original(shader.inputs['Normal']), dust.inputs['Normal'])
+    layer = tree.nodes.new('ShaderNodeMixShader')
+    assign(tree, amount, layer.inputs[0])
+    tree.links.new(shader.outputs[0], layer.inputs[1])
+    tree.links.new(dust.outputs[0], layer.inputs[2])
+    tree.links.new(layer.outputs[0], output.inputs['Surface'])
+    return True
+
+
 def scanned_surface(material, shader, profile, dust_color):
     """Retain source metalness, alpha and geometry. Mask all supplemental surface work."""
     tree = material.node_tree
@@ -59,12 +136,8 @@ def scanned_surface(material, shader, profile, dust_color):
     if dust:
         dust.inputs["Base Color"].default_value = (*dust_color, 1.)
         return True
-    output = next((n for n in tree.nodes if n.type == "OUTPUT_MATERIAL" and n.is_active_output), None)
-    if not output or not output.inputs["Surface"].is_linked or output.inputs["Surface"].links[0].from_node != shader:
-        return False
-    alpha = shader.inputs["Alpha"]
-    transmission = shader.inputs["Transmission Weight"]
-    if alpha.is_linked or alpha.default_value < .999 or transmission.is_linked or transmission.default_value > .02:
+    output = opaque_surface_output(tree, shader)
+    if output is None:
         return False
     uv = tree.nodes.new("ShaderNodeTexCoord").outputs["UV"]
     scaled = tree.nodes.new("ShaderNodeVectorMath")
@@ -72,13 +145,7 @@ def scanned_surface(material, shader, profile, dust_color):
     assign(tree, uv, scaled.inputs[0])
     scaled.inputs["Scale"].default_value = 2.4
     tiled = scaled.outputs["Vector"]
-    if entry.get("mask"):
-        part = texture(tree, entry["mask"], uv, "Source UV material regions")
-        separate = tree.nodes.new("ShaderNodeSeparateColor")
-        tree.links.new(part.outputs["Color"], separate.inputs["Color"])
-        weights = [separate.outputs[channel] for channel in ("Red", "Green", "Blue")]
-    else:
-        weights = entry["constant"][:3]
+    weights = material_weights(tree, entry, uv)
     normal_input = shader.inputs["Normal"]
     if not normal_input.is_linked:
         normal_node = tree.nodes.new("ShaderNodeNormalMap")

@@ -73,6 +73,8 @@ def part_keys(request, device, dependencies):
         shared=(*shared,request['scanned_hdri'])
     if request.get('surface_scans'):
         surface=(*surface,request['surface_scans']['signature'])
+    if request.get('matte_partitions'):
+        surface=(*surface,request['matte_partitions']['signature'])
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),
@@ -101,7 +103,8 @@ class RenderCache:
         return None,'incomplete_entry'
 
     async def get(self, asset, candidate, params, environment, size, resolution, *,
-                  appearance='scene', full_frame=False, surface_scans=None, scanned_hdri=None):
+                  appearance='scene', full_frame=False, surface_scans=None, scanned_hdri=None,
+                  matte_partitions=None, object_only=False):
         if not candidate.get('camera'):
             raise ValueError('cropped_render_requires_fixed_camera')
         request=render_request(asset,candidate,params,environment)
@@ -113,7 +116,11 @@ class RenderCache:
             request['surface_scans']=surface_scans
         if scanned_hdri is not None:
             request['scanned_hdri']=scanned_hdri
+        if matte_partitions is not None:
+            request['matte_partitions']=matte_partitions
         keys=part_keys(request,self.worker.device,render_dependencies())
+        if object_only:
+            keys={'object':keys['object']}
         queued=time.monotonic()
         async with self.lock:
             timings={'render_cache_wait_seconds':time.monotonic()-queued}
@@ -151,6 +158,8 @@ class RenderCache:
                       'anchor_uv':response['anchor_uv'],'contact_polygons':response['contact_polygons']}
                 if part=='object' and request.get('surface_scans'):
                     info['scanned_materials']=response['scanned_materials']
+                if part=='object' and request.get('matte_partitions'):
+                    info['matte_materials']=response['matte_materials']
                 if part=='with_shadow' and request.get('scanned_hdri'):
                     info.update(shadow_basis=response['shadow_basis'],
                                 shadow_catcher_fallback=response['shadow_catcher_fallback'])
@@ -169,6 +178,8 @@ class RenderCache:
                     render_cache=cache,render_timings=timings,asset_imports=imports)
         if request.get('surface_scans'):
             meta['scanned_materials']=obj.get('scanned_materials',[])
-        if request.get('scanned_hdri'):
+        if request.get('matte_partitions'):
+            meta['matte_materials']=obj.get('matte_materials',[])
+        if request.get('scanned_hdri') and 'with_shadow' in entries:
             meta.update({k:entries['with_shadow'].get(k) for k in ('shadow_basis','shadow_catcher_fallback')})
         return Path(obj['path']),meta,not missing
