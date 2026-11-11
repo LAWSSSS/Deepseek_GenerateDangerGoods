@@ -4,7 +4,7 @@ import unittest
 import cv2
 import numpy as np
 
-from display_batch.local import neighbourhood, camera_residual, seam_measurement, local_veil
+from display_batch.local import neighbourhood, camera_residual, seam_measurement, local_veil, foreground_dust, pool_object_rgb
 from display_batch.compose import taper_shadow
 from display_batch.photography import linear, match_linear
 from display_batch.schema import BatchConfig
@@ -142,6 +142,70 @@ class LocalTests(unittest.TestCase):
         self.assertGreater(float(result[31,20,0]-result[10,20,0]),.04)
         self.assertTrue(info['alpha_unchanged'])
         self.assertEqual(BatchConfig(backgrounds='x',output='y',appearance='local').appearance,'local')
+
+
+class ForegroundDustTests(unittest.TestCase):
+    def test_pool_normalizes_partial_coverage_on_odd_grid(self):
+        alpha = np.zeros((13, 17), np.float32)
+        alpha[2:11, 3:14] = .8
+        rgb = np.full((*alpha.shape, 3), .95, np.float32)
+        rgb[alpha > 0] = (.2, .4, .6)
+        result = pool_object_rgb(rgb, alpha)
+        self.assertEqual(result.shape, rgb.shape)
+        np.testing.assert_allclose(result[alpha > 0], rgb[alpha > 0], atol=1e-6)
+
+    def fixture(self):
+        alpha = np.zeros((41, 47), np.float32)
+        alpha[3:36, 5:40] = 1
+        alpha[16:25, 17:26] = 0
+        alpha[37:40, 7:24] = 1
+        alpha[38:40, 7:24] = 0
+        rgb = np.full((*alpha.shape, 3), .4, np.float32)
+        rgb[7:33:2, 8:37:2] = .65
+        env = {'local_context': {'confidence': 'estimated', 'sample_pixels': 120,
+                                 'basis': 'nearby_same_support_and_depth'},
+               'camera_psf': {'sigma_px': .85, 'edge_samples': 24},
+               'sensor': {'noise_sigma': .008}, 'dust_color': [.5, .5, .5]}
+        return rgb, alpha, env
+
+    def test_fog_and_pool_fade_around_holes_and_thin_parts(self):
+        rgb, alpha, env = self.fixture()
+        original_alpha = alpha.copy()
+        haze_rgb, local_air = local_veil(rgb, {**env, 'haze': .28}, {'photo_style': 'dusty_scrap'})
+        delta, info = foreground_dust(rgb, haze_rgb, alpha, env, local_air, 300)
+        self.assertAlmostEqual(info['fog_total_max'], .32, places=6)
+        self.assertLessEqual(info['fog_extra_max'], .09)
+        self.assertGreaterEqual(info['pool_weight'], .15)
+        self.assertLessEqual(info['pool_weight'], .35)
+        self.assertFalse(delta[alpha == 0].any())
+        self.assertFalse(delta[37, 7:24].any())
+        self.assertFalse(delta[15, 19].any())  # Near a transparent hole.
+        self.assertTrue(delta[9:13, 11:15].any())
+        np.testing.assert_array_equal(alpha, original_alpha)
+
+    def test_unknown_local_evidence_preserves_clear_object(self):
+        rgb, alpha, env = self.fixture()
+        env['local_context']['confidence'] = 'unknown'
+        delta, info = foreground_dust(rgb, rgb, alpha, env, {'amount': .2, 'color_linear': [.5] * 3}, 200)
+        self.assertFalse(delta.any())
+        self.assertEqual(info['pool_weight'], 0.)
+        self.assertEqual(info['fog_extra_max'], 0.)
+
+    def test_added_residual_cannot_bleed_past_visible_alpha_or_change_noise(self):
+        rgb, alpha, env = self.fixture()
+        writable = np.ones_like(alpha, bool)
+        writable[:, 32:] = False
+        bg = linear(np.full_like(rgb, .5))
+        shadow = bg.copy()
+        shadow[33:38, 3:31] *= .8
+        args = (shadow, rgb, alpha, bg, env, {}, 19, writable)
+        base, edited, optics = camera_residual(*args)
+        trial, trial_edit, trial_optics = camera_residual(*args, object_delta=np.full_like(rgb, -.03))
+        outside = (alpha == 0) | ~writable
+        np.testing.assert_array_equal(base[outside], trial[outside])
+        np.testing.assert_array_equal(trial_edit, edited)
+        self.assertEqual(optics, trial_optics)
+        self.assertTrue(np.any(base[~outside] != trial[~outside]))
 
 
 if __name__=='__main__':unittest.main(verbosity=2)

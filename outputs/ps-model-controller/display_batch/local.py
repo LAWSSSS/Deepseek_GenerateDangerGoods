@@ -98,6 +98,54 @@ def local_veil(rgb,environment,params):
         'limit':.32 if dusty else .16,'mode':params.get('atmosphere','auto')}
 
 
+def pool_object_rgb(rgb, alpha):
+    """Average 2×2 premultiplied cells once and reconstruct at the input grid."""
+    h, w = alpha.shape
+    rgba = np.dstack((rgb * alpha[..., None], alpha))
+    rgba = np.pad(rgba, ((0, h % 2), (0, w % 2), (0, 0)))
+    ph, pw = rgba.shape[:2]
+    pooled = cv2.resize(rgba, (pw // 2, ph // 2), interpolation=cv2.INTER_AREA)
+    restored = cv2.resize(pooled, (pw, ph), interpolation=cv2.INTER_LINEAR)[:h, :w]
+    return restored[..., :3] / np.maximum(restored[..., 3:], 1e-6)
+
+
+def foreground_dust(clear_rgb, veiled_rgb, alpha, environment, local_air, target_px):
+    """Return only the change in linear object RGB for the fixed-placement trial."""
+    clear = linear(clear_rgb)
+    veiled = linear(veiled_rgb)
+    core = alpha > .5
+    distance = cv2.distanceTransform(np.pad(core.astype(np.uint8), 1), cv2.DIST_L2,
+                                     cv2.DIST_MASK_PRECISE)[1:-1, 1:-1]
+    interior = np.maximum(distance - 1., 0.)
+    context = environment['local_context']
+    optics = environment['camera_psf']
+    sampled = context['confidence'] == 'estimated' and context['sample_pixels'] >= 20
+    pool_weight = float(np.clip(.20 + .40 * (optics['sigma_px'] - .65), .15, .35)) if (
+        sampled and optics['edge_samples'] >= 12) else 0.
+    fade = np.minimum(interior / 2., 1.)
+    pool = pool_weight * fade * fade * (3 - 2 * fade)
+    base = local_air['amount']
+    delta = np.zeros_like(clear)
+    if pool_weight:
+        delta = (pool_object_rgb(clear, alpha) - clear) * pool[..., None] * (1 - base)
+
+    radius = int(np.clip(round(target_px * .012), 2, 6))
+    extra = max(0., min(.35 * base, .09, (.32 - base) / max(1 - base, 1e-6))) if sampled else 0.
+    fade = np.minimum(interior / radius, 1.)
+    haze = extra * fade * fade * (3 - 2 * fade)
+    air = np.asarray(local_air['color_linear'], np.float32)
+    delta += (air - veiled - delta) * haze[..., None]
+
+    total = base + (1 - base) * haze[core]
+    return delta, {'pool_kernel': [2, 2], 'pool_weight': pool_weight,
+                   'pool_weight_max': float(pool.max()), 'edge_samples': optics['edge_samples'],
+                   'camera_sigma_px': optics['sigma_px'], 'fog_color_linear': local_air['color_linear'],
+                   'fog_feather_px': radius, 'fog_base': base, 'fog_extra_max': float(haze.max()),
+                   'fog_total_median': float(np.median(total)) if total.size else base,
+                   'fog_total_max': float(total.max()) if total.size else base,
+                   'sample_basis': context['basis'], 'sample_pixels': context['sample_pixels']}
+
+
 def seam_measurement(loss, receiver, alpha):
     """Measure the unobserved receiver cutoff separately from the object silhouette."""
     distance=cv2.distanceTransform(receiver.astype(np.uint8),cv2.DIST_L2,cv2.DIST_MASK_PRECISE)
@@ -107,7 +155,7 @@ def seam_measurement(loss, receiver, alpha):
             'basis':'receiver_boundary_outside_object_not_object_edge'}
 
 
-def camera_residual(shaded, rgb, alpha, background, environment, params, seed, writable):
+def camera_residual(shaded, rgb, alpha, background, environment, params, seed, writable, *, object_delta=None):
     """Filter only the inserted radiance difference, never a pasted rectangular background."""
     from .schema import PHOTO_CONTROLS
     sharpness=PHOTO_CONTROLS['sharpness'][params.get('sharpness','auto')]
@@ -138,6 +186,14 @@ def camera_residual(shaded, rgb, alpha, background, environment, params, seed, w
     target_noise=min(.012,environment['sensor']['noise_sigma'])
     added=math.sqrt(max(0,target_noise**2-existing**2))
     noise=np.random.default_rng(seed).normal(0,added,alpha.shape).astype(np.float32)
+    if object_delta is not None:
+        extra=object_delta*alpha[...,None]
+        if sigma:
+            extra=cv2.GaussianBlur(extra,(0,0),sigma,borderType=cv2.BORDER_CONSTANT)
+        visible=(alpha>0)&writable
+        # Only the new effect is clipped. Keep the baseline shadow, edge and noise intact.
+        changed=np.maximum(captured[visible]+extra[visible],0)
+        encoded[visible]=np.where(changed<=.0031308,changed*12.92,1.055*changed**(1/2.4)-.055)
     encoded+=np.clip(noise,-3*target_noise,3*target_noise)[...,None]*optical_alpha[...,None]
     edited=(np.max(abs(delta),axis=2)>1e-7)|(optical_alpha>0)
     return encoded,edited,{'blur_sigma':float(sigma),'measured_camera_sigma':target,

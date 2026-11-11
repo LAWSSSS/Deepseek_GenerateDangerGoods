@@ -16,7 +16,7 @@ from .framing import edit_bounds
 from .fusion import camera_psf, camera_tones, contact_darkening, optical_layer, reflection_probe
 from .atmosphere import (calibrate_environment, transmission_fields, fogged_radiance,
                          shadowed_background)
-from .local import neighbourhood, camera_residual, seam_measurement, local_veil
+from .local import neighbourhood, camera_residual, seam_measurement, local_veil, foreground_dust
 
 
 def linear(rgb):
@@ -190,7 +190,7 @@ def match_rgb(rgb, alpha, background_pixels, specular_weight, tone, seed):
                            'before_luma':before*255,'target_luma':target*255}
 
 
-def compose(scene,candidate,render_dir,render_meta,environment,samples,params,seed,out):
+def compose(scene,candidate,render_dir,render_meta,environment,samples,params,seed,out,*,dust_overlay=False):
     render_dir=Path(render_dir)
     source=np.asarray(Image.open(render_dir/'object.png').getchannel('A'),np.float32)/255
     alpha_dir=Path(candidate.get('fixed_alpha_dir',render_dir))
@@ -229,6 +229,8 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             channels[name]=warp(value,full,offset,bounds,window=window)/np.maximum(color_alpha,1e-6)
     photo_environment={**environment,'material_classes':candidate.get('material_classes',[])}
     local=params.get('photo_model')=='local'
+    if dust_overlay and not local:
+        raise ValueError('dust_overlay_requires_local_photography')
     reference=params.get('photo_model','reference') in ('reference','local')
     native=params.get('photo_model')=='native'
     reference_pixels=np.asarray(scene['frame'])[samples]
@@ -237,6 +239,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
                            surface_weathering='scanned_materials' not in render_meta,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     if local:
+        clear_rgb=rgb
         rgb,local_air=local_veil(rgb,environment,params)
         photo.update(local_air=local_air,haze=local_air['amount'])
         for label,value in PHOTO_CONTROLS['haze'].items():
@@ -359,7 +362,12 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     edited=(optical_alpha>0)|(loss>0)
     if local:
         writable=(~foreground)&(~protected)&(scene['allowed'][y:b,x:r] | (alpha>0))
-        result,edited,imaging=camera_residual(shaded,rgb,visible_alpha,linear(crop),environment,params,seed,writable)
+        object_delta=None
+        if dust_overlay:
+            object_delta,details=foreground_dust(clear_rgb,rgb,visible_alpha,environment,local_air,candidate['target_px'])
+            photo['dust_overlay']=details
+        result,edited,imaging=camera_residual(shaded,rgb,visible_alpha,linear(crop),environment,params,seed,writable,
+                                             object_delta=object_delta)
         photo.update(imaging,local_context=environment['local_context'])
         photo['after_luma']=float(np.median((np.clip(result,0,1)@np.float32([.2126,.7152,.0722]))[visible_alpha>.85])*255)
         photo['color_pipeline']='scene_linear_EXR_exposure_WB_AgX_once_local_camera_veil_residual_filter'
