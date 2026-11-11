@@ -366,7 +366,7 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
 
     async def run_loop(self,max_iterations,reviews,hard_pass=True,alternatives=1,bad_ids=()):
         with tempfile.TemporaryDirectory() as d:
-            root=Path(d);pipe=Pipeline.__new__(Pipeline);pipe.config=BatchConfig(backgrounds=d,output=d,max_iterations=max_iterations)
+            root=Path(d);pipe=Pipeline.__new__(Pipeline);pipe.config=BatchConfig(backgrounds=d,output=d,max_iterations=max_iterations,appearance='reference',photo_style='scrap_gray')
             pipe.out=root;pipe.cpu=asyncio.Semaphore(2);pipe.store=Store(root/'jobs.sqlite')
             payload={'asset_id':'A','background':'background','seed':3}
             pipe.store.initialize('test',[payload]);job=pipe.store.claim()
@@ -379,6 +379,8 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             pipe.scenes=FakeScene()
             class FakeVision:
                 def __init__(self):self.calls=[]
+                endpoint=VisionEndpoint(url='https://example.invalid/chat/completions',model='fake')
+                def usage(self):return {'calls':self.calls,'reported_tokens':0}
                 async def ask(self,*args,**kwargs):
                     i=len(self.calls);self.calls.append({'fake':True});value=reviews[min(i,len(reviews)-1)]
                     if isinstance(value,Exception):raise value

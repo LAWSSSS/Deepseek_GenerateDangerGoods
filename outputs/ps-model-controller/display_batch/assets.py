@@ -23,7 +23,9 @@ Describe key visible structures, material classes and whether components form on
 or genuinely loose objects. Decorative labels/bolts do not make an assembly loose. Do not reintroduce removed parts.
 upright_axis refers to supplied normalized mesh extents only; use none when not inferable.
 These are display estimates, not measured dimensions. Keep evidence concise.'''
-ASSET_PROMPT += ''' The current model name and CURRENT model board take precedence over older source photos
+ASSET_PROMPT += ''' material_classes must contain only steel, chrome, paint, rust, rubber, plastic.
+Map stainless steel/aluminium to steel or chrome according to finish; omit unsupported categories.
+The current model name and CURRENT model board take precedence over older source photos
 for intentional revisions. A closed opaque housing must not retain an old cutaway/observation window.
 Use source photos for material and size evidence, not to undo a documented current revision.'''
 

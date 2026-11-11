@@ -8,7 +8,7 @@ import numpy as np
 from .photography import LUMA, linear, sensor_statistics
 from .fusion import camera_psf, topology
 
-VERSION = 'neighbourhood-fusion-v3'
+VERSION = 'neighbourhood-fusion-v4-dust'
 
 
 def neighbourhood(scene, candidate):
@@ -53,11 +53,22 @@ def neighbourhood(scene, candidate):
     # Keep it restrained; the failed global neutral-reflectance calibration is not used.
     p05,p50,p95=np.percentile(gray[safe] if safe.any() else gray[selected],[5,50,95])
     veil=float(np.clip((p05/255-.18)*.30,0,.10))
+    # Airborne dust is inferred locally from a raised dark floor and reduced contrast.
+    # Clear, dark-floor neighbourhoods are not forced to have a dust veil.
+    raised=float(np.clip((p05/255-.08)/.46,0,1))
+    compressed=float(np.clip(1-(p95-p05)/155,0,1))
+    dust_veil=float(np.clip(raised*(.12+.16*compressed),0,.28))
+    bright=pixels[(pixels@LUMA)>=np.percentile(pixels@LUMA,75)]
+    air_rgb=np.median(bright,axis=0) if len(bright) else median
+    air_rgb=.75*air_rgb+.25*float(air_rgb@LUMA)
     environment={'world_color':(np.clip(.22+(luminance-100)*.0012,.14,.35)*tint).tolist(),
         'light_color':(tint/tint.max()).tolist(),'key_direction':None,'haze':veil,
         'sample_count':int(selected.sum()),'sample_hash':hashlib.sha256(np.packbits(samples)).hexdigest(),
         'luma_median':luminance,'basis':basis,'sample_basis':basis,
         'dust_color':linear(median/255).tolist(),'sensor':sensor,'camera_psf':optics,
+        'airborne_dust':{'amount':dust_veil,'color_linear':linear(air_rgb/255).tolist(),
+            'basis':'local_same_depth_raised_dark_floor_and_contrast_estimate',
+            'raised_dark_floor':raised,'contrast_compression':compressed},
         'local_context':{'version':VERSION,'bounds':bounds,'sample_pixels':int(selected.sum()),
             'basis':basis,'depth_tolerance':.085,'global_fallback':False,
             'confidence':'unknown' if 'unknown' in basis else 'estimated',
@@ -74,13 +85,17 @@ def neighbourhood(scene, candidate):
 def local_veil(rgb,environment,params):
     """A restrained neighbourhood camera estimate, independent of surface wear."""
     from .schema import PHOTO_CONTROLS
-    amount=float(np.clip(environment.get('haze',0)*PHOTO_CONTROLS['haze'][params.get('haze','auto')],0,.16))
+    dusty=params.get('photo_style')=='dusty_scrap'
+    dust=environment.get('airborne_dust',{}) if dusty else {}
+    amount=float(np.clip(dust.get('amount',environment.get('haze',0))*PHOTO_CONTROLS['haze'][params.get('haze','auto')],0,.32 if dusty else .16))
     if params.get('atmosphere','auto')=='off':amount=0.
-    air=np.asarray(environment['dust_color'],np.float32)
+    air=np.asarray(dust.get('color_linear',environment['dust_color']),np.float32)
     captured=linear(rgb)*(1-amount)+air*amount
     result=np.where(captured<=.0031308,captured*12.92,1.055*captured**(1/2.4)-.055)
     return np.float32(result),{'amount':amount,'color_linear':air.tolist(),
-        'basis':'bounded_neighbourhood_veiling_estimate_not_air_density','mode':params.get('atmosphere','auto')}
+        'basis':dust.get('basis','bounded_neighbourhood_veiling_estimate_not_air_density'),
+        'base_amount':dust.get('amount',environment.get('haze',0)),
+        'limit':.32 if dusty else .16,'mode':params.get('atmosphere','auto')}
 
 
 def seam_measurement(loss, receiver, alpha):

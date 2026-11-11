@@ -29,6 +29,8 @@ from .rendering import RenderCache, RENDER_VERSION
 from .review import allowed_actions, evidence_status, fusion_actions, inspect, repair, PLACEMENT_DEFECTS
 from .materials import material_kind, SURFACE_DUST
 from .atmosphere import Atmospheres
+from .costs import cumulative, estimate, tariff, label as cost_label
+from .policy import asset_id, resize_candidate
 
 COMPOSE_VERSION='scrap-gray-pile-v6-window'
 
@@ -77,6 +79,7 @@ def batch_lock(folder):
 
 
 def make_jobs(config,catalog):
+    excluded={asset_id(k) for k in config.excluded_assets}
     if config.manifest:
         jobs=json.loads(resolve(config.manifest).read_text(encoding='utf8'))
         if not isinstance(jobs,list) or not 1<=len(jobs)<=1000:raise ValueError('invalid manifest size')
@@ -85,19 +88,22 @@ def make_jobs(config,catalog):
         backgrounds=sorted(p for p in directory.iterdir() if p.suffix.lower() in ('.jpg','.jpeg','.png','.webp'))
         if not backgrounds:raise ValueError('没有可读取背景')
         ids=config.assets or list(catalog)
-        ids=[str(int(k.split('-')[0]))+('-'+k.split('-')[1] if '-' in k else '') for k in ids]
+        ids=[asset_id(k) for k in ids if asset_id(k) not in excluded]
+        if not ids:raise ValueError('所选模型均已移出生成名单')
         rng=random.Random(config.seed);rng.shuffle(backgrounds);rng.shuffle(ids)
         jobs=[{'background':str(backgrounds[(i//len(ids)+i)%len(backgrounds)]),
                'asset_id':ids[i%len(ids)],'group':'batch'} for i in range(config.count)]
     result=[]
     for i,job in enumerate(jobs):
-        k=str(job['asset_id']);path=resolve(job['background'])
+        k=asset_id(job['asset_id']);path=resolve(job['background'])
+        if k in excluded:continue
         if k not in catalog:raise ValueError('未知模型编号：'+k)
         if not path.is_file():raise ValueError('背景不存在：'+str(path))
         seed=job.get('seed',config.seed+i)
         if type(seed) is not int or seed<0:raise ValueError('invalid manifest seed')
         result.append({**job,'background':str(path),'asset_id':k,'background_hash':file_hash(path),
                        'mesh_hash':catalog[k]['mesh_hash'],'seed':seed})
+    if not result:raise ValueError('任务清单只包含已移出的模型')
     return result
 
 
@@ -136,6 +142,7 @@ def write_summary(out,store,usage=None,run=None):
     for group in groups.values():group['acceptance_rate']=group['accepted_display']/max(1,group['total'])
     times=[r['seconds'] for r in records if 'seconds' in r]
     summary={'version':VERSION,'counts':store.counts(),'groups':groups,'formal_acceptance':'not_changed',
+             'cost_total':cumulative(out,usage),
              'run':run,'usage_current_run':usage,'seconds_median':statistics.median(times) if times else None,
              'seconds_p95':sorted(times)[min(len(times)-1,math.ceil(len(times)*.95)-1)] if times else None,
              'generated_pngs':sum(bool(r.get('image')) for r in records),
@@ -157,6 +164,7 @@ def write_summary(out,store,usage=None,run=None):
                         (f'<a href="{image}"><img src="{image}" loading="lazy"></a>' if image else '')+
                         (f'<img class="crop" src="{crop}" loading="lazy">' if crop else '')+'</section>')
     page='<!doctype html><meta charset="utf-8"><title>多背景批量结果</title><style>body{background:#172128;color:#eee;font:15px sans-serif;margin:30px}section{border-top:1px solid #456;padding:15px}img{max-width:55%;max-height:440px}.crop{max-width:40%}h2{font-size:16px}</style><h1>多背景批量展示结果</h1><p>场景依据为估计；展示合格不等于旧流程正式验收。</p><pre>'+html.escape(json.dumps(summary['counts'],ensure_ascii=False))+'</pre>'+''.join(sections)
+    page=page.replace('<h1>多背景批量展示结果</h1>','<h1>多背景批量展示结果</h1><p>'+html.escape(cost_label(summary['cost_total']))+'</p>')
     (out/'index.html').write_text(page,encoding='utf8')
     return summary
 
@@ -224,7 +232,11 @@ class Pipeline:
         return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
 
     async def choose_placements(self,asset,scene,seed):
-        return await asyncio.to_thread(choose_candidates,asset,scene,seed,self.config)
+        candidates,rejected=await asyncio.to_thread(choose_candidates,asset,scene,seed,self.config)
+        factor=self.config.asset_scale_factors.get(str(asset.get('id','')),1.)
+        if factor!=1:
+            candidates=[await asyncio.to_thread(resize_candidate,asset,scene,c,factor) for c in candidates]
+        return candidates,rejected
 
     async def validate_local_pose(self,asset,scene,candidate):
         if candidate.get('placement'):
@@ -572,6 +584,8 @@ class Pipeline:
             result['cost']['api_retries']=sum(c.get('attempt',0)>0 and c.get('state')!='not_sent' for c in calls)
             result['cost']['reported_tokens']=usage['reported_tokens']
             result['cost']['unreported_calls']=usage['unreported_calls']
+            result['cost']['api_estimate']=estimate(calls,tariff(self.config,self.vision.endpoint) if calls else None)
+            result['cost_total_at_output']=cumulative(self.out,self.vision.usage() if calls else None)
             result['timings']['api_seconds']=round(sum(c.get('seconds',0) for c in calls),3)
             atomic_json(folder/'result.json',result)
 
@@ -637,9 +651,10 @@ class Pipeline:
                             self.store.pause(job['id']);state='paused_provider' if isinstance(failure,ProviderUnavailable) else 'paused_renderer'
                             error=str(failure);stop.set();return
                         self.store.finish(job['id'],result['status'],result)
-                        write_summary(self.out,self.store,self.vision.usage(),{'id':self.run_id,'state':'running'})
+                        progress=write_summary(self.out,self.store,self.vision.usage(),{'id':self.run_id,'state':'running'})
                         print(json.dumps({'event':'done','job':job['id'],'status':result['status'],
-                                          'reason':result['reason'],'seconds':result['seconds']},ensure_ascii=False),flush=True)
+                                          'reason':result['reason'],'seconds':result['seconds'],
+                                          'cost_total':cost_label(progress['cost_total'])},ensure_ascii=False),flush=True)
                 await asyncio.gather(*(consumer() for _ in range(self.config.cpu_concurrency)))
             except ProviderUnavailable as failure:
                 state='paused_provider';error=str(failure)
@@ -655,6 +670,7 @@ class Pipeline:
                 summary['run']['render_counts']=dict(self.renders.totals)
                 summary['run']['render_stage_seconds']=dict(self.renders.timings)
                 summary['run']['memory_retries']=self.blender.memory_retries
+                atomic_json(self.out/f'run-{self.run_id}.json',summary['run'])
                 atomic_json(self.out/'summary.json',summary)
                 self.store.close()
             return summary

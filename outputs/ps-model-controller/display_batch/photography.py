@@ -123,10 +123,12 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     scene_ab=np.median(scene_lab[:,1:],axis=0)
     source_chroma=float(np.median(np.linalg.norm(lab[:,:,1:][surface],axis=1)))
     scene_chroma=float(np.median(np.linalg.norm(scene_lab[:,1:],axis=1)))
-    gray_style=params.get('photo_style','scrap_gray')=='scrap_gray'
+    dusty=params.get('photo_style')=='dusty_scrap'
+    gray_style=params.get('photo_style','scrap_gray') in ('scrap_gray','dusty_scrap')
+    chroma_floor,chroma_ceiling=(.08,.35) if dusty else (.20,.55 if gray_style else 1.)
     ratio=(scene_chroma+2)/max(source_chroma,1)
-    base_gain=float(np.clip(ratio,.20,.55) if gray_style else np.clip(ratio,.6,1.))
-    gain=float(np.clip(base_gain/control(params,'chroma'),.20,.55 if gray_style else 1.))
+    base_gain=float(np.clip(ratio*(.65 if dusty else 1.),chroma_floor,chroma_ceiling) if gray_style else np.clip(ratio,.6,1.))
+    gain=float(np.clip(base_gain/control(params,'chroma'),chroma_floor,chroma_ceiling))
     # Low-frequency color is altered; original small-scale luminance detail survives.
     sigma=max(1.5,min(alpha.shape)*.018)
     smooth=normalized_blur(lab,alpha,sigma)
@@ -147,6 +149,13 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         chroma_mask *= np.clip(excess/7,0,1)*(1-.78*metal)*(1-.6*highlight)
     modified=lab[:,:,1:]*gain+scene_ab*(1-gain)*(.5 if gray_style else .15)
     lab[:,:,1:]=lab[:,:,1:]*(1-chroma_mask[...,None])+modified*chroma_mask[...,None]
+    chroma_cap=None
+    if dusty:
+        # Keep luminance/texture and material reflection intact; bound residual colour
+        # including coloured highlights by measured neighbouring chroma, not global tint.
+        chroma_cap=float(np.clip(np.percentile(np.linalg.norm(scene_lab[:,1:],axis=1),85)*.8+2,3,10))
+        magnitude=np.linalg.norm(lab[:,:,1:],axis=2)
+        lab[:,:,1:]*=np.minimum(1,chroma_cap/np.maximum(magnitude,1e-4))[...,None]
     rgb=np.clip(cv2.cvtColor(lab,cv2.COLOR_LAB2RGB),0,1)
     rng=np.random.default_rng(seed)
     dust_mean=wear_rms=0.
@@ -202,7 +211,7 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     for label,value in PHOTO_CONTROLS['haze'].items():
         blur=base_blur/value
         effective[label]={'haze':float(np.clip(haze_base*value,0,haze_limit)),
-            'chroma':float(np.clip(base_gain/value,.20,.55 if gray_style else 1.)) if chroma_mask[core].max()>.01 else 1.,
+            'chroma':float(np.clip(base_gain/value,chroma_floor,chroma_ceiling)) if chroma_mask[core].max()>.01 else 1.,
             'contrast':1+(base_contrast-1)*value,'sharpness':blur if blur>.05 else 0.}
     return rgb,{'version':environment.get('local_context',{}).get('version') or (REFERENCE_VERSION if reference else VERSION),
         'color_pipeline':'scene_linear_EXR_calibration_AgX_once_camera_linear_atmosphere' if calibration else 'scene_linear_EXR_exposure_WB_haze_then_OCIO_AgX_once',
@@ -212,7 +221,7 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         'dust_mean':dust_mean,'haze':haze,'noise_sigma':noise,'added_noise_sigma':added,
         'blur_sigma':blur_sigma,'before_luma':before*255,'target_luma':target*255,
         'after_luma':float(np.median((rgb@LUMA)[surface])*255),'source_chroma':source_chroma,
-        'scene_chroma':scene_chroma,'after_chroma':after_chroma,
+        'scene_chroma':scene_chroma,'after_chroma':after_chroma,'local_chroma_cap':chroma_cap,
         'excess_chroma_reduction':float(1-max(0,after_chroma-scene_chroma)/max(.001,source_chroma-scene_chroma)),
         'alpha_unchanged':True,'specular_protection':True,'surface_wear_rms':wear_rms,
         'sensor':stats,'polymer_preservation':polymer}

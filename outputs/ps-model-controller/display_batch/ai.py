@@ -12,6 +12,7 @@ from pydantic import Field, model_validator
 from PIL import Image, ImageOps
 from run import Endpoint, ModelClient, token_summary
 from .common import HERE, atomic_json, configure_credential, file_hash, signature
+from .costs import tariff, estimate
 
 
 class VisionEndpoint(Endpoint):
@@ -56,16 +57,20 @@ class Vision:
         self.cache_hits = 0
 
     async def close(self):
+        atomic_json(self.usage_path,self.usage())
         await self.http.aclose()
 
     def usage(self):
         result = token_summary(self.calls)
         result.update(cache_hits=self.cache_hits, calls=self.calls)
+        rates=tariff(self.config,self.endpoint)
+        result.update(ledger_name=self.usage_path.name,tariff=rates,cost=estimate(self.calls,rates))
         cfg = self.config
         if cfg.price_input_per_million is not None and cfg.price_output_per_million is not None:
-            result["reported_cost"] = sum((r.get("usage", {}).get("prompt_tokens", 0)*cfg.price_input_per_million
-                + r.get("usage", {}).get("completion_tokens", 0)*cfg.price_output_per_million)/1e6 for r in self.calls)
-            result["cost_complete"] = not result["unreported_calls"]
+            cost=result['cost']
+            exact=cost['complete'] and cost['estimated_api_min']==cost['estimated_api_max']
+            result['reported_cost']=cost['estimated_api_min'] if exact else None
+            result['cost_complete']=exact
         return result
 
     async def ask(self, role, schema, prompt, payload, images=(), *, cache=True,

@@ -18,13 +18,15 @@ class BatchConfig(Strict):
     backgrounds: str
     output: str
     assets: list[str] = Field(default_factory=list)
+    excluded_assets: list[str] = Field(default_factory=lambda:['5','6','7'])
+    asset_scale_factors: dict[str, Annotated[float, Field(ge=.1, le=2.)]] = Field(default_factory=lambda:{'31':.5})
     count: int = Field(default=100, ge=1, le=1000)
     seed: int = Field(default=20261110, ge=0)
     max_iterations: int = Field(default=2, ge=0, le=10)
     provider_config: str | None = None
     render_device: Literal["OPTIX", "CUDA", "CPU"] = "OPTIX"
     offline: bool = False
-    photo_style: Literal['scrap_gray', 'retain_color'] = 'scrap_gray'
+    photo_style: Literal['dusty_scrap', 'scrap_gray', 'retain_color'] = 'scrap_gray'
     placement_mode: Literal['auto', 'surface', 'combined', 'embedded'] = 'auto'
     uncertain_policy: Literal['render_review', 'skip'] = 'render_review'
     cache: str = "work/display-batch-cache"
@@ -34,10 +36,18 @@ class BatchConfig(Strict):
     cpu_concurrency: int = Field(default=2, ge=1, le=2)
     price_input_per_million: float | None = Field(default=None, ge=0)
     price_output_per_million: float | None = Field(default=None, ge=0)
+    price_cached_input_per_million: float | None = Field(default=None, ge=0)
+    price_currency: str = Field(default='CNY', pattern=r'^[A-Z]{3}$')
     # New photographic profiles are promoted after staged evaluation.
     appearance: Literal['reference','camera','materials','scene','native','local'] = 'reference'
     atmosphere: Literal['auto','off'] = 'auto'
     review_format: Literal['full','compact'] = 'full'
+
+    @model_validator(mode='after')
+    def dust_uses_neighbourhood(self):
+        # Selecting this style in either CLI or web must actually use local evidence.
+        if self.photo_style=='dusty_scrap':self.appearance='local'
+        return self
 
 
 class Surface(Strict):

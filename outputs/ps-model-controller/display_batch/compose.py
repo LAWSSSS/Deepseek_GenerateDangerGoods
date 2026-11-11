@@ -239,7 +239,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         rgb,local_air=local_veil(rgb,environment,params)
         photo.update(local_air=local_air,haze=local_air['amount'])
         for label,value in PHOTO_CONTROLS['haze'].items():
-            photo['effective_controls'][label]['haze']=float(np.clip(environment['haze']*value,0,.16)) if params.get('atmosphere','auto')!='off' else 0.
+            photo['effective_controls'][label]['haze']=float(np.clip(local_air['base_amount']*value,0,local_air['limit'])) if params.get('atmosphere','auto')!='off' else 0.
     site=next(s for s in scene['supports'] if s['id']==candidate['site_id'])
     support=np.logical_or.reduce([s['mask'][y:b,x:r] for s in scene['supports']
         if s['id'] in candidate.get('support_ids',[site['id']])]);protected=scene['protected'][y:b,x:r]
