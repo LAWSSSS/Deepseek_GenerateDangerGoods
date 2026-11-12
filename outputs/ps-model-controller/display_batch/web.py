@@ -124,6 +124,8 @@ async def effect_options(request):
             'shadow_mode':'matched_receiver','lighting':'local'}},
         'reference_projection_trial':{'scale_mode':'reference_projection','contact_mode':'strict',
                                       'chroma_mode':'local_budget','legacy_display_factors_applied':False},
+        'global_saturation_trial':{'chroma_mode':'global_mean','promoted_default':False,
+                                   'basis':'full_background_mean_HSV_S_additional_cap_after_local_budget'},
         'schema':EffectSettings.model_json_schema(),'actions':EFFECT_ACTIONS,
         'test_endpoint':'/api/batches/test','max_test_jobs':15,
         'dependencies':{'fog_extra':'compose_and_review','fog_gain':'compose_and_review','pool_kernel':'compose_and_review',

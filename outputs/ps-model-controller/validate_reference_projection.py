@@ -46,9 +46,13 @@ def freeze(source,out):
 
 
 def write_page(out,sections,summary):
-    body=['<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>实物尺度与严格接触小样</title>',
+    color_only='cases' in summary
+    title='固定旧摆位的颜色诊断（未改尺寸和位置）' if color_only else '实物尺度、局部色度与严格接触'
+    scope=('本页仅比较颜色，尺寸、落点、姿态和遮挡全部沿用历史结果。不是新尺度或物理合格交付。'
+           if color_only else '估计尺度与合格实物尺度分开；物理失败只保存诊断，不进入交付区。')
+    body=['<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>'+title+'</title>',
         '<style>body{background:#152027;color:#e8eeee;font:16px system-ui;margin:28px}img{width:100%;height:auto}a{color:#9cdac6}p{line-height:1.8}section{margin:28px 0;border-top:1px solid #567}pre{white-space:pre-wrap}</style>',
-        '<h1>实物尺度、局部色度与严格接触</h1><p>全部图片为完整监控画面，可点击查看原尺寸。估计尺度与合格实物尺度分开；物理失败只保存诊断，不进入交付区。</p>',
+        '<h1>'+title+'</h1><p>'+scope+'全部图片为完整监控画面，可点击查看原尺寸。</p>',
         '<p>'+html.escape(summary.get('message',''))+'</p>',
         '<p>'+html.escape(cost_label(summary.get('cost',{})))+'</p>',
         '<details><summary>全部验证与成本</summary><pre>'+html.escape(json.dumps(summary,ensure_ascii=False,indent=2))+'</pre></details>']

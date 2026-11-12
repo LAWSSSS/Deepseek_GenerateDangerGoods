@@ -65,7 +65,7 @@ class BatchConfig(Strict):
     effects: EffectSettings | None = None
     scale_mode: Literal['legacy', 'physical_consistent', 'reference_projection'] = 'legacy'
     contact_mode: Literal['legacy', 'strict'] = 'legacy'
-    chroma_mode: Literal['legacy', 'local_budget'] = 'legacy'
+    chroma_mode: Literal['legacy', 'local_budget', 'global_mean'] = 'legacy'
     dimension_registry: str | None = None
     scene_reference_registry: str | None = None
 

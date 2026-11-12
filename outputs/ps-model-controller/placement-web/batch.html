@@ -17,7 +17,7 @@
 <label class="wide">运行方式<select id="testMode"><option value="batch">原批量流程</option><option value="test">在线效果小样（最多 15 项）</option></select></label>
 <label>尺度模式<select id="scaleMode"><option value="reference_projection">实物规格与参照投影（新小样，不用旧缩放）</option><option value="physical_consistent">统一物品长度与场景标定（小样）</option><option value="legacy">旧尺度估计</option></select></label>
 <label>接触检查<select id="contactMode"><option value="strict">严格接触，悬空不出图</option><option value="legacy">旧流程复现</option></select></label>
-<label>鲜艳度约束<select id="chromaMode"><option value="local_budget">附近同层色度上限</option><option value="legacy">旧摄影处理</option></select></label>
+<label>鲜艳度约束<select id="chromaMode"><option value="local_budget">附近同层色度上限</option><option value="global_mean">再限于全图平均饱和度（诊断）</option><option value="legacy">旧摄影处理</option></select></label>
 <label>薄雾模式<select id="fogMode"><option value="local_auto">局部自动估计总雾量</option><option value="manual_extra">手动追加薄雾</option></select></label>
 <label>做旧模式<select id="weathering"><option value="preserve_source">保留原貌·中度做旧（浮灰最高 0.5）</option><option value="legacy_matte">旧哑光覆盖</option></select></label>
 <label>局部雾量修正倍数<input id="fogGain" type="number" min="0" max="1.5" step="0.25" value="1"></label>

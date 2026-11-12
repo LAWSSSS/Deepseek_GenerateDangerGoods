@@ -242,7 +242,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
                            fixed_tone=fixed_tone,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     chroma_limits=chroma_groups=None
-    if params.get('chroma_mode')=='local_budget':
+    if params.get('chroma_mode') in ('local_budget','global_mean'):
         from .chroma_budget import masks, budget, compress, measure
         from .photography import display
         chroma_limits=budget(reference_pixels,environment.get('local_context',{}).get('confidence','unknown'))
@@ -419,6 +419,15 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         photo['chroma_recompositions']=int(initial_final['status']=='fail')
         if initial_final['status']=='fail':
             result,photo['chroma_recomposition']=compress(result,chroma_groups,chroma_limits,visible_alpha)
+    saturation_mask=None
+    if params.get('chroma_mode')=='global_mean':
+        from .global_saturation import background_statistics, apply as apply_global_saturation
+        if 'global_saturation_statistics' not in scene:
+            scene['global_saturation_statistics']=background_statistics(np.asarray(scene['frame']))
+        # Use the exact exported local-budget result as this diagnostic's input.
+        result=np.rint(np.clip(result,0,1)*255).astype(np.float32)/255
+        result,photo['global_saturation'],saturation_mask=apply_global_saturation(
+            result,visible_alpha,scene['global_saturation_statistics'])
     crop_out=np.uint8(np.rint(np.clip(result,0,1)*255))
     original=base_rgb[y:b,x:r].copy()
     base_rgb[y:b,x:r][edited]=crop_out[edited]
@@ -472,6 +481,12 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     if chroma_groups is not None:
         photo['final_chroma']=measure(exported[y:b,x:r].astype(np.float32)/255,chroma_groups,chroma_limits)
         checks['local_chroma']=photo['final_chroma']
+    if saturation_mask is not None:
+        from .global_saturation import measure as measure_global_saturation
+        measured=measure_global_saturation(exported[y:b,x:r].astype(np.float32)/255,
+            saturation_mask,scene['global_saturation_statistics'])
+        photo['global_saturation']['after']=measured
+        checks['global_saturation']=measured
     if candidate.get('strict_contact'):
         checks['contact_gap']=candidate.get('contact_gap',{'status':'unknown','reason':'no_metric_gap_audit'})
         if not physics.get('stable'):
