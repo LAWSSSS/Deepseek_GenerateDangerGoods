@@ -79,6 +79,11 @@ def page(out,result):
         '<p>旧路径会把被遮挡背景的高频残差加回不透明物体。新版先合并物品 RGB、薄雾和池化，再一次过滤预乘透明度的物品图层。</p>',
         '<p><a href="analysis.json">逐图检查、背景独立性反例及耗时</a> · <a href="manifest.json">冻结输入</a></p>',
         '<details><summary>汇总</summary><pre>'+html.escape(json.dumps(top,ensure_ascii=False,indent=2))+'</pre></details>']
+    feedback=out/'user-feedback.json'
+    if feedback.is_file():
+        note=read(feedback)
+        body.insert(5,'<p style="padding:16px;background:#782d2d;color:white">用户结论：'+
+            html.escape(note['conclusion'])+'。这些旧几何图片仅留作问题诊断，未采用为新效果基线。</p>')
     for row in result['cases']:
         body.append('<section><h2>'+html.escape(row['group']+' · '+row['asset_id']+' · '+row['job_id'])+'</h2>')
         if row.get('error'):

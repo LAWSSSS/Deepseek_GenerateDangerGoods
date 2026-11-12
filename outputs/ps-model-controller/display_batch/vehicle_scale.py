@@ -13,6 +13,7 @@ from .common import atomic_json, signature, file_hash
 
 VERSION='vehicle-width-projection-v4-risk-preflight'
 PREFLIGHT_VERSION='vehicle-projection-preflight-v1'
+OBSERVATION_VERSION='vehicle-observed-width-v1'
 WIDTH_CONFLICT_LIMIT=.18
 
 
@@ -33,6 +34,42 @@ class VehicleGeometry(Strict):
     right_rim: tuple[Point,Point]
     heights: list[Height] = Field(max_length=24)
     evidence: str = Field(max_length=400)
+
+
+class WidthObservation(Strict):
+    points: tuple[Point,Point]
+    endpoint_visibility: tuple[Literal['visible','occluded','outside'],Literal['visible','occluded','outside']]
+    correspondence_basis: Literal['opposing_posts','transverse_member','matched_seams','unknown']
+    evidence: str = Field(max_length=180)
+
+
+class ObservedVehicleGeometry(Strict):
+    """An empty observation is valid; a hidden truck rim is not a ruler."""
+    vehicle_class: Literal['semitrailer','uncertain','other']
+    confidence: Unit
+    rim_visibility: Literal['clear','partial','inferred']
+    width_observations: list[WidthObservation] = Field(max_length=6)
+    left_rim: tuple[Point,Point] | None
+    right_rim: tuple[Point,Point] | None
+    heights: list[Height] = Field(max_length=24)
+    evidence: str = Field(max_length=400)
+
+
+OBSERVED_PROMPT='''Identify OBSERVED inside-top-rim geometry of this semi-trailer.
+The supplied interior width is a real-world length, not evidence that the image
+shows both width endpoints. Return width_observations=[] if either endpoint is
+hidden/outside or opposite longitudinal stations cannot be matched. Empty output
+is correct and does not need repair. Do not use image edges, guessed walls, steel
+pile outlines, equal image-y coordinates, or inferred vanishing points as rulers.
+Each usable observation must connect two visible INSIDE TOP RIM points at ONE
+longitudinal station. Name the opposing posts, matched seams or transverse member
+that establishes correspondence, and state endpoint visibility independently.
+Give left_rim/right_rim as visible straight longitudinal inner-rim segments only;
+use null when unavailable. Never extend a segment into hidden image regions.
+The user supplied box length/height do not prove unseen corners are image corners.
+For each supplied support ID give a conservative below-rim height interval in
+metres, explaining which wall and rim evidence is visible; it remains estimated.
+Do not select object position, size or camera focal length.'''
 
 
 PROMPT='''Locate the INSIDE TOP RIM of this semi-trailer, using the full image.
@@ -95,6 +132,12 @@ def projection_preflight(calibration,width_m=None):
     final=set(health.get('fitted_bound_hits',[]))
     initial=set(health.get('unconstrained_bound_hits',[]))
     risk=[];limitations=[]
+    observation=calibration.get('observation_audit')
+    if observation is not None and not observation.get('fit_ready',False):
+        risk.append('insufficient_observed_width_correspondences')
+    if observation is not None and health.get('mode') in (
+            'explicit_camera_prior_fallback','single_inferred_width_with_explicit_camera_prior'):
+        risk.append('observed_fit_requires_unmeasured_camera_prior')
     try:
         camera=calibration['metric_camera'];K=np.asarray(camera['K'],float);R=np.asarray(camera['R'],float)
         H=np.asarray(calibration['homography_mm_to_px'],float)
@@ -176,6 +219,88 @@ def rim_edge_evidence(image_path,left_rim,right_rim,visibility):
     return {'method':'bounded_continuous_edge_search','rims':rows,
             'both_supported':all(row['supported'] for row in rows),
             'limitation':'Image edges constrain line location; they do not establish transverse correspondence or vehicle identity.'}
+
+
+def audit_width_observations(observed,size,edges):
+    """Keep visible, independent, ordered transverse observations only.
+
+    Coordinates are never snapped, extended or replaced. Edge agreement checks
+    a proposed fact; it does not establish vehicle identity or correspondence.
+    """
+    size=np.asarray(size,float)-1;diagonal=float(np.linalg.norm(size))
+    tolerance=max(3.,diagonal*.004)
+    rims=edges.get('rims',[]);rows=[];accepted=[]
+    rims_supported=bool(edges.get('both_supported')) and len(rims)==2
+    lines=[np.asarray(r.get('refined',r.get('proposed')),float)*size for r in rims] if rims_supported else []
+    for index,item in enumerate(observed.get('width_observations',[])):
+        points=np.asarray(item['points'],float)*size;reasons=[];stations=[];distances=[]
+        if item.get('endpoint_visibility') not in (['visible','visible'],('visible','visible')):
+            reasons.append('endpoints_not_both_observed')
+        if item.get('correspondence_basis') not in ('opposing_posts','transverse_member','matched_seams') or not item.get('evidence','').strip():
+            reasons.append('transverse_station_evidence_missing')
+        if observed.get('rim_visibility')=='inferred' or not rims_supported:
+            reasons.append('inside_rims_not_image_supported')
+        if np.linalg.norm(points[1]-points[0])<size[0]*.15:
+            reasons.append('width_span_too_short')
+        for point,line in zip(points,lines):
+            delta=line[1]-line[0];length=float(np.linalg.norm(delta))
+            if length<1:
+                reasons.append('degenerate_rim_segment');continue
+            station=float(np.dot(point-line[0],delta)/(length*length))
+            distance=float(np.linalg.norm(point-(line[0]+station*delta)))
+            stations.append(station);distances.append(distance)
+            if distance>tolerance:reasons.append('width_endpoint_off_visible_inside_rim')
+            if station < -tolerance/length or station > 1+tolerance/length:
+                reasons.append('width_endpoint_extrapolated_past_visible_rim')
+        if not reasons and any(np.max(np.linalg.norm(points-old['points_px'],axis=1))<=tolerance for old in accepted):
+            reasons.append('duplicate_transverse_section')
+        row={'index':index,'usable':not reasons,'reasons':list(dict.fromkeys(reasons)),
+             'points_px':points.tolist(),'rim_distances_px':distances,'rim_stations':stations,
+             'correspondence_basis':item.get('correspondence_basis'),'evidence':item.get('evidence')}
+        rows.append(row)
+        if not reasons:accepted.append(row)
+    # Rim endpoint order is arbitrary. Normalize the right-line direction to the
+    # left one before checking crossing correspondences.
+    reversed_right=False
+    if rims_supported:
+        reversed_right=bool(np.dot(lines[0][1]-lines[0][0],lines[1][1]-lines[1][0])<0)
+    for i,left in enumerate(accepted):
+        for right in accepted[i+1:]:
+            a=np.subtract(left['rim_stations'],right['rim_stations'])
+            if reversed_right:a[1]*=-1
+            if a[0]*a[1]<0:
+                for row in (left,right):
+                    row['usable']=False
+                    if 'crossed_transverse_correspondences' not in row['reasons']:
+                        row['reasons'].append('crossed_transverse_correspondences')
+    valid=[row for row in rows if row['usable']]
+    distributed=False
+    if len(valid)>=2:
+        centers=np.array([row['points_px'] for row in valid]).mean(axis=1)
+        distributed=bool(np.max(np.linalg.norm(centers[:,None]-centers[None,:],axis=2))>=diagonal*.05)
+    ready=len(valid)>=2 and distributed
+    return {'version':OBSERVATION_VERSION,'status':'unknown','fit_ready':ready,
+            'reason':'observed_correspondences_available' if ready else 'no_independent_observed_width_calibration',
+            'accepted_indices':[row['index'] for row in valid],'observations':rows,
+            'distributed_sections':distributed,'endpoint_tolerance_px':tolerance,
+            'coordinates_modified':False,'image_rims_supported':rims_supported,
+            'limitation':'Visible-edge and pairing evidence is still unmeasured; camera and support heights remain estimated.'}
+
+
+def fit_observed_geometry(observed,size,width,elevation,elevation_interval,edges):
+    """No inferred spans enter this opt-in fit; missing facts remain explicit."""
+    audit=audit_width_observations(observed,size,edges)
+    result={'status':'unknown','projectable':False,'reason':audit['reason']}
+    if audit['fit_ready']:
+        spans=[observed['width_observations'][index]['points'] for index in audit['accepted_indices']]
+        try:
+            result=camera_fit(spans,size,width,elevation,elevation_interval,
+                              rim_lines=[row['refined'] for row in edges['rims']],allow_inferred_prior=False)
+        except ValueError as error:result['reason']=str(error)
+    result.update(observation_audit=audit,rim_edge_evidence=edges,rim_visibility=observed['rim_visibility'],
+                  correspondence_status='observed_unmeasured' if audit['fit_ready'] else 'unavailable')
+    result['projection_preflight']=projection_preflight(result,width)
+    return result
 
 
 def camera_fit(spans,size,width,elevation,elevation_interval=None,*,rim_lines=None,allow_inferred_prior=False):
@@ -302,30 +427,41 @@ def plane_camera(calibration,below):
     return result
 
 
-async def prepare(scene,reference,vision,cache):
+async def prepare(scene,reference,vision,cache,*,observation_mode='legacy'):
     validate_reference(reference)
-    key=signature(VERSION,file_hash(__file__),np.__version__,importlib.metadata.version('scipy'),
-                  file_hash(scene['path']),reference,scene['key'],PROMPT,vision.endpoint.model_dump())
+    if observation_mode not in ('legacy','audited'):raise ValueError('invalid_vehicle_observation_mode')
+    audited=observation_mode=='audited'
+    prompt=OBSERVED_PROMPT if audited else PROMPT
+    schema=ObservedVehicleGeometry if audited else VehicleGeometry
+    version=OBSERVATION_VERSION if audited else VERSION
+    key=signature(version,file_hash(__file__),np.__version__,importlib.metadata.version('scipy'),
+                  file_hash(scene['path']),reference,scene['key'],prompt,vision.endpoint.model_dump())
     path=Path(cache)/'vehicle-scale'/(key+'.json')
     if path.is_file():return json.loads(path.read_text(encoding='utf8'))
     supports=[{'id':s['id'],'anchor':(np.asarray(s['anchor_px'])/np.subtract(scene['size'],1)).tolist(),
                'label':s['label']} for s in scene['supports']]
-    answer=await vision.ask('vehicle-width-geometry',VehicleGeometry,PROMPT,
+    answer=await vision.ask('vehicle-width-observation' if audited else 'vehicle-width-geometry',schema,prompt,
         {'vehicle_reference':reference,'supports':supports},[scene['path']],
         image_limits=[(1920,1080)],plain_json=True)
     observed=answer.model_dump()
     if answer.vehicle_class=='other':raise ValueError('vehicle_class_conflicts_with_supplied_reference')
-    edges=rim_edge_evidence(scene['path'],answer.left_rim,answer.right_rim,answer.rim_visibility)
-    lines=[r['refined'] for r in edges['rims']] if edges['both_supported'] else None
-    fit=camera_fit(answer.width_spans,scene['size'],reference['internal_width_m'],sum(scene['answer']['elevation'])/2,
-                   scene['answer']['elevation'],rim_lines=lines,
-                   allow_inferred_prior=answer.rim_visibility!='clear' or not edges['both_supported'])
-    fit['rim_edge_evidence']=edges
-    fit['rim_visibility']=answer.rim_visibility
-    fit['correspondence_status']='observed_unmeasured' if answer.rim_visibility=='clear' and edges['both_supported'] and fit['fit_health']['scale_anchor_index'] is None else 'inferred'
-    fit['projection_preflight']=projection_preflight(fit,reference['internal_width_m'])
-    if answer.rim_visibility!='clear' and fit['fit_health']['scale_anchor_index'] is None:
-        fit['reason']='rim_correspondence_camera_and_pile_heights_estimated'
+    edges=(rim_edge_evidence(scene['path'],answer.left_rim,answer.right_rim,answer.rim_visibility)
+           if answer.left_rim is not None and answer.right_rim is not None else
+           {'method':'no_observed_rim_segments','rims':[],'both_supported':False})
+    if audited:
+        fit=fit_observed_geometry(observed,scene['size'],reference['internal_width_m'],
+                                  sum(scene['answer']['elevation'])/2,scene['answer']['elevation'],edges)
+    else:
+        lines=[r['refined'] for r in edges['rims']] if edges['both_supported'] else None
+        fit=camera_fit(answer.width_spans,scene['size'],reference['internal_width_m'],sum(scene['answer']['elevation'])/2,
+                       scene['answer']['elevation'],rim_lines=lines,
+                       allow_inferred_prior=answer.rim_visibility!='clear' or not edges['both_supported'])
+        fit['rim_edge_evidence']=edges
+        fit['rim_visibility']=answer.rim_visibility
+        fit['correspondence_status']='observed_unmeasured' if answer.rim_visibility=='clear' and edges['both_supported'] and fit['fit_health']['scale_anchor_index'] is None else 'inferred'
+        fit['projection_preflight']=projection_preflight(fit,reference['internal_width_m'])
+        if answer.rim_visibility!='clear' and fit['fit_health']['scale_anchor_index'] is None:
+            fit['reason']='rim_correspondence_camera_and_pile_heights_estimated'
     heights={}
     nominal=float(reference.get('nominal_internal_height_m',2.2))
     for h in answer.heights:
@@ -336,8 +472,9 @@ async def prepare(scene,reference,vision,cache):
     for s in scene['supports']:
         heights.setdefault(s['id'],{'interval_m':[0,nominal],'nominal_m':nominal/2,
             'confidence':0.,'status':'unknown','evidence':'wall-to-support height unavailable; nominal interval retained'})
-    result={'version':VERSION,'signature':key,'reference':reference,'observation':observed,
+    result={'version':version,'signature':key,'reference':reference,'observation':observed,
         'calibration':fit,'support_heights':heights,'status':'unknown',
+        'observation_mode':observation_mode,
         'projection_preflight':fit['projection_preflight'],
         'width_status':'user_supplied' if reference['source']['kind']=='user_supplied' else 'class_prior',
         'camera_status':'estimated','depth_is_metric':False}

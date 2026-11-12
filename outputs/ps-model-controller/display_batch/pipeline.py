@@ -265,8 +265,11 @@ class Pipeline:
     async def choose_placements(self,asset,scene,seed):
         if self.config.geometry_preset=='rebuild':
             from .vehicle_scale import prepare as prepare_vehicle, projection_preflight
-            if 'vehicle_scale' not in scene:
-                scene['vehicle_scale']=await prepare_vehicle(scene,self.config.vehicle_reference,self.vision,self.cache)
+            observation_mode='audited' if self.config.integration_mode=='coherent' else 'legacy'
+            if ('vehicle_scale' not in scene or
+                    scene['vehicle_scale'].get('observation_mode','legacy')!=observation_mode):
+                scene['vehicle_scale']=await prepare_vehicle(scene,self.config.vehicle_reference,self.vision,self.cache,
+                    observation_mode=observation_mode)
             scene['vehicle_scale']['enforce_projection_preflight']=self.config.integration_mode=='coherent'
             gate=scene['vehicle_scale'].get('projection_preflight') or projection_preflight(scene['vehicle_scale']['calibration'])
             if self.config.integration_mode=='coherent' and not gate['allow_expensive_steps']:
@@ -374,8 +377,13 @@ class Pipeline:
             if not simulated['stable']:
                 raise ValueError('strict_contact_'+','.join(simulated['failure_codes']))
             gap=projected_gap(simulated,candidate)
-            if gap['status']=='fail':raise ValueError('visible_contact_gap_over_2px')
             candidate['contact_gap']=gap
+            if gap.get('contact_evidence_version'):
+                atomic_json(self.out/'contact-evidence'/(signature(key,candidate.get('id'))+'.json'),
+                    {'candidate_id':candidate.get('id'),'physics_signature':key,'contact_gap':gap})
+            if gap['status']=='fail':
+                raise ValueError('visible_contact_support_below_90pct' if
+                    gap.get('visible_support',{}).get('status')=='fail' else 'visible_contact_gap_over_2px')
             unit=asset['physical_size']['nominal_mm']/1000
             candidate['contact_band']=tolerances(unit)['contact_m']/unit
         elif receiver['patches']:

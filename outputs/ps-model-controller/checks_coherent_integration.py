@@ -65,6 +65,19 @@ class CoherentIntegration(unittest.TestCase):
         self.assertAlmostEqual(new['photographic_adjustment_ev'],0.);self.assertTrue(np.array_equal(alpha,saved))
         self.assertTrue(np.isfinite(rgb).all())
 
+    def test_new_contact_evidence_never_uses_shadow_to_clear_unknown_or_failed_support(self):
+        c={'terrain_physics':{'stable':True,'status':'unknown','failure_codes':[],
+            'center_supported':True,'contact_count':12},
+            'receiver':{'contact_evidence_version':'visible-support-v1'},
+            'contact_gap':{'status':'unknown','simulation_status':'pass','visible_support':{'status':'pass'}}}
+        original=copy.deepcopy(c)
+        self.assertTrue(contact_shading_supported(c,[.99],True))
+        self.assertEqual(c,original)
+        c['contact_gap']['visible_support']['status']='fail'
+        self.assertFalse(contact_shading_supported(c,[1.],True))
+        c['terrain_physics']['status']='pass'
+        self.assertFalse(contact_shading_supported(c,[1.],True))
+
     def test_old_config_stays_legacy_and_new_mode_serializes(self):
         cfg=BatchConfig(backgrounds='example',output='example')
         self.assertEqual(cfg.integration_mode,'legacy')

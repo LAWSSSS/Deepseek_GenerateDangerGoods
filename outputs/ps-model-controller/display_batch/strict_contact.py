@@ -91,12 +91,55 @@ def validate_receiver(candidate):
     if not receiver.get('patches'):raise ValueError('receiver_geometry_insufficient')
     if len(candidate['support_ids'])>1 and receiver.get('height_confidence')!='measured':
         raise ValueError('separate_support_heights_unresolved')
+    if candidate.get('integration_mode')=='coherent':
+        if receiver.get('contact_evidence_version')!='visible-support-v1':
+            raise ValueError('visible_receiver_evidence_missing_regenerate_candidate')
+        if any(e.get('basis')=='nonplanar_label' for e in receiver.get('visible_support',[])):
+            raise ValueError('nonplanar_receiver_requires_independent_geometry')
+
+
+def visible_contact_coverage(points,candidate):
+    """Test contact clusters against finite receivers tied to actual visible pixels."""
+    import cv2
+    x,y,r,b=candidate['bounds'];height,width=b-y,r-x
+    if height<=0 or width<=0:return {'status':'fail','reason':'empty_contact_bounds'}
+    mask=np.zeros((height,width),np.uint8);camera=candidate['camera'];full=candidate['full_px']
+    offset=np.asarray(candidate['offset'])-[x,y]
+    for patch in candidate['receiver']['patches']:
+        projected=project(np.asarray(patch['vertices']),camera)*full+offset
+        for face in patch['faces']:
+            cv2.fillPoly(mask,[np.rint(projected[face]*16).astype(np.int32)],1,shift=4)
+    uv=project(points,camera)*full+offset
+    coordinates=np.rint(uv).astype(int)
+    inside=(coordinates[:,0]>=0)&(coordinates[:,0]<width)&(coordinates[:,1]>=0)&(coordinates[:,1]<height)
+    valid=np.zeros(len(points),bool)
+    valid[inside]=mask[coordinates[inside,1],coordinates[inside,0]]>0
+    cloud=np.zeros_like(mask)
+    cloud[coordinates[inside,1],coordinates[inside,0]]=1
+    _,labels=cv2.connectedComponents(cv2.dilate(cloud,np.ones((5,5),np.uint8)))
+    groups=np.zeros(len(points),int);groups[inside]=labels[coordinates[inside,1],coordinates[inside,0]]
+    coverages=[float(valid[groups==g].mean()) for g in sorted(set(groups))]
+    passed=bool(coverages and min(coverages)>=.9)
+    return {'status':'pass' if passed else 'fail','cluster_coverages':coverages,'threshold':.9,
+        'contact_points':len(points),'outside_visible_receiver_points':int((~valid).sum()),
+        'basis':'projected_true_mesh_contacts_on_depth_consistent_visible_receiver_pixels',
+        'proves_actual_height':False}
 
 
 def projected_gap(pose,candidate):
     p=np.asarray(pose.get('contact_points',[]));q=np.asarray(pose.get('receiver_points',[]))
     if not len(p):return {'status':'fail','reason':'no_true_mesh_contact'}
     pixels=np.linalg.norm(project(p,candidate['camera'])-project(q,candidate['camera']),axis=1)*candidate['full_px']
-    return {'status':'pass' if float(pixels.max())<=2 else 'fail', 'maximum_px':float(pixels.max()),
+    result={'status':'pass' if float(pixels.max())<=2 else 'fail', 'maximum_px':float(pixels.max()),
             'threshold_px':2.,'basis':'true_mesh_to_receiver_projected_separation',
             'scene_geometry_status':'estimated'}
+    if candidate.get('integration_mode')=='coherent':
+        coverage=visible_contact_coverage(p,candidate)
+        simulation_status=result['status']
+        measured=candidate['receiver'].get('scene_contact_status')=='pass'
+        status='fail' if simulation_status=='fail' or coverage['status']=='fail' else 'pass' if measured else 'unknown'
+        result.update(status=status,simulation_status=simulation_status,visible_support=coverage,
+            scene_geometry_status='measured' if measured else 'estimated',
+            reason='measured_surface_and_contact' if measured else 'contact_to_virtual_receiver_only; actual_height_unverified',
+            contact_evidence_version='visible-support-v1')
+    return result

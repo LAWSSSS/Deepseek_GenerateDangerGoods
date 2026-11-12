@@ -19,7 +19,7 @@ def support_plane_evidence(site):
     measured=site.get('plane_status')=='measured' and site.get('plane_origin_m') is not None
     label=str(site.get('label','')).lower()
     kind=site.get('geometry_kind','unknown')
-    nonplanar=kind in ('curved','compound') or bool(re.search(r'曲面|弯曲|卷曲|卷板|弯板|堆叠|叠放|叠层|多层|钢筋堆|curved|curled|stacked|pile of|overlapping',label))
+    nonplanar=kind in ('curved','compound','cylindrical') or bool(re.search(r'曲面|弯曲|卷曲|卷板|弯板|圆管|圆柱面|堆叠|叠放|叠层|多层|钢筋堆|curved|curled|cylindrical|round pipe|stacked|pile of|overlapping',label))
     inherited=bool(str(site.get('id','')).startswith('D') or site.get('normal_inherited'))
     return {'eligible':bool(measured or not nonplanar),'geometry_kind':kind,
             'basis':'measured_planes' if measured else 'nonplanar_label' if nonplanar else
@@ -202,12 +202,63 @@ def local_scale(scene,site,anchor,major_mm):
                        'anchor_px':anchor,'assumption':'display estimate, not measured scene dimensions'}
 
 
+def visible_support_mask(scene,site):
+    """Constrain an estimated face to visible, locally depth-consistent pixels.
+
+    Neural depth is used to reject discontinuities only. It supplies neither
+    metric height nor a measured surface normal, so evidence stays unknown.
+    """
+    cache=scene.setdefault('_visible_support_masks',{})
+    if site['id'] in cache:return cache[site['id']]
+    mask=np.asarray(site['mask'],bool)&scene['allowed']&~scene['protected']
+    depth=np.asarray(scene['depth_native'],np.float32)
+    valid=mask&np.isfinite(depth);yy,xx=np.nonzero(valid)
+    evidence={'version':'visible-support-v1','status':'unknown','site_id':site['id'],
+        'basis':'observed_mask_and_relative_depth_continuity; not_metric_surface_height',
+        'normal_inherited':bool(site.get('normal_inherited') or str(site['id']).startswith('D')),
+        'input_pixels':int(mask.sum()),'finite_depth_pixels':int(valid.sum())}
+    if len(xx)<32:
+        evidence.update(reason='insufficient_depth_samples',retained_pixels=int(valid.sum()),
+                        retained_fraction=float(valid.sum()/max(1,mask.sum())))
+        cache[site['id']]=(valid,evidence);return valid,evidence
+    step=max(1,len(xx)//2048);sx=xx[::step];sy=yy[::step]
+    width,height=scene['size'];design=np.column_stack([sx/max(width,1),sy/max(height,1),np.ones(len(sx))])
+    values=depth[sy,sx];kept=np.ones(len(values),bool)
+    for _ in range(3):
+        coeff=np.linalg.lstsq(design[kept],values[kept],rcond=None)[0]
+        error=values-design@coeff
+        median=float(np.median(error[kept]));mad=float(np.median(abs(error[kept]-median)))*1.4826
+        tolerance=float(np.clip(3*mad,.012,.030))
+        subset=abs(error-median)<=tolerance
+        if subset.sum()<32:break
+        kept=subset
+    residual=np.abs(depth[yy,xx]-(xx/max(width,1)*coeff[0]+yy/max(height,1)*coeff[1]+coeff[2]+median))
+    consistent=np.zeros_like(mask);consistent[yy,xx]=residual<=tolerance
+    # Inspect a depth-map pixel neighbourhood at native resolution. Erode only
+    # a confirmed discontinuity, never invent support inside a small mask hole.
+    scale=max(1,int(round(width/max(scene.get('depth',depth).shape[1],1))))
+    kernel=np.ones((2*scale+1,2*scale+1),np.uint8)
+    local_min=cv2.erode(np.where(valid,depth,1.).astype(np.float32),kernel)
+    local_max=cv2.dilate(np.where(valid,depth,0.).astype(np.float32),kernel)
+    discontinuity=(local_max-local_min)>max(.035,2*tolerance)
+    result=valid&consistent&~discontinuity
+    evidence.update(plane_fit_coefficients=coeff.tolist(),relative_depth_tolerance=tolerance,
+        fit_mad=mad,retained_pixels=int(result.sum()),retained_fraction=float(result.sum()/max(1,mask.sum())),
+        rejected_depth_residual_pixels=int((valid&~consistent).sum()),
+        rejected_discontinuity_pixels=int((valid&discontinuity).sum()),
+        metric_height_known=site.get('plane_status')=='measured',
+        reason='visible_surface_subset_only; height_and_occluded_contact_unverified')
+    cache[site['id']]=(result,evidence);return result,evidence
+
+
 def receiver_mesh(scene,candidate,*,bounds=None):
     """Separate finite patches; holes and gaps are absent from the collision receiver."""
     x,y,r,b=bounds or candidate['bounds']
     camera=candidate['camera'];offset=candidate['offset'];full=candidate['full_px']
     patches=[]
     strict=candidate.get('strict_contact',False)
+    coherent=candidate.get('integration_mode')=='coherent'
+    visible_evidence=[]
     support_ids=candidate.get('support_ids',[candidate['site_id']])
     independent=all(s.get('plane_origin_m') is not None and s.get('plane_status')=='measured'
                     for s in scene['supports'] if s['id'] in support_ids)
@@ -216,10 +267,18 @@ def receiver_mesh(scene,candidate,*,bounds=None):
                 'hidden_heights':'unknown','signature':signature('strict-receiver-v1',support_ids,'unresolved')}
     for site in scene['supports']:
         if site['id'] not in candidate.get('support_ids',[candidate['site_id']]):continue
-        mask=site['mask'][y:b,x:r]
+        if coherent:
+            if not support_plane_evidence(site)['eligible']:
+                visible_evidence.append({**support_plane_evidence(site),'site_id':site['id'],
+                    'reason':'nonplanar_surface_requires_independent_planes','retained_pixels':0})
+                continue
+            visible,proof=visible_support_mask(scene,site);visible_evidence.append(proof)
+            mask=visible[y:b,x:r]
+        else:mask=site['mask'][y:b,x:r]
         step=max(3,int(max(mask.shape)/50));vertices=[];faces=[]
         rows=list(range(0,max(0,mask.shape[0]-step),step));cols=list(range(0,max(0,mask.shape[1]-step),step))
-        cells=np.array([[mask[cy:cy+step+1,cx:cx+step+1].mean()>=.95 for cx in cols] for cy in rows])
+        cells=np.array([[mask[cy:cy+step+1,cx:cx+step+1].all() if coherent else
+                         mask[cy:cy+step+1,cx:cx+step+1].mean()>=.95 for cx in cols] for cy in rows])
         # Merge only identical occupied runs. Long bare gaps never become convex support.
         active={};rectangles=[]
         for row,values in enumerate(cells):
@@ -247,7 +306,9 @@ def receiver_mesh(scene,candidate,*,bounds=None):
         return {'patches':patches,'basis':'independent_metric_supports' if independent else 'single_surface_estimated_plane',
                 'height_confidence':'measured' if independent else 'estimated_single',
                 'hidden_heights':'measured' if independent else 'unknown',
-                'signature':signature('strict-receiver-v1',patches,independent)}
+                **({'visible_support':visible_evidence,'contact_evidence_version':'visible-support-v1',
+                    'scene_contact_status':'pass' if independent else 'unknown'} if coherent else {}),
+                'signature':signature('strict-receiver-v2-visible' if coherent else 'strict-receiver-v1',patches,independent)}
     return {'patches':patches,'basis':'finite_coplanar_support_patches_estimated_from_image',
             'height_confidence':'estimated_coplanar' if coplanar else 'unknown',
             'hidden_heights':'unknown','signature':signature(VERSION,patches,coplanar)}
@@ -301,6 +362,7 @@ def choose_pile_candidates(asset,scene,seed=0,config=None):
     if factor==1:return _choose_pile_candidates(asset,scene,seed,config)
     size=tuple(round(v*factor) for v in scene['size'])
     small={**scene,'size':size,'frame':scene['frame'].resize(size),'_image_scale':factor,
+        '_visible_support_masks':{},
         'depth_native':cv2.resize(scene['depth_native'],size,interpolation=cv2.INTER_LINEAR),
         'allowed':cv2.resize(scene['allowed'].astype(np.uint8),size,interpolation=cv2.INTER_NEAREST)>0,
         'protected':cv2.resize(scene['protected'].astype(np.uint8),size,interpolation=cv2.INTER_NEAREST)>0,
@@ -331,11 +393,17 @@ def choose_pile_candidates(asset,scene,seed=0,config=None):
         if np.any(scene['protected'][y:b,x:r]&mask) or (scene['allowed'][y:b,x:r]&mask).sum()/max(1,mask.sum())<.98:
             reject.append({'candidate':row['id'],'reason':'full_resolution_clearance_or_protection_failed'});continue
         row.update(bounds=fit['bounds'],offset=fit['offset'])
-        cover=contact_support(fit['contact'],support_union(scene,row['support_ids'],fit['bounds']))
+        support=support_union(scene,row['support_ids'],fit['bounds'])
+        if row.get('integration_mode')=='coherent':
+            support=np.logical_or.reduce([visible_support_mask(scene,s)[0][y:b,x:r]
+                for s in scene['supports'] if s['id'] in row['support_ids']])
+        cover=contact_support(fit['contact'],support)
         row['contact_min']=min(cover) if cover else 0;row['contact_coverages']=cover
         if row['contact_min']<.9:
             if row.get('strict_contact'):
-                reject.append({'candidate':row['id'],'reason':'full_resolution_contact_below_90_percent'});continue
+                reject.append({'candidate':row['id'],'reason':'full_resolution_contact_below_90_percent',
+                    'contact_coverages':cover,'anchor_px':row['anchor_px'],'support_ids':row['support_ids'],
+                    'visible_support':row.get('visible_support_evidence')});continue
             row['uncertainties'].append('full_resolution_support_unknown')
         row['receiver']=receiver_mesh(scene,row)
         selected.append(row)
@@ -386,6 +454,14 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
         site_count=0;reason_counts={}
         for mode,group in groups:
             ids=[s['id'] for s in group];union=support_union(scene,ids)
+            visible_evidence=[]
+            if coherent:
+                pieces=[visible_support_mask(scene,s) for s in group]
+                union=np.logical_or.reduce([piece[0] for piece in pieces]);visible_evidence=[piece[1] for piece in pieces]
+                if not union.any():
+                    reason_counts['no_depth_consistent_visible_support']=reason_counts.get('no_depth_consistent_visible_support',0)+1
+                    reject.append({'site':site['id'],'reason':'no_depth_consistent_visible_support',
+                                   'visible_support':visible_evidence});continue
             anchor_site={**site,'mask':union}
             anchors=support_anchors(anchor_site)
             if native and config.placement_mode in ('auto','embedded'):
@@ -498,7 +574,8 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                                 'anchor_uv':geom['anchor'].tolist(),
                                 'contact_min':minimum,'contact_coverages':cover,'inside':inside,'foreground_fraction':fraction,
                                 'uncertainties':uncertain,'base_pose':pose,
-                                **({'stability_priority':priority,'support_plane_evidence':support_plane_evidence(site)} if coherent else {}),
+                                **({'stability_priority':priority,'support_plane_evidence':support_plane_evidence(site),
+                                    'integration_mode':'coherent','visible_support_evidence':visible_evidence} if coherent else {}),
                                 'scale':{**evidence,'major_mm':asset['semantic']['major_mm'],'range_px':[low,high],
                                     'reference_projection_correction':float(correction),'world_pixels_per_unit':world_ppm},
                                 'score':score+float(rng.uniform(0,.005)),'projection_key':key})

@@ -27,6 +27,13 @@ def contact_shading_supported(candidate,coverage,coherent=False):
     """
     physics=candidate.get('terrain_physics',{})
     if not coverage or min(coverage)<.9 or not physics.get('stable'):return False
+    gap=candidate.get('contact_gap',{})
+    if candidate.get('receiver',{}).get('contact_evidence_version')=='visible-support-v1':
+        if (gap.get('status')=='fail' or gap.get('simulation_status')!='pass' or
+                gap.get('visible_support',{}).get('status')!='pass'):
+            return False
+        return bool(coherent and not physics.get('failure_codes') and physics.get('center_supported')
+                    and physics.get('contact_count',0)>0 and physics.get('status') in ('pass','unknown'))
     if physics.get('status')=='pass':return True
     return bool(coherent and physics.get('status')=='unknown'
         and not physics.get('failure_codes') and physics.get('center_supported')

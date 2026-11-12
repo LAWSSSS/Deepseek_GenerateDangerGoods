@@ -130,7 +130,8 @@ class VehicleCalibrationHealthTests(unittest.TestCase):
         from display_batch.pipeline import Pipeline
         calibration=consistent_calibration();calibration['roll_deg']=45.
         gate=projection_preflight(calibration,2.45)
-        scene={'key':'fixture','vehicle_scale':{'calibration':calibration,'projection_preflight':gate}}
+        scene={'key':'fixture','vehicle_scale':{'calibration':calibration,'projection_preflight':gate,
+            'observation_mode':'audited'}}
         with tempfile.TemporaryDirectory() as temp:
             pipeline=object.__new__(Pipeline)
             pipeline.config=SimpleNamespace(geometry_preset='rebuild',integration_mode='coherent')
