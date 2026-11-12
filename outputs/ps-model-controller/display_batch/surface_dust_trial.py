@@ -15,13 +15,8 @@ from .local_light import estimate_local_light
 from .photography import linear
 from validate_display_dust import read_rgb
 from validate_display_gradients import apply_camera
-from validate_display_local_light import audit_geometry, frame, PROFILE
-
-
-def dust_profile(scale):
-    if not np.isfinite(scale) or not 0 <= scale <= 1:
-        raise ValueError('invalid_surface_dust_scale')
-    return {**PROFILE,'version':'surface-dust-strength-v2','dust_scale':float(scale)}
+from validate_display_local_light import audit_geometry, frame
+from .effects import dust_profile
 
 
 def frozen_environment(scene,row,environment,previous):

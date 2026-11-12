@@ -230,7 +230,8 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             channels[name]=warp(value,full,offset,bounds,window=window)/np.maximum(color_alpha,1e-6)
     photo_environment={**environment,'material_classes':candidate.get('material_classes',[])}
     local=params.get('photo_model')=='local'
-    if (dust_overlay or capture_local) and not local:
+    effects=params.get('effects_enabled',False)
+    if (dust_overlay or capture_local or effects) and not local:
         raise ValueError('object_effects_require_local_photography')
     reference=params.get('photo_model','reference') in ('reference','local')
     native=params.get('photo_model')=='native'
@@ -365,7 +366,13 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     if local:
         writable=(~foreground)&(~protected)&(scene['allowed'][y:b,x:r] | (alpha>0))
         object_delta=None
-        if dust_overlay:
+        if effects:
+            from .effects import optical_delta
+            object_delta,details=optical_delta(clear_rgb,rgb,visible_alpha,environment,local_air,candidate['target_px'],params)
+            details.update(surface_dust_applied=bool(render_meta.get('matte_materials')),
+                           matte_profile=render_meta.get('matte_profile'))
+            photo['effects']=details
+        elif dust_overlay:
             object_delta,details=foreground_dust(clear_rgb,rgb,visible_alpha,environment,local_air,candidate['target_px'])
             photo['dust_overlay']=details
         result,edited,imaging=camera_residual(shaded,rgb,visible_alpha,linear(crop),environment,params,seed,writable,

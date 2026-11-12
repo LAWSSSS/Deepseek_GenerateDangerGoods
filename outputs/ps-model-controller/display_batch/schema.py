@@ -1,7 +1,7 @@
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 
 class Strict(BaseModel):
@@ -12,6 +12,16 @@ Unit = Annotated[float, Field(ge=0, le=1)]
 Point = tuple[Unit, Unit]
 Polygon = Annotated[list[Point], Field(min_length=3, max_length=24)]
 Score = Annotated[int, Field(strict=True, ge=0, le=4)]
+
+
+class EffectSettings(Strict):
+    """Opt-in online trial. Fog is extra airlight, dust is a material layer."""
+    fog_extra: float = Field(default=.35, ge=0, le=.85, strict=True)
+    pool_kernel: int = Field(default=3, ge=1, le=64, strict=True)
+    pool_weight: float = Field(default=1., ge=0, le=1, strict=True)
+    surface_dust: float = Field(default=.5, ge=0, le=1, strict=True)
+    lighting: Literal['local', 'global_mean'] = 'global_mean'
+    ai_adjust: bool = True
 
 
 class BatchConfig(Strict):
@@ -42,11 +52,15 @@ class BatchConfig(Strict):
     appearance: Literal['reference','camera','materials','scene','native','local'] = 'reference'
     atmosphere: Literal['auto','off'] = 'auto'
     review_format: Literal['full','compact'] = 'full'
+    effects: EffectSettings | None = None
 
     @model_validator(mode='after')
     def dust_uses_neighbourhood(self):
         # Selecting this style in either CLI or web must actually use local evidence.
         if self.photo_style=='dusty_scrap':self.appearance='local'
+        if self.effects is not None:
+            self.appearance='local'
+            self.photo_style='dusty_scrap'
         return self
 
 
@@ -136,7 +150,8 @@ class Scores(Strict):
 
 DefectCode = Literal["upright", "floating", "penetration", "occlusion", "scale", "camera",
                      "material", "lighting", "color", "shadow", "edge", "texture", "structure",
-                     "haze_clear", "haze_heavy", "light_direction", "reflection_flat", "reflection_hard", "surface_clean", "patch_seam"]
+                     "haze_clear", "haze_heavy", "light_direction", "reflection_flat", "reflection_hard", "surface_clean", "patch_seam",
+                     "surface_dust_heavy", "too_sharp", "too_blurry"]
 
 
 class Defect(Strict):
@@ -149,7 +164,8 @@ class Defect(Strict):
 
 
 class Action(Strict):
-    kind: Literal["candidate", "material", "light", "tone", "chroma", "dust", "contrast", "haze", "sharpness"]
+    kind: Literal["candidate", "material", "light", "tone", "chroma", "dust", "contrast", "haze", "sharpness",
+                  "fog_extra", "pool_kernel", "surface_dust"]
     value: str = Field(max_length=32)
 
 
@@ -164,7 +180,8 @@ class Review(Strict):
     def photo_passes(self):
         return min(self.scores.lighting,self.scores.material,self.scores.texture)>=3 and not any(
             d.severity in ('major','fatal') and d.code in ('color','lighting','material','texture',
-                'haze_clear','haze_heavy','light_direction','reflection_flat','reflection_hard','surface_clean','patch_seam')
+                'haze_clear','haze_heavy','light_direction','reflection_flat','reflection_hard','surface_clean','patch_seam',
+                'surface_dust_heavy','too_sharp','too_blurry')
             for d in self.defects)
 
 
@@ -174,6 +191,27 @@ class FusionReview(Review):
 
     def passes(self):
         return self.trace=='none' and super().passes()
+
+
+class EffectsReview(Review):
+    trace: Literal['none','uncertain','visible']
+
+    def passes(self):
+        return self.trace=='none' and super().passes()
+
+
+def effects_review_schema(allowed):
+    """Constrain each kind/value pair in the provider schema, as well as the executor."""
+    types=[]
+    for kind,values in allowed.items():
+        if values:
+            types.append(create_model('Allowed_'+kind, __base__=Action,
+                kind=(Literal[kind], ...),value=(Literal[tuple(values)], ...)))
+    if not types:
+        return create_model('AvailableEffectsReview',__base__=EffectsReview,
+                            actions=(list[Action],Field(max_length=0)))
+    return create_model('AvailableEffectsReview',__base__=EffectsReview,
+                        actions=(list[Union[tuple(types)]],Field(max_length=3)))
 
 
 class FusionCue(Strict):
@@ -211,6 +249,11 @@ TONE_PROFILES = {"scene": (0., 0.), "darker": (-.25, 0.), "brighter": (.25, 0.),
                  "cooler": (0., -1.5), "warmer": (0., 1.5)}
 PHOTO_CONTROLS = {name: {'auto':1., 'less':.7, 'more':1.3}
                   for name in ('chroma','dust','contrast','haze','sharpness')}
+EFFECT_ACTIONS = {
+    'fog_extra': ('0', '0.15', '0.25', '0.35', '0.45', '0.55', '0.7', '0.85'),
+    'pool_kernel': ('1', '2', '3', '6', '12', '16', '32', '64'),
+    'surface_dust': ('0', '0.25', '0.5', '0.75', '1'),
+}
 
 
 def apply_actions(params, actions, candidate_ids):
@@ -218,9 +261,10 @@ def apply_actions(params, actions, candidate_ids):
     allowed = {"candidate": set(candidate_ids), "material": set(MATERIAL_PROFILES),
                "light": set(LIGHT_PROFILES), "tone": set(TONE_PROFILES)}
     allowed.update({k:set(v) for k,v in PHOTO_CONTROLS.items()})
+    allowed.update({k:set(v) for k,v in EFFECT_ACTIONS.items() if params.get('effects_enabled')})
     seen = set()
     for action in actions:
-        if action.kind in seen or action.value not in allowed[action.kind]:
+        if action.kind in seen or action.value not in allowed.get(action.kind, ()):
             raise ValueError("duplicate or unavailable modification")
         seen.add(action.kind)
         result[action.kind] = action.value

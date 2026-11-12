@@ -1,0 +1,16 @@
+{
+  "backgrounds": "external/异物生成/input/backgrounds",
+  "output": "outputs/在线效果测试-example",
+  "assets": ["3", "13"],
+  "count": 2,
+  "max_iterations": 2,
+  "seed": 20261112,
+  "effects": {
+    "fog_extra": 0.35,
+    "pool_kernel": 3,
+    "pool_weight": 1.0,
+    "surface_dust": 0.5,
+    "lighting": "global_mean",
+    "ai_adjust": true
+  }
+}

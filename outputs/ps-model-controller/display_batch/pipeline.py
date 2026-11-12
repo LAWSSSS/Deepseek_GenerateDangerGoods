@@ -19,7 +19,7 @@ from .assets import prepare as prepare_asset
 from .common import ROOT, HERE, atomic_json, file_hash, load_catalog, resolve, signature, implementation_manifest
 from .compose import compose, sample_environment
 from .scene import Scenes, choose_candidates, projection_geometry, fitted_masks, fit_checks
-from .schema import (Review, FusionReview, Probe, PHOTO_CONTROLS, StructureConfirmation, version_rank)
+from .schema import (Review, FusionReview, EffectsReview, Probe, PHOTO_CONTROLS, StructureConfirmation, version_rank)
 from .pile import support_union, diagnostic, receiver_mesh
 from .geometry import contact_support
 from .store import Store
@@ -31,6 +31,7 @@ from .materials import material_kind, SURFACE_DUST
 from .atmosphere import Atmospheres
 from .costs import cumulative, estimate, tariff, label as cost_label
 from .policy import asset_id, resize_candidate
+from .effects import parameters as effect_parameters, render_identity
 
 COMPOSE_VERSION='scrap-gray-pile-v6-window'
 
@@ -160,10 +161,22 @@ def write_summary(out,store,usage=None,run=None):
         crop=Path(r['crop']).relative_to(out).as_posix() if r.get('crop') else None
         name=f"{r['job_id']} · {r['asset_id']} · {r['status']}"
         trace={'none':'未见插入痕迹','uncertain':'插入痕迹不确定','visible':'可见插入痕迹'}.get(r.get('insertion_trace'),'')
+        history=[]
+        for entry in r.get('iterations',[]):
+            p=entry.get('params',{})
+            if not p.get('effects_enabled'):continue
+            history_image=Path(entry['image']).resolve()
+            # Reused results keep their original history records, but the API
+            # serves only files inside this batch. Its final full PNG is copied.
+            if not history_image.is_relative_to(out):continue
+            uri=html.escape(history_image.relative_to(out).as_posix(),quote=True)
+            label=f"第 {entry['iteration']} 轮 · 追加薄雾 {float(p['fog_extra']):.0%} · {p['pool_kernel']}×{p['pool_kernel']} 池化 · 表面浮灰 ×{p['surface_dust']}"
+            history.append('<figure><figcaption>'+html.escape(label)+f'</figcaption><a href="{uri}"><img src="{uri}" loading="lazy"></a></figure>')
         sections.append('<section><h2>'+html.escape(name)+'</h2><p>'+html.escape(' · '.join(x for x in (trace,r.get('reason','')) if x))+'</p>'+
                         (f'<a href="{image}"><img src="{image}" loading="lazy"></a>' if image else '')+
-                        (f'<img class="crop" src="{crop}" loading="lazy">' if crop else '')+'</section>')
-    page='<!doctype html><meta charset="utf-8"><title>多背景批量结果</title><style>body{background:#172128;color:#eee;font:15px sans-serif;margin:30px}section{border-top:1px solid #456;padding:15px}img{max-width:55%;max-height:440px}.crop{max-width:40%}h2{font-size:16px}</style><h1>多背景批量展示结果</h1><p>场景依据为估计；展示合格不等于旧流程正式验收。</p><pre>'+html.escape(json.dumps(summary['counts'],ensure_ascii=False))+'</pre>'+''.join(sections)
+                        (f'<p><a href="{crop}">局部检查图</a></p>' if crop else '')+
+                        ('<details><summary>每轮完整画面与实际参数</summary>'+''.join(history)+'</details>' if history else '')+'</section>')
+    page='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>多背景批量结果</title><style>body{background:#172128;color:#eee;font:15px sans-serif;margin:30px auto;max-width:1600px;padding:16px}section{border-top:1px solid #456;padding:15px}img{display:block;width:100%;height:auto}a{color:#b1dfce}h2{font-size:16px}</style><h1>多背景批量展示结果</h1><p>完整画面可点击查看原尺寸。场景依据为估计，展示合格不等于旧流程正式验收。</p><pre>'+html.escape(json.dumps(summary['counts'],ensure_ascii=False))+'</pre>'+''.join(sections)
     page=page.replace('<h1>多背景批量展示结果</h1>','<h1>多背景批量展示结果</h1><p>'+html.escape(cost_label(summary['cost_total']))+'</p>')
     (out/'index.html').write_text(page,encoding='utf8')
     return summary
@@ -214,6 +227,13 @@ class Pipeline:
             scene['atmosphere']=await self.atmospheres.prepare(scene)
         environment,samples=await asyncio.to_thread(sample_environment,scene,candidate,
             scene_lighting=style in ('scene','native'),native=style=='native',local=self.config.appearance=='local')
+        extras={}
+        if params.get('effects_enabled'):
+            from .effects import dust_profile, lighting_for
+            from .surface_maps import prepare_uv_masks
+            environment=await asyncio.to_thread(lighting_for,scene,candidate,environment,params['effects_lighting'])
+            partitions,_=await asyncio.to_thread(prepare_uv_masks,asset,self.cache/'scanned-uv')
+            extras={'matte_partitions':partitions,'matte_profile':dust_profile(float(params['surface_dust']))}
         render_candidate=candidate
         if style=='native':
             # Cast onto the visible neighboring support as well. Physics retains
@@ -222,7 +242,11 @@ class Pipeline:
             render_candidate={**candidate,'receiver':receiver}
         render_environment={**environment,'haze':0.} if self.config.appearance=='local' else environment
         folder,meta,hit=await self.renders.get(asset,render_candidate,params,render_environment,scene['size'],resolution,
-                                             appearance=style)
+                                             appearance=style,**extras)
+        if params.get('effects_enabled'):
+            from .local_light import receiver_calibration
+            calibration=await asyncio.to_thread(receiver_calibration,folder,meta,environment)
+            environment={**environment,'calibration':calibration}
         return folder,meta,environment,samples,hit
 
     @property
@@ -367,7 +391,7 @@ class Pipeline:
         photo_model={'native':'native','local':'local','camera':'camera','scene':'camera'}.get(self.config.appearance,'reference')
         return {'candidate':candidate,'material':'original','light':'scene','tone':'scene','photo_model':photo_model,
                 'photo_style':self.config.photo_style,'atmosphere':self.config.atmosphere,
-                **{k:'auto' for k in PHOTO_CONTROLS}}
+                **{k:'auto' for k in PHOTO_CONTROLS},**effect_parameters(self.config.effects)}
 
     @staticmethod
     def finish_image(out,ident,result,best):
@@ -375,7 +399,7 @@ class Pipeline:
         dest.mkdir(parents=True,exist_ok=True)
         final=dest/(ident+'.png');shutil.copy2(best['image'],final)
         crop=dest/(ident+'.crop.jpg');shutil.copy2(best['crop'],crop)
-        review_type=FusionReview if 'trace' in best['review'] else Review
+        review_type=EffectsReview if best['params'].get('effects_enabled') else FusionReview if 'trace' in best['review'] else Review
         review=review_type.model_validate(best['review'])
         result.update(image=str(final),crop=str(crop),best_iteration=best['iteration'],
                       checks=best['checks'],scores=best['review']['scores'],
@@ -386,7 +410,7 @@ class Pipeline:
                       evidence_status=evidence_status(best['checks']),
                       photo_status='pass' if review.photo_passes() else 'fail',
                       visual_status='pass' if review.passes() else 'fail')
-        if isinstance(review,FusionReview):result['insertion_trace']=review.trace
+        if isinstance(review,(FusionReview,EffectsReview)):result['insertion_trace']=review.trace
 
     async def job(self,job):
         ident=job['id'];payload=job['payload'];start=time.monotonic()
@@ -455,9 +479,7 @@ class Pipeline:
                 if cid not in invalid:
                     candidate=ready[cid]
                     candidate['material_classes']=asset.get('semantic',{}).get('material_classes',[])
-                    render_fields=['candidate','material','light']
-                    if self.render_style in ('scene','native'):render_fields.append('dust')
-                    rkey=tuple(params[k] for k in render_fields)
+                    rkey=render_identity(params,self.render_style)
                     if rkey not in rendered_parts:
                         before=time.monotonic()
                         rendered=await self.render(asset,scene,candidate,params,final_resolution(candidate))
@@ -520,7 +542,7 @@ class Pipeline:
                 atomic_json(folder/f'iteration-{iteration}.json',entry)
                 self.store.checkpoint(ident,'review',{'last_iteration':iteration,'params':params,'record':str(folder/f'iteration-{iteration}.json')})
                 rank=version_rank(comp['checks'],review)
-                if isinstance(review,FusionReview):
+                if isinstance(review,(FusionReview,EffectsReview)):
                     trace_rank={'none':2,'uncertain':1,'visible':0}[review.trace]
                     rank=(*rank[:3],trace_rank,*rank[3:])
                 if best_rank is None or rank>best_rank:
@@ -544,7 +566,7 @@ class Pipeline:
                         atomic_json(self.out/'model-review.json',self.model_review)
                         reason='asset_structure_requires_review';break
                 if (evidence_status(comp['checks'])=='unknown' and review.photo_passes() and review.scores.edge>=3
-                    and (not isinstance(review,FusionReview) or review.trace=='none')):
+                    and (not isinstance(review,(FusionReview,EffectsReview)) or review.trace=='none')):
                     unresolved=[d for d in review.defects if d.visibility=='visible' and d.severity in ('major','fatal')]
                     repairable=any(d.code in PLACEMENT_DEFECTS for d in unresolved) and any(v!=cid for v in ids)
                     structure_ok=review.scores.structure>=3 or any(

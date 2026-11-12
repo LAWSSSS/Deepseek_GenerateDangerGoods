@@ -14,6 +14,12 @@
 <label class="wide">融合方式<select id="appearance"><option value="reference">归档版摄影风格</option><option value="local">局部环境融合（小样验证中）</option><option value="native">上一版薄雾融合（诊断）</option></select></label>
 <label class="wide">空气与薄雾<select id="atmosphere"><option value="auto">自动适配局部薄雾与眩光</option><option value="off">关闭空气遮蔽（诊断）</option></select></label>
 <label class="wide">证据不足时<select id="uncertainPolicy"><option value="render_review">生成效果图并标注待审</option><option value="skip">跳过不确定候选</option></select></label>
+<label class="wide">运行方式<select id="testMode"><option value="batch">原批量流程</option><option value="test">在线效果小样（最多 12 项）</option></select></label>
+<label>追加薄雾（%）<input id="fogExtra" type="number" min="0" max="85" step="1" value="35"></label>
+<label>均匀池化格大小（1 为关闭）<input id="poolKernel" type="number" min="1" max="64" step="1" value="3"></label>
+<label>表面浮灰倍率<input id="surfaceDust" type="number" min="0" max="1" step="0.05" value="0.5"></label>
+<label>自动调整效果<select id="adjustEffects"><option value="yes">允许 AI 依据缺陷调整</option><option value="no">固定这三个参数</option></select></label>
+<p class="note">以上三个效果仅在“在线效果小样”启用。默认全图平均取光，局部估计雾色。浮灰与空气薄雾分开，漆面浮灰另减半，塑料保持原材质。</p>
 <button id="start" type="submit">开始批量生成</button><button id="resume" type="button" class="secondary" disabled>继续此批次</button></form>
 <p id="message" role="status"></p><a id="results" hidden target="_blank" rel="noopener">查看效果与验证记录</a><pre id="progress">尚未开始</pre>
 <p class="note">修正达到上限时保存最佳版本。默认允许约 10%–40% 被钢料遮挡；尺度或隐藏接触证据不足时输出待审图。明确穿透、悬空或保护区冲突仍拒绝。有图率与展示合格率分别记录。</p>
@@ -22,6 +28,8 @@ const $=id=>document.getElementById(id);let batch=localStorage.getItem('displayB
 $('backgrounds').value=localStorage.getItem('displayBackgrounds')||'';
 $('photoStyle').onchange=()=>{if($('photoStyle').value==='dusty_scrap')$('appearance').value='local';};
 $('appearance').onchange=()=>{if($('appearance').value!=='local'&&$('photoStyle').value==='dusty_scrap')$('photoStyle').value='scrap_gray';};
+$('testMode').onchange=()=>{const test=$('testMode').value==='test';$('count').max=test?'12':'1000';if(test){if(Number($('count').value)>12)$('count').value=1;$('appearance').value='local';$('photoStyle').value='dusty_scrap';}for(const id of ['fogExtra','poolKernel','surfaceDust','adjustEffects'])$(id).disabled=!test;};
+$('testMode').onchange();
 async function update(){if(!batch)return;try{
 const r=await fetch('/api/batches/'+batch);const data=await r.json();if(!r.ok)throw Error(data.error);
 const c=data.counts||{};const stages={asset:'准备模型',scene:'分析背景',review:'复核成图',review_request:'复核图片',queued:'等待执行'};
@@ -36,6 +44,8 @@ data.run?.seconds?'本次耗时 '+Math.round(data.run.seconds)+' 秒':'','保存
 $('resume').disabled=!data.resumable;$('start').disabled=data.running;$('results').hidden=!data.has_results;
 $('results').href='/api/batches/'+batch+'/files/index.html';clearTimeout(timer);if(data.running)timer=setTimeout(update,2500);
 }catch(e){$('message').textContent=e.message;}}
-$('form').onsubmit=async e=>{e.preventDefault();$('start').disabled=true;$('message').textContent='正在创建批次…';try{const data={backgrounds:$('backgrounds').value.trim(),count:Number($('count').value),max_iterations:Number($('iterations').value),assets:$('assets').value.split(',').map(x=>x.trim()).filter(Boolean),seed:Number($('seed').value),render_device:$('device').value,photo_style:$('photoStyle').value,appearance:$('appearance').value,atmosphere:$('atmosphere').value,placement_mode:$('placementMode').value,uncertain_policy:$('uncertainPolicy').value};const r=await fetch('/api/batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const result=await r.json();if(!r.ok)throw Error(result.error);batch=result.id;localStorage.setItem('displayBatchId',batch);localStorage.setItem('displayBackgrounds',data.backgrounds);$('message').textContent='批次已启动';await update();}catch(e){$('message').textContent=e.message;$('start').disabled=false;}};
+$('form').onsubmit=async e=>{e.preventDefault();$('start').disabled=true;$('message').textContent='正在创建批次…';try{const data={backgrounds:$('backgrounds').value.trim(),count:Number($('count').value),max_iterations:Number($('iterations').value),assets:$('assets').value.split(',').map(x=>x.trim()).filter(Boolean),seed:Number($('seed').value),render_device:$('device').value,photo_style:$('photoStyle').value,appearance:$('appearance').value,atmosphere:$('atmosphere').value,placement_mode:$('placementMode').value,uncertain_policy:$('uncertainPolicy').value};
+const test=$('testMode').value==='test';if(test)data.effects={fog_extra:Number($('fogExtra').value)/100,pool_kernel:Number($('poolKernel').value),surface_dust:Number($('surfaceDust').value),ai_adjust:$('adjustEffects').value==='yes'};
+const r=await fetch(test?'/api/batches/test':'/api/batches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const result=await r.json();if(!r.ok)throw Error(result.error);batch=result.id;localStorage.setItem('displayBatchId',batch);localStorage.setItem('displayBackgrounds',data.backgrounds);$('message').textContent='批次已启动';await update();}catch(e){$('message').textContent=e.message;$('start').disabled=false;}};
 $('resume').onclick=async()=>{const r=await fetch('/api/batches/'+batch+'/resume',{method:'POST'});const d=await r.json();$('message').textContent=r.ok?'正在继续批次':d.error;await update();};update();
 </script></body></html>

@@ -1,7 +1,8 @@
 """Review the exported PNG and spend corrections on defects they can address."""
 import math
 
-from .schema import Action, LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS, TONE_PROFILES, Review, FusionObservation, apply_actions
+from .schema import (Action, LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS, TONE_PROFILES,
+                     EFFECT_ACTIONS, Review, EffectsReview, FusionObservation, apply_actions, effects_review_schema)
 
 
 COMPACT_PROMPT = """Inspect this exported scrap-hopper composite: panorama, crop, current model reference.
@@ -45,11 +46,15 @@ ACTION_CAUSES={
     'contrast':{'lighting','texture','material'},
     'haze':{'color','lighting','texture','haze_clear','haze_heavy'},
     'sharpness':{'edge','texture'},
+    'fog_extra':{'haze_clear','haze_heavy'},
+    'pool_kernel':{'too_sharp','too_blurry'},
+    'surface_dust':{'surface_clean','surface_dust_heavy'},
 }
 CAUSE_SCORES={'upright':'support','floating':'support','penetration':'support','scale':'support',
               'camera':'support','shadow':'lighting','color':'lighting','haze_clear':'lighting',
               'haze_heavy':'lighting','light_direction':'lighting','reflection_flat':'material',
-              'reflection_hard':'material','surface_clean':'material'}
+              'reflection_hard':'material','surface_clean':'material','surface_dust_heavy':'material',
+              'too_sharp':'texture','too_blurry':'texture','patch_seam':'edge'}
 
 
 def evidence_status(checks):
@@ -66,10 +71,26 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
     elif params['photo_model']=='camera' and render_style=='reference':
         options.pop('dust')
     if params.get('atmosphere')=='off':options.pop('haze',None)
+    if params.get('effects_enabled'):
+        # Never offer two controls for the same physical effect.
+        # The dedicated matte shader preserves source roughness, so the old
+        # material profiles are not executable in this mode either.
+        for name in ('dust','haze','sharpness','material'):options.pop(name,None)
+        if params.get('effects_ai_adjust',True):
+            options.update({k:list(values) for k,values in EFFECT_ACTIONS.items()})
+            measured=photo.get('effects',{})
+            if params.get('atmosphere')=='off' or measured.get('fog_base',0)<=0 or measured.get('sample_pixels',0)<20:
+                options.pop('fog_extra',None)
+            if params.get('pool_weight',0)<=0 or measured.get('edge_samples',0)<12 or measured.get('sample_pixels',0)<20:
+                options.pop('pool_kernel',None)
+            if not measured.get('surface_dust_applied'):
+                options.pop('surface_dust',None)
+            if photo.get('local_context',{}).get('confidence','estimated')!='estimated':
+                options.pop('fog_extra',None);options.pop('pool_kernel',None)
     controls=photo.get('effective_controls',{})
     for kind,values in list(options.items()):
         current=params[kind]
-        values=[v for v in values if v!=current]
+        values=[v for v in values if (not math.isclose(float(v),float(current)) if kind in EFFECT_ACTIONS else v!=current)]
         if current in controls and kind in controls[current]:
             current_value=controls[current][kind]
             values=[v for v in values if not math.isclose(controls[v][kind],current_value,abs_tol=1e-4)]
@@ -129,14 +150,19 @@ def repair(params, review, allowed, candidate_ids, seen, *, dust_in_shader=False
     for action in review.actions if suggestions is None else suggestions:
         kind,value=action.kind,action.value
         dependency='placement' if kind=='candidate' else 'lighting' if kind=='light' else (
-            'material' if kind=='material' or (kind=='dust' and dust_in_shader) else 'photography')
+            'material' if kind in ('material','surface_dust') or (kind=='dust' and dust_in_shader) else 'photography')
         causes=ACTION_CAUSES[kind]&(severe or limiting or visible)
+        if kind in EFFECT_ACTIONS:
+            causes=ACTION_CAUSES[kind]&{d.code for d in review.defects
+                                       if d.visibility=='visible' and d.scope=='image'}
         if kind=='candidate':
             causes&={d.code for d in review.defects if d.visibility=='visible' and d.scope=='image'}
-        row={'action':action.model_dump(),'from':params[kind],'stage':dependency,'causes':sorted(causes)}
-        if value==params[kind]:reason='repeated_parameters'
+        row={'action':action.model_dump(),'from':params.get(kind),'stage':dependency,'causes':sorted(causes)}
+        if kind not in params:reason='unavailable_or_saturated'
+        elif value==params[kind]:reason='repeated_parameters'
         elif value not in allowed.get(kind,[]):reason='unavailable_or_saturated'
         elif not causes:reason='no_related_defect'
+        elif kind in EFFECT_ACTIONS and not effect_direction(kind,value,params[kind],causes):reason='wrong_effect_direction'
         elif any(a.kind==kind for a in selected):reason='duplicate_action'
         elif stage and (stage!=dependency or not (selected_causes&causes)):reason='different_cause_or_stage'
         else:
@@ -152,12 +178,44 @@ def repair(params, review, allowed, candidate_ids, seen, *, dust_in_shader=False
     return updated,log
 
 
+def effect_direction(kind,value,current,causes):
+    more,less={'fog_extra':('haze_clear','haze_heavy'),
+               'pool_kernel':('too_sharp','too_blurry'),
+               'surface_dust':('surface_clean','surface_dust_heavy')}[kind]
+    # Conflicting observations cannot justify an automatic numeric change.
+    if more in causes and less in causes:return False
+    return (more in causes and float(value)>float(current)) or (less in causes and float(value)<float(current))
+
+
 async def inspect(vision,prompt,asset,comp,params,allowed,render_dir,*,compact=False,
                   candidate_evidence=(),geometry_board=None):
     checks=comp['checks']
     payload={'name':asset['name'],'features':asset['semantic']['key_features'],'params':params,
              'allowed':allowed,'placement_options':list(candidate_evidence)}
     images=[comp['preview'],comp['crop'],asset['board']]
+    if params.get('effects_enabled'):
+        prompt=FUSION_PROMPT.replace(
+            'Return JSON with trace, scores, defects and evidence. Each defect has only code, severity and evidence.',
+            'Return JSON matching the supplied schema, including actions and defect region/scope/visibility.')
+        prompt+=''' Only suggest up to three actions from allowed, preferably one cause per round.
+fog_extra is an ADDITIONAL airlight opacity, not total haze. It attenuates reflection and body colour
+together without changing geometric alpha. surface_dust is separate deposited nonmetal dust on
+metal/paint; painted metal already uses half coverage and plastic is untouched.
+pool_kernel is an alpha-weighted average pooling square in final image pixels; 1 disables pooling.
+Use haze_clear/haze_heavy for air, surface_clean/surface_dust_heavy for material coverage,
+too_sharp/too_blurry for camera detail. Increase/decrease the corresponding numeric control.
+Use exact allowed strings as values. Never compensate wrong lighting with dust or blur.
+If evidence is uncertain or a control is unavailable, give no action for it.
+Assess photographic agreement against the local neighbourhood, not distant bright areas.
+The supplied numerical measurements are not proof of visual acceptance.'''
+        payload.update(effects=comp.get('photo',{}).get('effects'),
+                       evidence_status=evidence_status(checks),
+                       checks={k:v['status'] for k,v in checks.items()})
+        from pathlib import Path
+        context=Path(comp['image']).with_suffix('.context.jpg')
+        if context.is_file():images[1]=context
+        return await vision.ask('effects-review',effects_review_schema(allowed),prompt,payload,images,
+            image_limits=[(1280,720),(1200,900),(512,512)],max_output_tokens=2048,plain_json=True)
     native=params.get('photo_model') in ('native','local')
     if native:
         # The recognizer sees material references, without physics histories.

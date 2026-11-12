@@ -11,7 +11,7 @@ from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
 from .common import ROOT, HERE, atomic_json, load_catalog, FileLease
-from .schema import BatchConfig
+from .schema import BatchConfig, EffectSettings, EFFECT_ACTIONS
 from .store import Store
 
 DATA=ROOT/'work/placement-web/batches'
@@ -48,17 +48,30 @@ async def page(request):
 async def create(request):
     try:
         raw=await request.json()
+        if not isinstance(raw,dict):raise ValueError('请求必须为 JSON 对象')
+        test=request.url.path=='/api/batches/test'
+        if test:
+            raw.setdefault('count',1)
+            raw.setdefault('effects',{})
+            raw.setdefault('max_iterations',2)
+            if raw.get('offline') or raw.get('effects') is None:
+                raise ValueError('在线测试必须启用效果和在线复核')
         ident=secrets.token_hex(8)
         raw['output']=str(ROOT/'outputs'/('批量展示-'+time.strftime('%Y%m%d-%H%M%S')+'-'+ident[:6]))
         config=BatchConfig.model_validate(raw)
+        if test and config.count>12:raise ValueError('在线小样测试每批最多 12 项')
         if not Path(config.backgrounds).is_dir():raise ValueError('背景目录不存在')
         from .pipeline import make_jobs
         catalog=await asyncio.to_thread(load_catalog)
-        await asyncio.to_thread(make_jobs,config,catalog)
+        jobs=await asyncio.to_thread(make_jobs,config,catalog)
+        if test and len(jobs)>12:raise ValueError('在线小样清单最多 12 项')
         DATA.mkdir(parents=True,exist_ok=True)
         atomic_json(DATA/(ident+'.json'),config.model_dump())
         launch(ident)
-        return JSONResponse({'id':ident,'output':config.output},status_code=202)
+        return JSONResponse({'id':ident,'output':config.output,
+            'effects':config.effects.model_dump() if config.effects else None,
+            'status_url':f'/api/batches/{ident}',
+            'report_url':f'/api/batches/{ident}/files/index.html'},status_code=202)
     except (ValueError,OSError) as error:
         return JSONResponse({'error':str(error)[:300]},status_code=400)
 
@@ -68,6 +81,7 @@ async def status(request):
         ident=request.path_params['ident'];path=config_path(ident)
         config=BatchConfig.model_validate_json(path.read_text(encoding='utf8'));out=Path(config.output)
         result={'id':ident,'output':str(out),'running':bool(ident in PROCESSES and PROCESSES[ident].poll() is None)}
+        result['effects']=config.effects.model_dump() if config.effects else None
         lease=FileLease(out/'.batch.lock')
         if not lease.acquire():result['running']=True
         else:lease.release()
@@ -103,6 +117,18 @@ async def artifact(request):
     except (ValueError,OSError):return JSONResponse({'error':'文件不存在'},status_code=404)
 
 
+async def effect_options(request):
+    return JSONResponse({'version':'online-effects-v1','defaults':EffectSettings().model_dump(),
+        'schema':EffectSettings.model_json_schema(),'actions':EFFECT_ACTIONS,
+        'test_endpoint':'/api/batches/test','max_test_jobs':12,
+        'dependencies':{'fog_extra':'compose_and_review','pool_kernel':'compose_and_review',
+                        'surface_dust':'material_render_shadow_compose_review'},
+        'notes':['fog_extra 为追加雾层，非总雾量','pool_kernel=1 关闭池化',
+                 'surface_dust 是独立表面浮灰倍率，漆面另乘 0.5，塑料不加额外灰层',
+                 'atmosphere=off 同时关闭基础和追加薄雾','未指定 effects 的旧批次保持原行为']})
+
+
 routes=[Route('/batch',page),Route('/api/batches',create,methods=['POST']),
+        Route('/api/batches/effects',effect_options),Route('/api/batches/test',create,methods=['POST']),
         Route('/api/batches/{ident}',status),Route('/api/batches/{ident}/resume',resume,methods=['POST']),
         Route('/api/batches/{ident}/files/{path:path}',artifact)]
