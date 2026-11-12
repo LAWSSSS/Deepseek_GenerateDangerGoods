@@ -191,11 +191,11 @@ def seam_measurement(loss, receiver, alpha):
 
 
 def camera_residual(shaded, rgb, alpha, background, environment, params, seed, writable, *, object_delta=None,
-                    fixed_sensor=None):
+                    fixed_sensor=None, capture_layers=None):
     """Filter only the inserted radiance difference, never a pasted rectangular background."""
     if params.get('camera_pipeline') == 'premultiplied':
         return camera_premultiplied(shaded,rgb,alpha,background,environment,params,seed,writable,
-                                    object_delta=object_delta,fixed_sensor=fixed_sensor)
+                                    object_delta=object_delta,fixed_sensor=fixed_sensor,capture_layers=capture_layers)
     from .schema import PHOTO_CONTROLS
     sharpness=PHOTO_CONTROLS['sharpness'][params.get('sharpness','auto')]
     target=environment['camera_psf']['sigma_px']
@@ -246,7 +246,7 @@ def camera_residual(shaded, rgb, alpha, background, environment, params, seed, w
 
 
 def camera_premultiplied(shaded, rgb, alpha, background, environment, params, seed, writable, *,
-                         object_delta=None, fixed_sensor=None):
+                         object_delta=None, fixed_sensor=None, capture_layers=None):
     """Filter the full object radiance and coverage once, retaining photographed B.
 
     B + G(alpha*F - alpha*B) reintroduces B-G(B) inside an opaque object.
@@ -280,6 +280,10 @@ def camera_premultiplied(shaded, rgb, alpha, background, environment, params, se
     shadow_delta=shaded-background
     if sigma:shadow_delta=cv2.GaussianBlur(shadow_delta,(0,0),sigma,borderType=cv2.BORDER_CONSTANT)
     plate=background+shadow_delta
+    if capture_layers is not None:
+        display_plate = np.maximum(np.where(writable[...,None],plate,background),0)
+        capture_layers.update(optical_alpha=optical_alpha, plate=np.where(
+            display_plate<=.0031308,display_plate*12.92,1.055*display_plate**(1/2.4)-.055))
     captured=plate*(1-optical_alpha[...,None])+premult
     captured[~writable]=background[~writable]
     captured=np.maximum(captured,0)

@@ -53,6 +53,9 @@ def optical_delta(clear, veiled, alpha, environment, air, target_px, params):
         from .local import pool_object_rgb
         from .photography import linear
         weight=float(params['pool_weight']) if int(params['pool_kernel'])>1 else 0.
+        if params.get('workflow') == 'evidence_v1':
+            # The camera PSF owns all automatic spatial filtering.
+            weight = 0.
         optics=environment['camera_psf'];context=environment['local_context']
         if optics['edge_samples']<12 or context['sample_pixels']<20:weight=0.
         clear_linear=linear(clear)
@@ -66,6 +69,7 @@ def optical_delta(clear, veiled, alpha, environment, air, target_px, params):
             'fog_extra_max':0.,'fog_total_median':float(np.median(fog)) if fog.size else 0.,
             'fog_total_max':float(fog.max()) if fog.size else 0.,'fog_color_linear':air['color_linear'],
             'pool_kernel':[int(params['pool_kernel'])]*2,'pool_weight':weight,'pool_uniform':True,
+            **({'filtering_basis':'single_premultiplied_camera_psf'} if params.get('workflow')=='evidence_v1' else {}),
             'edge_samples':optics['edge_samples'],'sample_pixels':context['sample_pixels'],
             'requested':{k:params.get(k) for k in ('fog_mode','fog_extra','fog_gain','pool_kernel','surface_dust','weathering')},
             'additional_fog_applied':False,'atmosphere_off':params.get('atmosphere')=='off'}

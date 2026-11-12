@@ -427,6 +427,29 @@ def plane_camera(calibration,below):
     return result
 
 
+async def preflight_visible_width(path, size, reference, vision):
+    """Check whether a width observation exists before segmenting the pile."""
+    validate_reference(reference)
+    answer = await vision.ask(
+        'vehicle-width-preflight', ObservedVehicleGeometry,
+        OBSERVED_PROMPT + ' Only inspect the two top inner rims and transverse width. '
+                          'The supports list is empty, so return heights=[].',
+        {'vehicle_reference': reference, 'supports': []}, [path],
+        image_limits=[(1920,1080)], plain_json=True,
+    )
+    if answer.vehicle_class == 'other':
+        return {'status':'unknown','allow_expensive_steps':False,
+                'risk_codes':['vehicle_class_conflicts_with_supplied_reference']}
+    edges = (rim_edge_evidence(path,answer.left_rim,answer.right_rim,answer.rim_visibility)
+             if answer.left_rim is not None and answer.right_rim is not None else
+             {'method':'no_observed_rim_segments','rims':[],'both_supported':False})
+    evidence = audit_width_observations(answer.model_dump(),size,edges)
+    return {'status':'unknown','allow_expensive_steps':evidence['fit_ready'],
+            'risk_codes':[] if evidence['fit_ready'] else ['insufficient_observed_width_correspondences'],
+            'observation':answer.model_dump(),'observation_audit':evidence,'rim_edge_evidence':edges,
+            'basis':'visible_width_observation_only_camera_fit_deferred'}
+
+
 async def prepare(scene,reference,vision,cache,*,observation_mode='legacy'):
     validate_reference(reference)
     if observation_mode not in ('legacy','audited'):raise ValueError('invalid_vehicle_observation_mode')

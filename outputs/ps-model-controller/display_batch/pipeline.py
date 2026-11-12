@@ -11,7 +11,7 @@ import statistics
 import time
 import numpy as np
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 from . import VERSION
 from .ai import Vision, ProviderUnavailable, token_summary
@@ -191,11 +191,14 @@ class Pipeline:
         self.vision=Vision(config,self.cache/'vision',self.out/f'usage-{self.run_id}.json')
         self.blender=Blender(self.cache/('worker-'+str(os.getpid())),config.render_device)
         self.renders=RenderCache(self.cache,self.blender)
-        self.scenes=Scenes(self.cache,self.vision,structured=config.support_geometry=='structured');self.assets={}
+        self.scenes=Scenes(self.cache,self.vision,structured=config.support_geometry=='structured',
+                           structured_json=config.workflow=='evidence_v1');self.assets={}
         self.atmospheres=Atmospheres(self.cache,self.vision)
         self.catalog=load_catalog();self.store=Store(self.out/'jobs.sqlite')
         self.cpu=asyncio.Semaphore(config.cpu_concurrency)
         self.prepare_lock=asyncio.Lock()
+        self.width_gates={}
+        self.scene_format_failures={}
         self.model_review={}
         self.structure_locks={}
         review_path=self.out/'model-review.json'
@@ -222,12 +225,44 @@ class Pipeline:
                         atomic_json(failure_path,self.assets[k])
             return self.assets[k]
 
-    async def render(self,asset,scene,candidate,params,resolution):
+    async def width_preflight(self, payload):
+        from .vehicle_scale import preflight_visible_width
+        key=payload['background_hash']
+        async with self.prepare_lock:
+            if key not in self.width_gates:
+                with Image.open(payload['background']) as source:
+                    size=ImageOps.exif_transpose(source).size
+                try:
+                    gate=await preflight_visible_width(payload['background'],size,self.config.vehicle_reference,self.vision)
+                except ProviderUnavailable:
+                    raise
+                except (ValueError,RuntimeError) as failure:
+                    gate={'status':'unknown','allow_expensive_steps':False,
+                          'risk_codes':['width_observation_unavailable'],'reason':str(failure)[:180]}
+                self.width_gates[key]=gate
+                atomic_json(self.out/'width-observations'/(key+'.json'),gate)
+        return self.width_gates[key]
+
+    async def evidence_scene(self, payload):
+        key=payload['background_hash']
+        async with self.prepare_lock:
+            if key in self.scene_format_failures:
+                raise RuntimeError(self.scene_format_failures[key])
+            try:
+                return await self.scenes.prepare(payload['background'])
+            except ProviderUnavailable:
+                raise
+            except (ValueError,RuntimeError) as failure:
+                self.scene_format_failures[key]=str(failure)[:220]
+                raise
+
+    async def render(self,asset,scene,candidate,params,resolution,*,sampled=None):
         style=self.render_style
         if style=='native' or params.get('fog_mode')=='local_auto':
             scene['atmosphere']=await self.atmospheres.prepare(scene)
-        environment,samples=await asyncio.to_thread(sample_environment,scene,candidate,
-            scene_lighting=style in ('scene','native'),native=style=='native',local=self.config.appearance=='local')
+        environment,samples=(sampled if sampled is not None else
+            await asyncio.to_thread(sample_environment,scene,candidate,
+                scene_lighting=style in ('scene','native'),native=style=='native',local=self.config.appearance=='local'))
         environment={**environment,'integration_mode':params.get('integration_mode','legacy')}
         extras={}
         if params.get('fog_mode')=='local_auto':
@@ -482,6 +517,7 @@ class Pipeline:
                 'chroma_mode':self.config.chroma_mode,
                 'integration_mode':self.config.integration_mode,
                 'camera_pipeline':self.config.camera_pipeline,
+                **({'workflow':self.config.workflow} if self.config.workflow!='legacy' else {}),
                 **{k:'auto' for k in PHOTO_CONTROLS},**effect_parameters(self.config.effects)}
 
     @staticmethod
@@ -517,21 +553,54 @@ class Pipeline:
                 'photo_status':'unknown','visual_status':'unknown','evidence_status':'unknown',
                 'cost':{'logical_reviews':0,'renders':{},'render_cache_hits':{},'asset_imports':0},
                 'actions':[]}
+        if payload.get('background_hash'):result['background_hash']=payload['background_hash']
         best=None;draft=None
         try:
             held=getattr(self,'model_review',{}).get(payload['asset_id'])
             if held and held.get('independent_confirmation') and held.get('mesh_hash')==payload.get('mesh_hash'):
                 result.update(reason='asset_structure_requires_review',model_review=held);return result
+            structured=getattr(self.config,'workflow','legacy')=='evidence_v1'
+            scene=None
+            if structured:
+                result['configuration']={'requested':self.config._requested,'resolved':self.config.model_dump(),
+                                         'reasons':self.config._resolution_notes}
+                stage_start=time.monotonic()
+                self.store.checkpoint(ident,'scene',{})
+                if self.config.geometry_preset=='rebuild':
+                    gate=await self.width_preflight(payload)
+                    result['width_preflight']=gate
+                    if not gate['allow_expensive_steps']:
+                        result.update(status='failed',evidence_status='fail',reason='high_risk_vehicle_projection',
+                                      rejections=[{'reason':'high_risk_vehicle_projection','evidence':gate}])
+                        return result
+                scene=await self.evidence_scene(payload)
+                result['timings']['scene_seconds']=round(time.monotonic()-stage_start,3)
+                result['scene_signature']=scene['key']
+                if self.config.geometry_preset=='rebuild':
+                    # Reject unobservable calibration before asset preparation or Blender.
+                    from .vehicle_scale import prepare as prepare_vehicle
+                    async with self.prepare_lock:
+                        if scene.get('vehicle_scale',{}).get('observation_mode')!='audited':
+                            scene['vehicle_scale']=await prepare_vehicle(
+                                scene,self.config.vehicle_reference,self.vision,self.cache,observation_mode='audited')
+                    gate=scene['vehicle_scale']['projection_preflight']
+                    if not gate['allow_expensive_steps']:
+                        atomic_json(self.out/'scale-scenes'/(scene['key']+'.json'),scene['vehicle_scale'])
+                        result.update(status='failed',evidence_status='fail',reason='high_risk_vehicle_projection',
+                                      rejections=[{'reason':'high_risk_vehicle_projection','evidence':gate}])
+                        return result
             self.store.checkpoint(ident,'asset',job['checkpoint'] or {})
+            stage_start=time.monotonic()
             asset=await self.prepare_asset(payload['asset_id'])
-            result['timings']['asset_prepare_seconds']=round(time.monotonic()-start,3)
+            result['timings']['asset_prepare_seconds']=round(time.monotonic()-stage_start,3)
             result['asset_signature']=asset['signature']
             if not asset['poses'] and not (self.config.contact_mode=='strict' and asset.get('axis')):
                 result['reason']=asset['reason'];return result
-            self.store.checkpoint(ident,'scene',{})
-            stage_start=time.monotonic()
-            scene=await self.scenes.prepare(payload['background'])
-            result['timings']['scene_seconds']=round(time.monotonic()-stage_start,3)
+            if scene is None:
+                self.store.checkpoint(ident,'scene',{})
+                stage_start=time.monotonic()
+                scene=await self.scenes.prepare(payload['background'])
+                result['timings']['scene_seconds']=round(time.monotonic()-stage_start,3)
             result['scene_signature']=scene['key'];result['physics_signature']=asset['physics_signature']
             async with self.cpu:
                 stage_start=time.monotonic()
@@ -555,7 +624,7 @@ class Pipeline:
             adjustable=any(material_kind(m['name'],m['metallic'] or 0.,m['metallic_linked'],
                            asset['semantic'].get('material_classes',[])) in adjusted_classes
                            for m in asset.get('inspection',{}).get('materials',[]))
-            iteration=0;previous_candidate=None;rendered_parts={}
+            iteration=0;previous_candidate=None;rendered_parts={};recipe_checked=set()
             while iteration<=self.config.max_iterations:
                 psig=signature(params)
                 if psig in seen:reason='repeated_parameters';break
@@ -578,10 +647,20 @@ class Pipeline:
                 if cid not in invalid:
                     candidate=ready[cid]
                     candidate['material_classes']=asset.get('semantic',{}).get('material_classes',[])
+                    render_options={}
+                    if structured and cid not in recipe_checked:
+                        from .structured import initial_recipe
+                        sampled=await asyncio.to_thread(sample_environment,scene,candidate,local=True)
+                        params,recommendation=initial_recipe(resolve(self.config.knowledge_db or 'work/knowledge/history-v2.sqlite'),
+                                                             asset,candidate,sampled[0],params)
+                        result['parameter_recommendation']={**recommendation,'candidate':cid}
+                        recipe_checked.add(cid)
+                        seen.add(signature(params))
+                        render_options['sampled']=sampled
                     rkey=render_identity(params,self.render_style)
                     if rkey not in rendered_parts:
                         before=time.monotonic()
-                        rendered=await self.render(asset,scene,candidate,params,final_resolution(candidate))
+                        rendered=await self.render(asset,scene,candidate,params,final_resolution(candidate),**render_options)
                         result['timings']['render_stage_seconds']=result['timings'].get('render_stage_seconds',0)+time.monotonic()-before
                         rendered_parts[rkey]=rendered
                         for part,info in rendered[1].get('render_cache',{}).items():
@@ -596,8 +675,11 @@ class Pipeline:
                     before=time.monotonic()
                     try:
                         async with self.cpu:
+                            layer_options={}
+                            if structured and self.config.prepare_photoshop:
+                                layer_options['layer_output']=folder/f'layers-{iteration}'
                             comp=await asyncio.to_thread(compose,scene,candidate,folder_render,meta,environment,samples,
-                                                         params,payload['seed'],image)
+                                                         params,payload['seed'],image,**layer_options)
                     except ValueError as failure:
                         if str(failure) not in ('object_fully_occluded','object_too_small'):raise
                         invalid.add(cid);rejected.append({'candidate':cid,'reason':str(failure)})
@@ -616,6 +698,9 @@ class Pipeline:
                 draft={**comp,'iteration':iteration,'params':params.copy(),'render_cache_hit':hit,
                        'render_cache':meta.get('render_cache',{}),'render_resolution':meta.get('resolution'),
                        'image_hash':file_hash(image)}
+                if structured:
+                    from .structured import algorithm_versions
+                    draft['algorithm_versions']=algorithm_versions(params,comp['photo'].get('version'))
                 if result['actions'] and result['actions'][-1]['iteration']==iteration-1:
                     result['actions'][-1]['effect']={'params':params.copy(),'image_hash':draft['image_hash'],
                         'changed_pixels':draft['image_hash']!=result['iterations'][-1]['image_hash'],
@@ -631,12 +716,18 @@ class Pipeline:
                 allowed=allowed_actions(params,comp,ids,render_style=self.render_style,adjustable=adjustable)
                 geometry_board=folder/(cid+'-geometry.jpg') if previous_candidate and previous_candidate!=cid and candidate.get('placement') else None
                 result['cost']['logical_reviews']+=1
-                review=await inspect(self.vision,REVIEW_PROMPT,asset,comp,params,allowed,folder_render,
-                    compact=self.config.review_format=='compact',geometry_board=geometry_board,
-                    candidate_evidence=[{'id':c['id'],'placement':c.get('placement'),
-                                         'uncertainties':c.get('uncertainties',[])} for c in choices])
+                observation=None
+                if structured:
+                    from .structured import inspect_frame
+                    observation,review=await inspect_frame(self.vision,asset,comp,draft['image_hash'])
+                else:
+                    review=await inspect(self.vision,REVIEW_PROMPT,asset,comp,params,allowed,folder_render,
+                        compact=self.config.review_format=='compact',geometry_board=geometry_board,
+                        candidate_evidence=[{'id':c['id'],'placement':c.get('placement'),
+                                             'uncertainties':c.get('uncertainties',[])} for c in choices])
                 previous_candidate=cid
                 entry={**draft,'review':review.model_dump()}
+                if observation is not None:entry['visual_evidence']=observation.model_dump(mode='json')
                 if self.config.contact_mode=='strict':
                     from .strict_contact import visual_veto
                     veto=visual_veto(review);entry['deliverable']=not veto
@@ -693,13 +784,20 @@ class Pipeline:
                         reason='visual_ok_evidence_unresolved';break
                 if iteration>=self.config.max_iterations:break
                 if no_gain>=2:reason='no_improvement';break
-                suggestions=fusion_actions(review,comp,allowed) if isinstance(review,FusionReview) else review.actions
-                if not suggestions:reason='no_valid_action';break
-                updated,actions=repair(params,review,allowed,ids,lambda p:signature(p) in seen,
-                                       dust_in_shader=self.render_style in ('scene','native'),suggestions=suggestions)
-                result['actions'].append({'iteration':iteration,'decisions':actions})
+                if structured:
+                    from .structured import plan_frame
+                    updated,actions,plan=await plan_frame(self.vision,observation,review,comp,params,allowed,ids,
+                        lambda p:signature(p) in seen,dust_in_shader=self.render_style in ('scene','native'),
+                        recommendation=result.get('parameter_recommendation'))
+                    result['actions'].append({'iteration':iteration,'decisions':actions,'execution_plan':plan})
+                else:
+                    suggestions=fusion_actions(review,comp,allowed) if isinstance(review,FusionReview) else review.actions
+                    if not suggestions:reason='no_valid_action';break
+                    updated,actions=repair(params,review,allowed,ids,lambda p:signature(p) in seen,
+                                           dust_in_shader=self.render_style in ('scene','native'),suggestions=suggestions)
+                    result['actions'].append({'iteration':iteration,'decisions':actions})
                 if updated is None:
-                    reason='repeated_parameters' if all(a['disposition']=='repeated_parameters' for a in actions) else 'no_effective_action'
+                    reason='repeated_parameters' if actions and all(a['disposition']=='repeated_parameters' for a in actions) else 'no_effective_action'
                     break
                 params=updated;iteration+=1
             if best:
@@ -777,6 +875,7 @@ class Pipeline:
         implementation=implementation_manifest()
         config_signature=signature(VERSION,self.config.model_dump(exclude={'offline'}),jobs,
                                     RENDER_VERSION,COMPOSE_VERSION,implementation,self.vision.endpoint.model_dump(),
+                                    self.vision.planner.model_dump() if self.config.workflow=='evidence_v1' else None,
                                     self.dimension_reference_signature())
         with batch_lock(self.out):
             self.store.initialize(config_signature,jobs);self.store.recover()
@@ -826,6 +925,13 @@ class Pipeline:
                 summary['run']['render_counts']=dict(self.renders.totals)
                 summary['run']['render_stage_seconds']=dict(self.renders.timings)
                 summary['run']['memory_retries']=self.blender.memory_retries
+                if self.config.workflow=='evidence_v1':
+                    from scrap_composite.knowledge import archive_run
+                    import sqlite3
+                    try:
+                        summary['knowledge_archive']=archive_run(self.out,resolve('work/knowledge/history-v2.sqlite'))
+                    except (OSError,ValueError,sqlite3.Error) as failure:
+                        summary['knowledge_archive']={'error_kind':type(failure).__name__}
                 atomic_json(self.out/f'run-{self.run_id}.json',summary['run'])
                 atomic_json(self.out/'summary.json',summary)
                 self.store.close()

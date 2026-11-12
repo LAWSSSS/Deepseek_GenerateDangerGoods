@@ -45,14 +45,20 @@ class Vision:
         endpoint = dict(raw.get("vision") or raw)
         endpoint.update(max_output_tokens=3072, timeout_seconds=120)
         self.endpoint = VisionEndpoint.model_validate(endpoint)
+        self.planner = self.endpoint
+        if getattr(config, 'workflow', 'legacy') == 'evidence_v1' and raw.get('planner'):
+            self.planner = VisionEndpoint.model_validate({
+                **raw['planner'], 'max_output_tokens': 1024, 'timeout_seconds': 120})
         self.offline = config.offline
         self.config, self.cache, self.usage_path = config, Path(cache), Path(usage_path)
         self.cache.mkdir(parents=True, exist_ok=True)
         self.calls = []
         self.semaphore = asyncio.Semaphore(config.ai_concurrency)
         self.configured = configure_credential(self.endpoint.key_env)
-        if self.endpoint.response_protocol=='qwen-json' and os.environ.get(self.endpoint.key_env or '', '').startswith('sk-sp-'):
-            raise ValueError('百炼批处理需要独立 API 凭据，不能使用套餐密钥')
+        for service in (self.endpoint, self.planner):
+            configure_credential(service.key_env)
+            if os.environ.get(service.key_env or '', '').startswith('sk-sp-'):
+                raise ValueError('百炼批处理需要独立 API 凭据，不能使用套餐密钥')
         self.http = httpx.AsyncClient()
         self.cache_hits = 0
 
@@ -74,9 +80,10 @@ class Vision:
         return result
 
     async def ask(self, role, schema, prompt, payload, images=(), *, cache=True,
-                  image_limits=None,max_output_tokens=None,plain_json=False):
+                  image_limits=None,max_output_tokens=None,plain_json=False,planning=False,validate=None):
         previews=[]
-        endpoint=self.endpoint if max_output_tokens is None else self.endpoint.model_copy(
+        service=self.planner if planning else self.endpoint
+        endpoint=service if max_output_tokens is None else service.model_copy(
             update={'max_output_tokens':max_output_tokens})
         for i,image in enumerate(images):
             image=Path(image)
@@ -102,12 +109,18 @@ class Vision:
                         role, prompt, semantic_payload(payload), [file_hash(p) for p in images])
         path = self.cache/f"{key}.json"
         if cache and path.is_file():
-            self.cache_hits += 1
-            return schema.model_validate_json(path.read_text(encoding="utf8"))
+            try:
+                answer=schema.model_validate_json(path.read_text(encoding="utf8"))
+                if validate is not None:validate(answer)
+            except ValueError:
+                pass
+            else:
+                self.cache_hits += 1
+                return answer
         if self.offline:
             raise ProviderUnavailable("离线模式缺少模型缓存："+role)
-        if not self.configured:
-            raise ProviderUnavailable("未配置视觉服务凭据："+str(self.endpoint.key_env))
+        if (not configure_credential(endpoint.key_env) if planning else not self.configured):
+            raise ProviderUnavailable("未配置模型服务凭据："+str(endpoint.key_env))
         async with self.semaphore:
             last_error = None
             retry_payload = payload
@@ -121,6 +134,7 @@ class Vision:
                         " Write evidence in concise Chinese, at most 60 Chinese characters. Respect all schema string limits.",
                         retry_payload, images, tool=None if use_json else "inspect_display",
                         detail=None if qwen else "high",qwen_json=qwen,plain_json=use_json)
+                    if validate is not None:validate(answer)
                     if cache:
                         atomic_json(path, answer.model_dump())
                     return answer
@@ -138,6 +152,8 @@ class Vision:
                         call.update(request_signature=key, attempt=attempt,
                                     job_id=asyncio.current_task().get_name(),
                                     seconds=round(time.monotonic()-start, 3))
+                        if planning:
+                            call['request_tariff'] = tariff(self.config, endpoint)
                         self.calls.append(call)
                     atomic_json(self.usage_path, self.usage())
             transport_failed=bool(report['calls'] and report['calls'][-1].get('transport_error'))

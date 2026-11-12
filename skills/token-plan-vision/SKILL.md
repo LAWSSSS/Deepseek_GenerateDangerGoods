@@ -17,6 +17,10 @@ From that directory, run:
 work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/interactive_token_plan.py --image <full-image> --question-file <question.txt> --out <new-output-directory>
 ```
 
+Use `--format visual_evidence` for the versioned seven-score protocol. In that
+mode the first image is the current frame and any remaining images are context.
+The report binds findings and normalized regions to the first image's hash.
+
 The default is `qwen3.7-plus` on the official Beijing Token Plan endpoint. Credentials
 come from `BAILIAN_TOKEN_PLAN_API_KEY` or the application's current-user DPAPI store;
 never include a key in the question, command, repository or output.

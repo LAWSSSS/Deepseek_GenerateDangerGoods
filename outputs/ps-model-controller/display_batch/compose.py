@@ -213,7 +213,7 @@ def match_rgb(rgb, alpha, background_pixels, specular_weight, tone, seed):
 
 
 def compose(scene,candidate,render_dir,render_meta,environment,samples,params,seed,out,
-            *,dust_overlay=False,capture_local=False,fixed_tone=None):
+            *,dust_overlay=False,capture_local=False,fixed_tone=None,layer_output=None):
     render_dir=Path(render_dir)
     source=np.asarray(Image.open(render_dir/'object.png').getchannel('A'),np.float32)/255
     alpha_dir=Path(candidate.get('fixed_alpha_dir',render_dir))
@@ -413,6 +413,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         result+=residual[...,None]*optical_alpha[...,None]
         photo['added_noise_sigma']=noise
     edited=(optical_alpha>0)|(loss>0)
+    photoshop_layers={} if layer_output is not None else None
     if local:
         writable=(~foreground)&(~protected)&(scene['allowed'][y:b,x:r] | (alpha>0))
         object_delta=None
@@ -429,8 +430,9 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         # Treat automatic air as an object-only residual too. Blurring a fogged base
         # would spread fog changes into holes/background and change the noise estimate.
         capture_rgb=clear_rgb if local_atmospheric and effects else rgb
+        capture_options={'capture_layers':photoshop_layers} if photoshop_layers is not None else {}
         result,edited,imaging=camera_residual(shaded,capture_rgb,visible_alpha,linear(crop),environment,params,seed,writable,
-                                             object_delta=object_delta)
+                                             object_delta=object_delta,**capture_options)
         photo.update(imaging,local_context=environment['local_context'])
         photo['after_luma']=float(np.median((np.clip(result,0,1)@np.float32([.2126,.7152,.0722]))[visible_alpha>.85])*255)
         photo['color_pipeline']='scene_linear_EXR_exposure_WB_AgX_once_local_camera_veil_residual_filter'
@@ -572,4 +574,12 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     if capture_local:
         result['local_layers']={'clear_rgb':clear_rgb,'rgb':rgb,'alpha':visible_alpha,'shaded':shaded,
                                 'background':linear(crop),'writable':writable,'air':local_air}
+    if photoshop_layers and all(c['status']!='fail' for c in checks.values()):
+        from scrap_composite.layers import save_bundle
+        try:
+            proof=save_bundle(layer_output,scene,out,bounds,photoshop_layers['plate'],photoshop_layers['optical_alpha'],
+                              alpha,foreground,checks)
+            result['composition_manifest']=str(proof)
+        except ValueError as error:
+            result['photoshop_layer_error']=str(error)
     return result

@@ -356,6 +356,34 @@ def diagnostic(scene,candidate,out):
     image.thumbnail((1600,1000));image.save(out,quality=90)
 
 
+def pocket_proposals(asset,scene,site,mask,config):
+    """Scale fixes the search window; proposals never change physical object size."""
+    from scrap_composite.pockets import propose
+    fixed=asset.get('physical_size')
+    if fixed:
+        if config.scale_mode=='reference_projection':
+            from .reference_projection import local_scale as scale
+        else:
+            from .consistent_scale import local_scale as scale
+        interval,basis=scale(scene,site,site['anchor_px'],fixed)
+    else:interval,basis=local_scale(scene,site,site['anchor_px'],asset['semantic']['major_mm'])
+    target=math.sqrt(max(interval[0],1)*max(interval[1],1))
+    proposals,summary=propose(scene['depth_native'],mask,scene['allowed'],scene['protected'],target)
+    summary['scale_basis']={'status':basis.get('status','unknown'),'basis':basis.get('basis'),
+                            'physical_size_fixed':bool(fixed),'range_px':interval}
+    return proposals,summary
+
+
+def scale_pocket(pocket,factor):
+    """Move diagnostics from the coarse search grid to the original image grid."""
+    p=json.loads(json.dumps(pocket));p['anchor_px']=(np.asarray(p['anchor_px'])/factor).tolist()
+    p['clearance_px']/=factor
+    for scale in p['rim_evidence']:
+        scale['radius_px']/=factor
+        scale['rim_points_px']=(np.asarray(scale['rim_points_px']).reshape(-1,2)/factor).tolist()
+    return p
+
+
 def choose_pile_candidates(asset,scene,seed=0,config=None):
     from .scene import cached_projection,fitted_masks
     factor=min(1.,960/max(scene['size']))
@@ -373,6 +401,14 @@ def choose_pile_candidates(asset,scene,seed=0,config=None):
         if 'anchor' in rejection:rejection['anchor']=(np.asarray(rejection['anchor'])/factor).tolist()
     data=np.load(asset['geometry']);selected=[]
     for row in rows:
+        if row.get('pocket'):row['pocket']=scale_pocket(row['pocket'],factor)
+        if row.get('pocket_search'):
+            summary=json.loads(json.dumps(row['pocket_search']));row['pocket_search']=summary
+            summary['search_grid_scale_to_original']=factor
+            if summary.get('bounds'):summary['bounds']=(np.asarray(summary['bounds'])/factor).tolist()
+            if summary.get('target_px'):summary['target_px']/=factor
+            if summary.get('scale_basis',{}).get('range_px'):
+                summary['scale_basis']['range_px']=(np.asarray(summary['scale_basis']['range_px'])/factor).tolist()
         row['anchor_px']=(np.asarray(row['anchor_px'])/factor).tolist();row['full_px']/=factor
         for name in ('target_px','expected_major_px'):row[name]/=factor
         row['scale']['world_pixels_per_unit']/=factor
@@ -405,6 +441,13 @@ def choose_pile_candidates(asset,scene,seed=0,config=None):
                     'contact_coverages':cover,'anchor_px':row['anchor_px'],'support_ids':row['support_ids'],
                     'visible_support':row.get('visible_support_evidence')});continue
             row['uncertainties'].append('full_resolution_support_unknown')
+        if row.get('pocket'):
+            from scrap_composite.pockets import check_projection
+            evidence=check_projection(row['pocket'],fit['hull'],fit['contact'],fit['bounds'],support,
+                                      scene['allowed'][y:b,x:r],scene['protected'][y:b,x:r])
+            row['pocket_projection']=evidence
+            if evidence['program_fit']=='fail':
+                reject.append({'candidate':row['id'],'reason':'full_resolution_pocket_projection_failed','evidence':evidence});continue
         row['receiver']=receiver_mesh(scene,row)
         selected.append(row)
         if len(selected)==3:break
@@ -419,6 +462,7 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
     strict=config.contact_mode=='strict'
     native=config.appearance=='native'
     coherent=getattr(config,'integration_mode','legacy')=='coherent'
+    pockets_enabled=coherent and getattr(config,'workflow','legacy')=='evidence_v1'
     data=np.load(asset['geometry']);vertices=data['vertices'];faces=data['faces']
     midpoint=sum(scene['answer']['elevation'])/2;records=[];reject=[];seen=set();geometries={};world_patches={}
     priorities={};shape=shape_priority(vertices,asset['axis']) if coherent else None
@@ -464,9 +508,18 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                                    'visible_support':visible_evidence});continue
             anchor_site={**site,'mask':union}
             anchors=support_anchors(anchor_site)
+            pockets=[];pocket_summary=None
+            if pockets_enabled:
+                try:pockets,pocket_summary=pocket_proposals(asset,scene,site,union,config)
+                except ValueError as error:
+                    pocket_summary={'status':'unknown','reason':'pocket_scale_unavailable','detail':str(error)}
+                if pockets:
+                    anchors=[p['anchor_px'] for p in pockets]+[a for a in anchors if all(np.linalg.norm(np.subtract(a,p['anchor_px']))>3 for p in pockets)]
+                else:reject.append({'site':site['id'],'reason':'no_confirmed_pocket_planar_candidates_retained','pocket_analysis':pocket_summary})
             if native and config.placement_mode in ('auto','embedded'):
                 anchors+=anchors_near_foreground(scene,site,union,anchors)
             for anchor_index,anchor in enumerate(anchors):
+                pocket=next((p for p in pockets if np.linalg.norm(np.subtract(p['anchor_px'],anchor))<1e-4),None)
                 fixed_size = asset.get('physical_size')
                 if fixed_size:
                     if config.scale_mode=='reference_projection':
@@ -541,6 +594,13 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                             minimum=min(cover) if cover else 0
                             if strict and minimum<.9:
                                 reason_counts['contact_below_90_percent']=reason_counts.get('contact_below_90_percent',0)+1;continue
+                            pocket_fit=None
+                            if pocket:
+                                from scrap_composite.pockets import check_projection
+                                pocket_fit=check_projection(pocket,mask,fit['contact'],fit['bounds'],support,
+                                                            scene['allowed'][y:b,x:r],scene['protected'][y:b,x:r])
+                                if pocket_fit['program_fit']=='fail':
+                                    reason_counts['pocket_real_mesh_fit_failed']=reason_counts.get('pocket_real_mesh_fit_failed',0)+1;continue
                             front=scene['depth_native'][y:b,x:r]>site['depth']+.035
                             fraction=float((front&mask).sum()/area)
                             if minimum<.20 and fraction<.10:
@@ -558,6 +618,7 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                             score-=abs(target-math.sqrt(low*high))/max(high,1)*.1
                             if strict:score+=(.35 if len(group)==1 else 0)-pose['height']*.2-site.get('slope_deg',0)*.01
                             if coherent:score-=priority['penalty']+support_plane_evidence(site)['penalty']
+                            if pocket:score+=.55*pocket['score']
                             ident=f"{site['id']}-{mode}-{pose['id']}-Y{yaw}-Z{scale_index}-A{anchor_index}"
                             if ident in seen:continue
                             seen.add(ident);site_count+=1
@@ -576,6 +637,8 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                                 'uncertainties':uncertain,'base_pose':pose,
                                 **({'stability_priority':priority,'support_plane_evidence':support_plane_evidence(site),
                                     'integration_mode':'coherent','visible_support_evidence':visible_evidence} if coherent else {}),
+                                **({'workflow':'evidence_v1','pocket':pocket,'pocket_projection':pocket_fit,
+                                    'pocket_search':pocket_summary,'placement_basis':'visible_recess_candidate' if pocket else 'planar_fallback'} if pockets_enabled else {}),
                                 'scale':{**evidence,'major_mm':asset['semantic']['major_mm'],'range_px':[low,high],
                                     'reference_projection_correction':float(correction),'world_pixels_per_unit':world_ppm},
                                 'score':score+float(rng.uniform(0,.005)),'projection_key':key})

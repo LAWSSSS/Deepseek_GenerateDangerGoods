@@ -54,7 +54,8 @@ async def create(request):
             raw.setdefault('count',1)
             # Let the coherent preset supply its own defaults. An empty effects
             # object would instantiate legacy manual haze before schema validation.
-            if raw.get('integration_mode','legacy')!='coherent':raw.setdefault('effects',{})
+            if raw.get('integration_mode','legacy')!='coherent' and raw.get('workflow')!='evidence_v1':
+                raw.setdefault('effects',{})
             raw.setdefault('max_iterations',2)
             if raw.get('offline') or ('effects' in raw and raw['effects'] is None):
                 raise ValueError('在线测试必须启用效果和在线复核')
@@ -73,6 +74,7 @@ async def create(request):
         return JSONResponse({'id':ident,'output':config.output,
             'geometry_preset':config.geometry_preset,'vehicle_reference':config.vehicle_reference,
             'integration_mode':config.integration_mode,
+            'workflow':config.workflow,
             'effective_modes':{'scale':config.scale_mode,'contact':config.contact_mode,'chroma':config.chroma_mode,
                                'integration':config.integration_mode},
             'effects':config.effects.model_dump() if config.effects else None,
@@ -90,6 +92,7 @@ async def status(request):
         result['effects']=config.effects.model_dump() if config.effects else None
         result['geometry_preset']=config.geometry_preset
         result['integration_mode']=config.integration_mode
+        result['workflow']=config.workflow
         result['vehicle_reference']=config.vehicle_reference
         from .collision import VERSION as collision_version
         from .vehicle_scale import VERSION as scale_version
@@ -137,6 +140,7 @@ async def effect_options(request):
             {'value':'legacy','label':'原融合流程'},
             {'value':'coherent','label':'局部受光与反射协同（小样）'}],
             'promoted_default':False,'dependency':'lighting_material_render_shadow_compose_review'},
+        'workflows':['legacy','evidence_v1'],
         'recommended':{'scale_mode':'physical_consistent','effects':{
             **EffectSettings().model_dump(),'fog_mode':'local_auto','weathering':'preserve_source',
             'shadow_mode':'matched_receiver','lighting':'local'}},

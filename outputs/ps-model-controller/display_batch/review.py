@@ -55,7 +55,7 @@ ACTION_CAUSES={
     'dust':{'material','color','texture','surface_clean'},
     'contrast':{'lighting','texture','material'},
     'haze':{'color','lighting','texture','haze_clear','haze_heavy'},
-    'sharpness':{'edge','texture'},
+    'sharpness':{'edge','texture','too_sharp','too_blurry'},
     'fog_extra':{'haze_clear','haze_heavy'},
     'fog_gain':{'haze_clear','haze_heavy'},
     'pool_kernel':{'too_sharp','too_blurry'},
@@ -89,6 +89,9 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
         # The dedicated matte shader preserves source roughness, so the old
         # material profiles are not executable in this mode either.
         for name in ('dust','haze','sharpness','material'):options.pop(name,None)
+        if (params.get('workflow')=='evidence_v1' and params.get('fog_mode')=='local_auto'
+                and photo.get('effects',{}).get('edge_samples',0)>=12):
+            options['sharpness']=list(PHOTO_CONTROLS['sharpness'])
         if params.get('effects_ai_adjust',True):
             options.update({k:list(values) for k,values in EFFECT_ACTIONS.items()})
             if params.get('fog_mode')=='local_auto':options.pop('fog_extra',None)
@@ -99,7 +102,8 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
             if params.get('atmosphere')=='off' or measured.get('fog_base',0)<=0 or measured.get('sample_pixels',0)<20:
                 options.pop('fog_extra',None)
                 options.pop('fog_gain',None)
-            if params.get('pool_weight',0)<=0 or measured.get('edge_samples',0)<12 or measured.get('sample_pixels',0)<20:
+            if (params.get('workflow')=='evidence_v1' and params.get('fog_mode')=='local_auto'
+                    or params.get('pool_weight',0)<=0 or measured.get('edge_samples',0)<12 or measured.get('sample_pixels',0)<20):
                 options.pop('pool_kernel',None)
             if not measured.get('surface_dust_applied'):
                 options.pop('surface_dust',None)
@@ -184,6 +188,10 @@ def repair(params, review, allowed, candidate_ids, seen, *, dust_in_shader=False
         elif value not in allowed.get(kind,[]):reason='unavailable_or_saturated'
         elif not causes:reason='no_related_defect'
         elif kind in EFFECT_ACTIONS and not effect_direction(kind,value,params[kind],causes):reason='wrong_effect_direction'
+        elif kind=='sharpness' and params.get('workflow')=='evidence_v1' and not (
+                ('too_sharp' in causes and 'too_blurry' not in causes and PHOTO_CONTROLS[kind][value]<PHOTO_CONTROLS[kind][params[kind]])
+                or ('too_blurry' in causes and 'too_sharp' not in causes and PHOTO_CONTROLS[kind][value]>PHOTO_CONTROLS[kind][params[kind]])):
+            reason='wrong_effect_direction'
         elif any(a.kind==kind for a in selected):reason='duplicate_action'
         elif stage and (stage!=dependency or not (selected_causes&causes)):reason='different_cause_or_stage'
         else:

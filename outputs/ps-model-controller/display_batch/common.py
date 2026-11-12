@@ -8,6 +8,9 @@ from functools import lru_cache
 
 HERE = Path(__file__).resolve().parent.parent
 ROOT = HERE.parents[1]
+SOURCE = ROOT / "src"
+if str(SOURCE) not in sys.path:
+    sys.path.insert(0, str(SOURCE))
 BLENDER = ROOT / "work/blender45/blender-4.5.3-windows-x64/blender.exe"
 WEIGHTS = ROOT / "work/v2-models"
 
@@ -45,13 +48,16 @@ def implementation_manifest():
     import importlib.metadata
     files=sorted((HERE/'display_batch').glob('*.py'))+[HERE/'blender_display_worker.py',HERE/'display_collision_worker.py']
     files += [HERE/name for name in ('blender_worker.py','scene_v2.py','run.py','placement-web/review_viewer.py')]
+    core = sorted(SOURCE.glob('scrap_composite/*'))
     versions={}
     for name in ('numpy','trimesh','coacd','rtree','scipy','Pillow','opencv-python','pydantic','httpx','torch','transformers','opencolorio','numba'):
         try:versions[name]=importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:versions[name]='unavailable'
     weights={str(p.relative_to(WEIGHTS)):file_hash(p) for p in
              (WEIGHTS/'mobile_sam.pt',WEIGHTS/'depth/model.safetensors',WEIGHTS/'matte/birefnet-general-lite.onnx') if p.is_file()}
-    return {'sources':{str(p.relative_to(HERE)):file_hash(p) for p in files},'weight_hashes':weights,
+    return {'sources':{str(p.relative_to(HERE)):file_hash(p) for p in files},
+            'core_sources':{p.name:file_hash(p) for p in core if p.suffix in ('.py','.jsx') and p.is_file()},
+            'weight_hashes':weights,
             'ocio_config_hash':file_hash(BLENDER.parent/'4.5/datafiles/colormanagement/config.ocio'),
             'dependencies':versions,'blender':'4.5.3','python':sys.version.split()[0]}
 

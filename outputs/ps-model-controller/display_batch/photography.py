@@ -156,7 +156,14 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     luma_iqr=float(np.diff(np.percentile(low_l[surface],[25,75]))[0])
     scene_iqr=float(np.diff(np.percentile(scene_lab[:,0],[25,75]))[0])
     base_contrast=float(np.clip(scene_iqr/max(luma_iqr,1),(.82 if polymer else .60) if reference else .88,1.10))
-    if calibration:base_contrast=1.
+    if calibration:
+        context=environment.get('local_context',{})
+        if (params.get('workflow')=='evidence_v1' and context.get('confidence')=='estimated'
+                and context.get('sample_pixels',0)>=64):
+            # Match low-frequency spread gently. Keep texture and highlight protection below.
+            base_contrast=float(np.clip(1+.45*(base_contrast-1),.86,1.04))
+        else:
+            base_contrast=1.
     contrast=1+(base_contrast-1)*control(params,'contrast')
     if fixed_tone is not None:
         contrast=fixed_tone['contrast_gain']

@@ -36,6 +36,11 @@ STRUCTURED_PROMPT=PILE_PROMPT+''' Each surface must include geometry_kind: plana
 curved, compound (multiple overlapping faces), or unknown. A broad image mask is
 not evidence of a plane. Curled sheets, bent sheets and layered stacks require
 their corresponding kind; never silently flatten them into a supporting plane.'''
+POLYGON_FORMAT=''' Return exactly one JSON object. A point is [x,y].
+hopper is one polygon of 3–8 points. excluded and protected are lists of polygons,
+for example [[[0.0,0.0],[0.1,0.0],[0.1,0.1],[0.0,0.1]]]. Use [] if absent.
+Never return a flat coordinate list or a four-number box. Use 3–8 points in each
+surface polygon. Do not copy the response_JSON_schema into the answer.'''
 
 
 def polygon_mask(polygons, size):
@@ -47,12 +52,13 @@ def polygon_mask(polygons, size):
 
 
 class Scenes:
-    def __init__(self, root, vision, legacy=False, structured=False):
+    def __init__(self, root, vision, legacy=False, structured=False, structured_json=False):
         self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True)
         self.vision=vision;self.engine=None;self.engine_lock=asyncio.Lock()
         self.loaded={};self.locks={}
         self.legacy=legacy
         self.structured=structured
+        self.structured_json=structured_json
 
     async def prepare(self, path):
         key=file_hash(path)
@@ -60,15 +66,22 @@ class Scenes:
         async with lock:return await self._prepare(path)
 
     async def _prepare(self, path):
-        key=signature('independent-scene-v5-surface-geometry' if self.structured else 'independent-scene-v3' if self.legacy else SCENE_VERSION,file_hash(path))
+        version=('independent-scene-v5-surface-geometry-json' if self.structured_json else
+                 'independent-scene-v5-surface-geometry' if self.structured else
+                 'independent-scene-v3' if self.legacy else SCENE_VERSION)
+        key=signature(version,file_hash(path))
         if key in self.loaded:return self.loaded[key]
         start=time.monotonic();folder=self.root/'scenes'/key;folder.mkdir(parents=True,exist_ok=True)
         with Image.open(path) as im:frame=ImageOps.exif_transpose(im).convert('RGB')
         preview=folder/'background.jpg'
         if not preview.is_file():
             thumb=frame.copy();thumb.thumbnail((1536,1024));thumb.save(preview,quality=88)
+        response_options={'plain_json':True} if self.structured_json else {}
+        prompt=STRUCTURED_PROMPT if self.structured else SCENE_PROMPT if self.legacy else PILE_PROMPT
+        if self.structured_json:
+            prompt+=POLYGON_FORMAT
         answer=await self.vision.ask('scene',StructuredSceneAnswer if self.structured else SceneAnswer,
-            STRUCTURED_PROMPT if self.structured else SCENE_PROMPT if self.legacy else PILE_PROMPT,{},[preview])
+            prompt,{},[preview],**response_options)
         atomic_json(folder/'analysis.json',answer.model_dump())
         async with self.engine_lock:
             if self.engine is None:self.engine=Perception(WEIGHTS,self.root)

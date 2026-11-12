@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, create_model, model_validator
 
 
 class Strict(BaseModel):
@@ -73,17 +73,34 @@ class BatchConfig(Strict):
     integration_mode: Literal['legacy', 'coherent'] = 'legacy'
     camera_pipeline: Literal['legacy_residual', 'premultiplied'] = 'legacy_residual'
     support_geometry: Literal['legacy', 'structured'] = 'legacy'
+    workflow: Literal['legacy', 'evidence_v1'] = 'legacy'
+    knowledge_db: str | None = None
+    prepare_photoshop: bool = False
+    _requested: dict = PrivateAttr(default_factory=dict)
+    _resolution_notes: dict = PrivateAttr(default_factory=dict)
 
     @model_validator(mode='after')
     def dust_uses_neighbourhood(self):
+        from . import common  # Exposes the shared source package for legacy entry points.
+        from scrap_composite.configuration import evidence_settings
+
+        self._requested = self.model_dump(exclude_unset=True)
+        if self.workflow == 'evidence_v1':
+            resolved, self._resolution_notes = evidence_settings(self.model_dump(), self.model_fields_set)
+            for field in ('integration_mode', 'camera_pipeline', 'support_geometry'):
+                setattr(self, field, resolved[field])
+            self.effects = EffectSettings.model_validate(resolved['effects'])
         if self.geometry_preset=='rebuild':
             if not self.vehicle_reference:
                 raise ValueError('geometry rebuild requires a vehicle_reference with internal_width_m and source')
             from .vehicle_scale import validate_reference
             validate_reference(self.vehicle_reference)
             self.scale_mode='reference_projection';self.contact_mode='strict';self.chroma_mode='local_budget'
-            self.effects=EffectSettings(fog_extra=0.,pool_kernel=3,surface_dust=.5,lighting='local',
-                fog_mode='local_auto',weathering='preserve_source',shadow_mode='matched_receiver')
+            if self.workflow == 'legacy':
+                self.effects=EffectSettings(fog_extra=0.,pool_kernel=3,surface_dust=.5,lighting='local',
+                    fog_mode='local_auto',weathering='preserve_source',shadow_mode='matched_receiver')
+            else:
+                self._resolution_notes['geometry_preset'] = 'audited reference scale, strict contact and local chroma'
             self.asset_scale_factors={}
         if self.integration_mode=='coherent' and self.effects is None:
             self.effects=EffectSettings(fog_extra=0.,pool_kernel=3,surface_dust=.5,lighting='local',
