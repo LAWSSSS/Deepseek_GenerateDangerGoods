@@ -241,6 +241,16 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
                            surface_weathering='scanned_materials' not in render_meta and 'matte_profile' not in render_meta,
                            fixed_tone=fixed_tone,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
+    chroma_limits=chroma_groups=None
+    if params.get('chroma_mode')=='local_budget':
+        from .chroma_budget import masks, budget, compress, measure
+        from .photography import display
+        chroma_limits=budget(reference_pixels,environment.get('local_context',{}).get('confidence','unknown'))
+        chroma_groups=masks(display(raw),alpha,channels.get('metallic'),candidate.get('material_classes',[]))
+        # This budget owns the FINAL sensor-space colour, with no retention floor.
+        # Applying it after the camera residual prevents colour changes leaking into
+        # background pixels through the camera PSF, while retaining legacy replay.
+        photo['chroma_initial']=measure(rgb,chroma_groups,chroma_limits)
     if local:
         clear_rgb=rgb
         rgb,local_air=local_veil(rgb,environment,{**params,'atmosphere':'off'} if params.get('fog_mode')=='local_auto' else params)
@@ -261,6 +271,8 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     else:foreground=(scene['depth_native'][y:b,x:r]>site['depth']+.10)&~support
     foreground &= ~protected
     visible_alpha=alpha*((~foreground)&(~protected))
+    if chroma_groups is not None:
+        chroma_groups={k:v&(visible_alpha>.95) for k,v in chroma_groups.items()}
     local_atmospheric=None
     if local and params.get('fog_mode')=='local_auto':
         from .local_atmosphere import fields_for
@@ -401,6 +413,12 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         photo['color_pipeline']='scene_linear_EXR_exposure_WB_AgX_once_local_camera_veil_residual_filter'
         for label,value in PHOTO_CONTROLS['sharpness'].items():
             photo['effective_controls'][label]['sharpness']=math.sqrt(max(environment['camera_psf']['sigma_px']**2-.38**2,0))/value
+    if chroma_groups is not None:
+        exported_preview=np.rint(np.clip(result,0,1)*255).astype(np.float32)/255
+        initial_final=measure(exported_preview,chroma_groups,chroma_limits)
+        photo['chroma_recompositions']=int(initial_final['status']=='fail')
+        if initial_final['status']=='fail':
+            result,photo['chroma_recomposition']=compress(result,chroma_groups,chroma_limits,visible_alpha)
     crop_out=np.uint8(np.rint(np.clip(result,0,1)*255))
     original=base_rgb[y:b,x:r].copy()
     base_rgb[y:b,x:r][edited]=crop_out[edited]
@@ -451,6 +469,14 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
       'holes_alpha':{'status':'pass','basis':'unchanged_object_alpha_before_foreground_mask'},
       'size':{'status':'pass' if exported_size==[w,h] else 'fail','pixels':exported_size},
     }
+    if chroma_groups is not None:
+        photo['final_chroma']=measure(exported[y:b,x:r].astype(np.float32)/255,chroma_groups,chroma_limits)
+        checks['local_chroma']=photo['final_chroma']
+    if candidate.get('strict_contact'):
+        checks['contact_gap']=candidate.get('contact_gap',{'status':'unknown','reason':'no_metric_gap_audit'})
+        if not physics.get('stable'):
+            checks['physics']['status']='fail'
+        if not cover or min(cover)<.9:checks['support']['status']='fail'
     if photo.get('atmosphere'):
         atmosphere=photo['atmosphere']
         checks['atmosphere']={'status':'pass' if atmosphere['confidence']=='estimated' and atmosphere['mode']=='auto' else 'unknown',

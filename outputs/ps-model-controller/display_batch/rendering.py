@@ -38,6 +38,7 @@ def render_request(asset,candidate,params,environment):
              'dust_gain':1.6 if params['material']=='weathered' else 1.,
              'light_gain':LIGHT_PROFILES[params['light']]}
     if candidate.get('camera'):request['camera']=candidate['camera']
+    if candidate.get('contact_band'):request['contact_band']=candidate['contact_band']
     if candidate.get('receiver',{}).get('patches'):request['receiver']=candidate['receiver']
     return request
 
@@ -52,7 +53,7 @@ def reference_path(cache,asset,candidate,params,environment,device='OPTIX',resol
 @lru_cache(maxsize=1)
 def render_dependencies():
     files=['blender_display_worker.py','blender_worker.py','display_batch/geometry.py',
-           'display_batch/framing.py','display_batch/materials.py','display_batch/rendering.py',
+           'display_batch/framing.py','display_batch/materials.py','display_batch/rendering.py','display_batch/contact_geometry.py',
            'display_batch/scanned_shader.py','display_batch/local_light.py']
     return signature('blender-4.5.3',{name:file_hash(HERE/name) for name in files})
 
@@ -65,6 +66,7 @@ def part_keys(request, device, dependencies):
     light['calibrated']=bool(environment.get('calibration'))
     shared=(RENDER_VERSION,dependencies,device,request['appearance'],request['camera'],
             request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'])
+    if request.get('contact_band'):shared=(*shared,request['contact_band'])
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
              request['dust_gain'],request['dust_control'],request['material_classes'],
              environment.get('dust_color'),environment.get('haze') if request['appearance']!='native' else None,

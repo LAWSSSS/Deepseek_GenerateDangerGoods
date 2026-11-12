@@ -139,6 +139,13 @@ def receiver_mesh(scene,candidate,*,bounds=None):
     x,y,r,b=bounds or candidate['bounds']
     camera=candidate['camera'];offset=candidate['offset'];full=candidate['full_px']
     patches=[]
+    strict=candidate.get('strict_contact',False)
+    support_ids=candidate.get('support_ids',[candidate['site_id']])
+    independent=all(s.get('plane_origin_m') is not None and s.get('plane_status')=='measured'
+                    for s in scene['supports'] if s['id'] in support_ids)
+    if strict and len(support_ids)>1 and not independent:
+        return {'patches':[],'height_confidence':'unknown','basis':'separate_support_heights_unresolved',
+                'hidden_heights':'unknown','signature':signature('strict-receiver-v1',support_ids,'unresolved')}
     for site in scene['supports']:
         if site['id'] not in candidate.get('support_ids',[candidate['site_id']]):continue
         mask=site['mask'][y:b,x:r]
@@ -157,12 +164,22 @@ def receiver_mesh(scene,candidate,*,bounds=None):
         for left,top,right,bottom in rectangles:
             pixels=np.array([[x+left*step,y+top*step],[x+right*step,y+top*step],
                              [x+right*step,y+bottom*step],[x+left*step,y+bottom*step]])
-            world,_=world_on_plane(pixels,camera,offset,full,candidate.get('plane_normal',[0,0,1]))
+            normal=candidate.get('plane_normal',[0,0,1]);origin=[0,0,0]
+            if strict and independent:
+                normal=site['plane_normal']
+                unit=candidate['scale']['physical_size']['nominal_mm']/1000
+                origin=(np.asarray(site['plane_origin_m'])/unit).tolist()
+            world,_=world_on_plane(pixels,camera,offset,full,normal,origin)
             start=len(vertices);vertices.extend(world.tolist());faces.extend([[start,start+1,start+2],[start,start+2,start+3]])
         if faces:patches.append({'site_id':site['id'],'vertices':vertices,'faces':faces})
     sites=[s for s in scene['supports'] if s['id'] in candidate.get('support_ids',[candidate['site_id']])]
     coplanar=(all(s.get('slope_deg',0)<=7.5 and s.get('plane_residual',0)<=.04 for s in sites)
               and (max(s['depth'] for s in sites)-min(s['depth'] for s in sites))<=.04)
+    if strict:
+        return {'patches':patches,'basis':'independent_metric_supports' if independent else 'single_surface_estimated_plane',
+                'height_confidence':'measured' if independent else 'estimated_single',
+                'hidden_heights':'measured' if independent else 'unknown',
+                'signature':signature('strict-receiver-v1',patches,independent)}
     return {'patches':patches,'basis':'finite_coplanar_support_patches_estimated_from_image',
             'height_confidence':'estimated_coplanar' if coplanar else 'unknown',
             'hidden_heights':'unknown','signature':signature(VERSION,patches,coplanar)}
@@ -234,7 +251,12 @@ def choose_pile_candidates(asset,scene,seed=0,config=None):
         if row['scale'].get('fixed_physical_size'):
             from .consistent_scale import calibration_to_native
             row['scale']=calibration_to_native(row['scale'],factor,scene['size'])
-        geom=cached_projection(asset,data['vertices'],data['faces'],{'matrix':row['matrix']},0,row['elevation'])
+        if row.get('strict_contact') or row['scale'].get('calibration',{}).get('status')=='pass':
+            from .scene import projection_geometry
+            geom=projection_geometry(data['vertices'],data['faces'],{'matrix':row['matrix']},0,row['elevation'],
+                                     row['plane_normal'],camera=row['camera'])
+        else:
+            geom=cached_projection(asset,data['vertices'],data['faces'],{'matrix':row['matrix']},0,row['elevation'])
         fit=fitted_masks(geom,row['anchor_px'],row['full_px'],scene)
         if fit is None:reject.append({'candidate':row['id'],'reason':'full_resolution_outside_image'});continue
         x,y,r,b=fit['bounds'];mask=fit['hull']
@@ -243,7 +265,10 @@ def choose_pile_candidates(asset,scene,seed=0,config=None):
         row.update(bounds=fit['bounds'],offset=fit['offset'])
         cover=contact_support(fit['contact'],support_union(scene,row['support_ids'],fit['bounds']))
         row['contact_min']=min(cover) if cover else 0;row['contact_coverages']=cover
-        if row['contact_min']<.9:row['uncertainties'].append('full_resolution_support_unknown')
+        if row['contact_min']<.9:
+            if row.get('strict_contact'):
+                reject.append({'candidate':row['id'],'reason':'full_resolution_contact_below_90_percent'});continue
+            row['uncertainties'].append('full_resolution_support_unknown')
         row['receiver']=receiver_mesh(scene,row)
         selected.append(row)
         if len(selected)==3:break
@@ -255,6 +280,7 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
     from .geometry import terrain_matrix,horizontal_angle
     from .schema import BatchConfig
     config=config or BatchConfig(backgrounds='unused',output='unused')
+    strict=config.contact_mode=='strict'
     native=config.appearance=='native'
     data=np.load(asset['geometry']);vertices=data['vertices'];faces=data['faces']
     midpoint=sum(scene['answer']['elevation'])/2;records=[];reject=[];seen=set();geometries={}
@@ -270,7 +296,11 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
             abs(s['depth']-site['depth'])<.16 and np.linalg.norm(np.subtract(s['anchor_px'],site['anchor_px']))<diagonal*.25],
             key=lambda s:np.linalg.norm(np.subtract(s['anchor_px'],site['anchor_px'])))[:3]
         groups=[('surface',[site])]
-        if neighbors:groups.extend([('combined',[site,*neighbors]),('embedded',[site,*neighbors])])
+        if strict:
+            measured=[s for s in [site,*neighbors] if s.get('plane_status')=='measured' and s.get('plane_origin_m') is not None]
+            if len(measured)>1 and any(s['id']==site['id'] for s in measured):groups.extend([('combined',measured),('embedded',measured)])
+            groups.append(('embedded',[site]))
+        elif neighbors:groups.extend([('combined',[site,*neighbors]),('embedded',[site,*neighbors])])
         else:groups.append(('embedded',[site]))
         groups=[g for g in groups if config.placement_mode in ('auto',g[0])]
         site_count=0;reason_counts={}
@@ -283,7 +313,10 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
             for anchor_index,anchor in enumerate(anchors):
                 fixed_size = asset.get('physical_size')
                 if fixed_size:
-                    from .consistent_scale import local_scale as physical_scale
+                    if config.scale_mode=='reference_projection':
+                        from .reference_projection import local_scale as physical_scale
+                    else:
+                        from .consistent_scale import local_scale as physical_scale
                     interval,evidence=physical_scale(scene,site,anchor,fixed_size)
                 else:
                     interval,evidence=local_scale(scene,site,anchor,asset['semantic']['major_mm'])
@@ -301,12 +334,14 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                 if evidence['status']=='unknown' or fixed_size:correction=1.
                 for pose in asset['poses']:
                     for yaw in range(0,360,30):
-                        matrix=terrain_matrix(pose['matrix'],yaw,[0,0,1])
+                        normal=site.get('plane_normal',[0,0,1]) if strict else [0,0,1]
+                        if evidence.get('calibration',{}).get('status')=='pass':normal=[0,0,1]
+                        matrix=terrain_matrix(pose['matrix'],yaw,normal)
                         tilt=horizontal_angle(asset['axis'],matrix)
                         if tilt>15:continue
-                        key=(pose['id'],yaw)
+                        key=(pose['id'],yaw,tuple(normal))
                         if key not in geometries:
-                            geometries[key]=cached_projection(asset,vertices,faces,{**pose,'matrix':matrix.tolist()},0,midpoint)
+                            geometries[key]=cached_projection(asset,vertices,faces,{**pose,'matrix':matrix.tolist()},0,midpoint,normal)
                         geom=geometries[key]
                         distance=np.linalg.norm(np.subtract(geom['camera']['eye'],geom['camera']['target']))
                         projected_span=float(np.ptp(geom['uv'],axis=0).max())
@@ -316,6 +351,20 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                             world_ppm=target*correction
                             full_px=world_ppm*2*distance*math.tan(math.radians(geom['camera']['fov']/2))
                             projected_major=full_px*projected_span
+                            if evidence.get('calibration',{}).get('status')=='pass':
+                                from .reference_projection import metric_projection
+                                from .geometry import contact_world, transformed
+                                from .scene import projection_geometry
+                                patches=contact_world(transformed(vertices,matrix),faces,normal=normal)
+                                if not patches:continue
+                                points=np.concatenate(patches);center=(points.min(0)+points.max(0))/2
+                                factor=scene.get('_image_scale',1.)
+                                cam,frame=metric_projection(evidence['calibration'],np.asarray(anchor)/factor,
+                                    fixed_size['nominal_mm'],np.asarray(scene['size'])/factor,center)
+                                geom=projection_geometry(vertices,faces,{'matrix':matrix.tolist()},0,midpoint,normal,camera=cam)
+                                full_px=frame*factor;projected_major=full_px*float(np.ptp(geom['uv'],axis=0).max())
+                                key=(pose['id'],yaw,tuple(normal),site['id'],anchor_index)
+                                geometries[key]=geom
                             if projected_major<64*image_scale:continue
                             fit=fitted_masks(geom,anchor,full_px,scene)
                             if fit is None:reason_counts['outside_image_or_size'] = reason_counts.get('outside_image_or_size',0)+1;continue
@@ -327,6 +376,8 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                                 reason_counts[reason]=reason_counts.get(reason,0)+1;continue
                             support=union[y:b,x:r];cover=contact_support(fit['contact'],support)
                             minimum=min(cover) if cover else 0
+                            if strict and minimum<.9:
+                                reason_counts['contact_below_90_percent']=reason_counts.get('contact_below_90_percent',0)+1;continue
                             front=scene['depth_native'][y:b,x:r]>site['depth']+.035
                             fraction=float((front&mask).sum()/area)
                             if minimum<.20 and fraction<.10:
@@ -340,14 +391,18 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                             bonus=.30 if mode=='embedded' and .10<=fraction<=.40 else .08 if mode=='combined' else 0
                             score=site['confidence']*.5+minimum*.7+bonus-.18*len(uncertain)-max(0,fraction-.4)*2
                             score-=abs(target-math.sqrt(low*high))/max(high,1)*.1
+                            if strict:score+=(.35 if len(group)==1 else 0)-pose['height']*.2-site.get('slope_deg',0)*.01
                             ident=f"{site['id']}-{mode}-{pose['id']}-Y{yaw}-Z{scale_index}-A{anchor_index}"
                             if ident in seen:continue
                             seen.add(ident);site_count+=1
+                            calibrated=evidence.get('calibration',{}).get('status')=='pass'
+                            actual_elevation=math.degrees(math.asin(-geom['camera']['basis'][2][2])) if calibrated else midpoint
                             records.append({'id':ident,'site_id':site['id'],'support_ids':ids,'placement':mode,
                                 'material_classes':asset['semantic']['material_classes'],
                                 'pose_id':pose['id'],'matrix':matrix.tolist(),'yaw':0,'horizontal_yaw_deg':yaw,
-                                'plane_normal':[0,0,1],'plane_basis':'local_visible_supports_estimated',
-                                'camera':geom['camera'],'elevation':midpoint,'elevation_interval':scene['answer']['elevation'],
+                                'plane_normal':normal,'plane_basis':'local_visible_supports_estimated','strict_contact':strict,
+                                'camera':geom['camera'],'elevation':actual_elevation,
+                                'elevation_interval':[actual_elevation,actual_elevation] if calibrated else scene['answer']['elevation'],
                                 'anchor_px':anchor,'full_px':full_px,'target_px':projected_major,'expected_major_px':projected_major,
                                 'axis_angle_deg':tilt,'offset':fit['offset'],'bounds':fit['bounds'],
                                 'anchor_uv':geom['anchor'].tolist(),

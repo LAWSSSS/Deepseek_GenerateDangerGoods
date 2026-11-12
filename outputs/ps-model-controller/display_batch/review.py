@@ -73,6 +73,7 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
     elif params['photo_model']=='camera' and render_style=='reference':
         options.pop('dust')
     if params.get('atmosphere')=='off':options.pop('haze',None)
+    if params.get('chroma_mode')=='local_budget':options.pop('chroma',None)
     if params.get('effects_enabled'):
         # Never offer two controls for the same physical effect.
         # The dedicated matte shader preserves source roughness, so the old
@@ -230,6 +231,9 @@ Never repair a rectangular patch_seam by more haze. Do not invent a different re
         payload.update(effects=comp.get('photo',{}).get('effects'),
                        evidence_status=evidence_status(checks),
                        checks={k:v['status'] for k,v in checks.items()})
+        if params.get('chroma_mode')=='local_budget':
+            payload['final_local_chroma']=comp.get('photo',{}).get('final_chroma')
+            prompt+=' The final image already has a measured local chroma ceiling. Do not add dust or haze to hide a colour discrepancy; identify wrong illumination or airlight when visible.'
         from pathlib import Path
         context=Path(comp['image']).with_suffix('.context.jpg')
         if context.is_file():images[1]=context

@@ -163,6 +163,7 @@ def write_summary(out,store,usage=None,run=None):
         trace={'none':'未见插入痕迹','uncertain':'插入痕迹不确定','visible':'可见插入痕迹'}.get(r.get('insertion_trace'),'')
         history=[]
         for entry in r.get('iterations',[]):
+            if entry.get('deliverable') is False:continue
             p=entry.get('params',{})
             if not p.get('effects_enabled'):continue
             history_image=Path(entry['image']).resolve()
@@ -261,6 +262,30 @@ class Pipeline:
         return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
 
     async def choose_placements(self,asset,scene,seed):
+        if self.config.scale_mode=='reference_projection' or self.config.contact_mode=='strict':
+            from .specifications import identify, scene_observations
+            from .reference_projection import audit
+            from .strict_contact import simulate
+            from .assets import initial_poses
+            async with self.prepare_lock:
+                if 'physical_size' not in asset:
+                    asset['physical_size']=await identify(asset,self.vision,self.cache,self.config.dimension_registry)
+                if self.config.contact_mode=='strict' and not asset.get('metric_prepared'):
+                    data=np.load(asset['geometry']);_,initial=initial_poses(data['vertices'])
+                    physics=await simulate(asset,self.blender,initial)
+                    poses=[p for p in physics['poses'] if p['stable']]
+                    ext=sorted(asset['inspection']['extents'])
+                    if poses and ext[-1]/max(ext[-2],1e-6)<1.5:
+                        low=min(p['height'] for p in poses);poses=[p for p in poses if p['height']<=low*1.15]
+                    asset.update(poses=poses,metric_prepared=True,metric_physics=physics)
+                    atomic_json(self.out/'physics-models'/(str(asset['id'])+'.json'),physics)
+            scene['reference_audit']=audit(scene,self.config.scene_reference_registry)
+            scene['reference_audit']['visual_observations']=await scene_observations(scene,self.vision,self.cache)
+            atomic_json(self.out/'scale-models'/(str(asset['id'])+'.json'),asset['physical_size'])
+            atomic_json(self.out/'scale-scenes'/(scene['key']+'.json'),scene['reference_audit'])
+            if not asset['poses']:
+                return [],[{'reason':'no_valid_metric_lying_pose','evidence':asset.get('metric_physics')}]
+            return await asyncio.to_thread(choose_candidates,asset,scene,seed,self.config)
         if self.config.scale_mode == 'physical_consistent':
             from .consistent_scale import scaled_asset, scene_calibration
             asset = scaled_asset(asset,self.config.asset_scale_factors.get(str(asset.get('id','')),1.))
@@ -314,12 +339,26 @@ class Pipeline:
     async def validate_pile_pose(self,asset,scene,candidate):
         from .geometry import transformed,horizontal_angle
         candidate=dict(candidate);candidate['allow_uncertain']=self.config.uncertain_policy=='render_review'
+        strict=self.config.contact_mode=='strict'
         receiver=candidate['receiver'];data=np.load(asset['geometry'])
         original=transformed(data['vertices'],candidate['matrix'])
-        if original[:,2].min()<-.004:raise ValueError('confirmed_initial_ground_penetration')
+        if not strict and original[:,2].min()<-.004:raise ValueError('confirmed_initial_ground_penetration')
         key=signature('finite-support-physics-v1',asset['physics_signature'],candidate['matrix'],receiver['signature'])
         path=Path(asset['folder'])/'terrain'/(key+'.json');hit=path.is_file()
-        if receiver['patches']:
+        if strict:
+            from .strict_contact import simulate, validate_receiver, projected_gap
+            from .metric_physics import tolerances
+            validate_receiver(candidate)
+            physics=await simulate(asset,self.blender,[candidate['matrix']],receiver,candidate['plane_normal'])
+            simulated=physics['poses'][0];key=physics['signature'];hit=physics['cache_hit']
+            if not simulated['stable']:
+                raise ValueError('strict_contact_'+','.join(simulated['failure_codes']))
+            gap=projected_gap(simulated,candidate)
+            if gap['status']=='fail':raise ValueError('visible_contact_gap_over_2px')
+            candidate['contact_gap']=gap
+            unit=asset['physical_size']['nominal_mm']/1000
+            candidate['contact_band']=tolerances(unit)['contact_m']/unit
+        elif receiver['patches']:
             if hit:physics=json.loads(path.read_text(encoding='utf8'))
             else:
                 physics=await self.blender.ask('settle',{'geometry':asset['geometry'],
@@ -338,7 +377,9 @@ class Pipeline:
             candidate['uncertainties']=list(candidate['uncertainties'])+['hidden_support_or_height_unknown']
         # Keep the scene camera fixed when a simulated object moves; update the contact pixel.
         middle=candidate['elevation'];camera=candidate['camera'];full=candidate['full_px']
-        geom=projection_geometry(data['vertices'],data['faces'],pose,0,middle,camera=camera)
+        geom=projection_geometry(data['vertices'],data['faces'],pose,0,middle,
+                                 candidate['plane_normal'] if strict else (0,0,1),camera=camera,
+                                 contact_band=candidate.get('contact_band',.008),receiver=receiver if strict else None)
         if geom['anchor'] is None:raise ValueError('no_visible_contact_geometry')
         anchor=(np.asarray(candidate['offset'])+geom['anchor']*full).tolist()
         fit=fitted_masks(geom,anchor,full,scene)
@@ -349,7 +390,7 @@ class Pipeline:
         cover=contact_support(
             fit['contact'],support_union(scene,candidate['support_ids'],fit['bounds']))
         if not cover or min(cover)<.9:
-            if not candidate['allow_uncertain']:raise ValueError('support_coverage_insufficient')
+            if strict or not candidate['allow_uncertain']:raise ValueError('support_coverage_insufficient')
             candidate['uncertainties']=list(candidate['uncertainties'])+['support_coverage_insufficient']
         tilt=horizontal_angle(asset['axis'],pose['matrix'])
         if tilt>15:raise ValueError('confirmed_non_horizontal_pose')
@@ -359,7 +400,9 @@ class Pipeline:
             contact_min=min(cover) if cover else 0,axis_angle_deg=tilt)
         endpoint_risks=[]
         for elevation in candidate['elevation_interval']:
-            endpoint=projection_geometry(data['vertices'],data['faces'],pose,0,elevation)
+            endpoint=projection_geometry(data['vertices'],data['faces'],pose,0,elevation,
+                                         candidate['plane_normal'] if strict else (0,0,1),
+                                         contact_band=candidate.get('contact_band',.008),receiver=receiver if strict else None)
             other=fitted_masks(endpoint,anchor,full,scene)
             if other is None:endpoint_risks.append({'elevation':elevation,'reason':'outside_image'});continue
             ox,oy,rr,bb=other['bounds'];m=other['hull']
@@ -372,7 +415,7 @@ class Pipeline:
         if receiver['height_confidence']=='unknown':
             candidate['uncertainties']=list(candidate['uncertainties'])+['support_heights_uncertain']
         candidate['terrain_physics']={**pose,'signature':key,'cache_hit':hit,'simulation':simulated,
-            'status':'pass' if pose.get('stable') and receiver['height_confidence']!='unknown' else 'unknown',
+            'status':'pass' if pose.get('stable') and (receiver['height_confidence']=='measured' if strict else receiver['height_confidence']!='unknown') else 'unknown',
             'basis':receiver['basis'],'hidden_heights':receiver['hidden_heights']}
         return candidate
 
@@ -402,11 +445,16 @@ class Pipeline:
         photo_model={'native':'native','local':'local','camera':'camera','scene':'camera'}.get(self.config.appearance,'reference')
         return {'candidate':candidate,'material':'original','light':'scene','tone':'scene','photo_model':photo_model,
                 'photo_style':self.config.photo_style,'atmosphere':self.config.atmosphere,
+                'chroma_mode':self.config.chroma_mode,
                 **{k:'auto' for k in PHOTO_CONTROLS},**effect_parameters(self.config.effects)}
 
     @staticmethod
     def finish_image(out,ident,result,best):
-        dest=out/('accepted' if result['status']=='accepted_display' else 'review')
+        if best.get('deliverable') is False:raise ValueError('physical_failure_is_not_deliverable')
+        estimated=(best['checks'].get('scale',{}).get('evidence',{}).get('version')=='reference-projection-v1'
+                   and best['checks']['scale']['status']!='pass')
+        dest=out/('estimated' if estimated else 'accepted' if result['status']=='accepted_display' else 'review')
+        result['delivery_group']='estimated_scale' if estimated else 'normal'
         dest.mkdir(parents=True,exist_ok=True)
         final=dest/(ident+'.png');shutil.copy2(best['image'],final)
         crop=dest/(ident+'.crop.jpg');shutil.copy2(best['crop'],crop)
@@ -442,7 +490,7 @@ class Pipeline:
             asset=await self.prepare_asset(payload['asset_id'])
             result['timings']['asset_prepare_seconds']=round(time.monotonic()-start,3)
             result['asset_signature']=asset['signature']
-            if not asset['poses']:
+            if not asset['poses'] and not (self.config.contact_mode=='strict' and asset.get('axis')):
                 result['reason']=asset['reason'];return result
             self.store.checkpoint(ident,'scene',{})
             stage_start=time.monotonic()
@@ -461,7 +509,9 @@ class Pipeline:
             save_candidates()
             result['rejections']=rejected
             if not candidates:
-                result['reason']='no_geometric_candidate';return result
+                result['reason']='no_valid_metric_lying_pose' if any(r.get('reason')=='no_valid_metric_lying_pose' for r in rejected) else 'no_geometric_candidate'
+                if self.config.contact_mode=='strict':result.update(status='failed',evidence_status='fail')
+                return result
             params=self.default_params(candidates[0]['id'])
             seen=set();seen_images=set();best_rank=None;no_gain=0;reason='iterations_exhausted'
             adjusted_classes=set(SURFACE_DUST)
@@ -477,6 +527,8 @@ class Pipeline:
                 if cid not in ready:
                     candidate=next(c for c in candidates if c['id']==cid)
                     result['candidate_visits'].append(cid)
+                    if self.config.contact_mode=='strict':
+                        await asyncio.to_thread(diagnostic,scene,candidate,folder/(cid+'-initial-diagnostic.jpg'))
                     before=time.monotonic()
                     try:
                         ready[cid]=await self.validate_local_pose(asset,scene,candidate) if 'plane_normal' in candidate else candidate
@@ -549,9 +601,28 @@ class Pipeline:
                                          'uncertainties':c.get('uncertainties',[])} for c in choices])
                 previous_candidate=cid
                 entry={**draft,'review':review.model_dump()}
+                if self.config.contact_mode=='strict':
+                    from .strict_contact import visual_veto
+                    veto=visual_veto(review);entry['deliverable']=not veto
+                    entry['physical_visual_veto']=veto
                 result['iterations'].append(entry)
                 atomic_json(folder/f'iteration-{iteration}.json',entry)
                 self.store.checkpoint(ident,'review',{'last_iteration':iteration,'params':params,'record':str(folder/f'iteration-{iteration}.json')})
+                if entry.get('deliverable') is False:
+                    invalid.add(cid);rejected.append({'candidate':cid,'reason':'visual_physical_failure','defects':veto})
+                    for previous in result['iterations']:
+                        if previous['params']['candidate']==cid:previous['deliverable']=False
+                    # A later view can expose the same candidate's earlier hidden physical fault.
+                    eligible=[e for e in result['iterations'] if e.get('deliverable',True) and e['params']['candidate'] not in invalid]
+                    best=max(eligible,key=lambda e:version_rank(e['checks'],Review.model_validate(
+                        {k:v for k,v in e['review'].items() if k!='trace'}))) if eligible else None
+                    best_rank=None;save_candidates()
+                    fallback=next((c['id'] for c in candidates if c['id'] not in invalid and c['id'] not in ready),None)
+                    if fallback and iteration<self.config.max_iterations:
+                        params=self.default_params(fallback);iteration+=1;continue
+                    reason='no_deliverable_candidate_after_physical_veto'
+                    if best is None:result.update(status='failed',evidence_status='fail')
+                    break
                 rank=version_rank(comp['checks'],review)
                 if isinstance(review,(FusionReview,EffectsReview)):
                     trace_rank={'none':2,'uncertain':1,'visible':0}[review.trace]
@@ -597,13 +668,17 @@ class Pipeline:
                 params=updated;iteration+=1
             if best:
                 self.finish_image(self.out,ident,result,best)
+            elif self.config.contact_mode=='strict':
+                result.update(status='failed',evidence_status='fail')
             result['reason']=reason
             return result
         except (ProviderUnavailable,RenderUnavailable):
             raise
         except Exception as error:
             result.update(status='failed',reason=f'{type(error).__name__}: {str(error)[:260]}')
-            if best:self.finish_image(self.out,ident,result,best)
+            if best:
+                if self.config.contact_mode=='strict':result['status']='review'
+                self.finish_image(self.out,ident,result,best)
             elif draft:
                 result.update(checks=draft['checks'],draft_record=str(folder/f"draft-{draft['iteration']}.json"),
                     unreviewed_draft=True,measured_major_px=draft['measured_major_px'],
@@ -628,6 +703,9 @@ class Pipeline:
         source_config=json.loads((source/'config.json').read_text(encoding='utf8'))
         exclude={'output','manifest','count','offline'}
         source_vision=json.loads((source/'vision-signature.json').read_text(encoding='utf8'))
+        source_evidence=source/'dimension-reference-signature.json'
+        if source_evidence.is_file() and json.loads(source_evidence.read_text(encoding='utf8'))!=self.dimension_reference_signature():
+            raise ValueError('pilot dimension/reference evidence has changed')
         if source_vision['signature']!=signature(self.vision.endpoint.model_dump()) or signature(source_manifest)!=signature(implementation) or {
             k:v for k,v in source_config.items() if k not in exclude
         }!=self.config.model_dump(exclude=exclude):
@@ -650,12 +728,20 @@ class Pipeline:
                                 'api_retries':0,'reported_tokens':0,'unreported_calls':0})
             self.store.finish(row['id'],result['status'],result)
 
+    def dimension_reference_signature(self):
+        from .specifications import CATALOG
+        if self.config.scale_mode!='reference_projection' and self.config.contact_mode!='strict':return None
+        return {k:file_hash(resolve(v)) if v else None for k,v in {
+            'catalog':str(CATALOG),'dimensions':self.config.dimension_registry,
+            'scene_references':self.config.scene_reference_registry}.items()}
+
     async def run(self,*,reuse_from=None):
         started=time.monotonic();state='complete';error=None
         jobs=make_jobs(self.config,self.catalog)
         implementation=implementation_manifest()
         config_signature=signature(VERSION,self.config.model_dump(exclude={'offline'}),jobs,
-                                    RENDER_VERSION,COMPOSE_VERSION,implementation,self.vision.endpoint.model_dump())
+                                    RENDER_VERSION,COMPOSE_VERSION,implementation,self.vision.endpoint.model_dump(),
+                                    self.dimension_reference_signature())
         with batch_lock(self.out):
             self.store.initialize(config_signature,jobs);self.store.recover()
             atomic_json(self.out/'config.json',self.config.model_dump())
@@ -663,6 +749,7 @@ class Pipeline:
             atomic_json(self.out/'inputs.json',jobs)
             atomic_json(self.out/'implementation.json',implementation)
             atomic_json(self.out/'vision-signature.json',{'signature':signature(self.vision.endpoint.model_dump())})
+            atomic_json(self.out/'dimension-reference-signature.json',self.dimension_reference_signature())
             try:
                 if reuse_from:self.reuse_completed(reuse_from,implementation)
                 if not self.config.offline and self.store.counts().get('queued'):

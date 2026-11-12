@@ -63,7 +63,11 @@ class BatchConfig(Strict):
     atmosphere: Literal['auto','off'] = 'auto'
     review_format: Literal['full','compact'] = 'full'
     effects: EffectSettings | None = None
-    scale_mode: Literal['legacy', 'physical_consistent'] = 'legacy'
+    scale_mode: Literal['legacy', 'physical_consistent', 'reference_projection'] = 'legacy'
+    contact_mode: Literal['legacy', 'strict'] = 'legacy'
+    chroma_mode: Literal['legacy', 'local_budget'] = 'legacy'
+    dimension_registry: str | None = None
+    scene_reference_registry: str | None = None
 
     @model_validator(mode='after')
     def dust_uses_neighbourhood(self):

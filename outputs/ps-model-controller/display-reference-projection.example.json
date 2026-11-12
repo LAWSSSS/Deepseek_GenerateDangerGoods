@@ -1,0 +1,26 @@
+{
+  "backgrounds": "external/backgrounds",
+  "output": "outputs/reference-projection-trial",
+  "assets": ["3", "13", "22", "31", "33"],
+  "count": 15,
+  "seed": 20261110,
+  "max_iterations": 2,
+  "scale_mode": "reference_projection",
+  "contact_mode": "strict",
+  "chroma_mode": "local_budget",
+  "uncertain_policy": "render_review",
+  "placement_mode": "auto",
+  "appearance": "local",
+  "photo_style": "dusty_scrap",
+  "atmosphere": "auto",
+  "effects": {
+    "fog_mode": "local_auto",
+    "weathering": "preserve_source",
+    "surface_dust": 0.5,
+    "pool_kernel": 3,
+    "pool_weight": 1.0,
+    "lighting": "local",
+    "shadow_mode": "matched_receiver",
+    "ai_adjust": true
+  }
+}

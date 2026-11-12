@@ -122,6 +122,8 @@ async def effect_options(request):
         'recommended':{'scale_mode':'physical_consistent','effects':{
             **EffectSettings().model_dump(),'fog_mode':'local_auto','weathering':'preserve_source',
             'shadow_mode':'matched_receiver','lighting':'local'}},
+        'reference_projection_trial':{'scale_mode':'reference_projection','contact_mode':'strict',
+                                      'chroma_mode':'local_budget','legacy_display_factors_applied':False},
         'schema':EffectSettings.model_json_schema(),'actions':EFFECT_ACTIONS,
         'test_endpoint':'/api/batches/test','max_test_jobs':15,
         'dependencies':{'fog_extra':'compose_and_review','fog_gain':'compose_and_review','pool_kernel':'compose_and_review',

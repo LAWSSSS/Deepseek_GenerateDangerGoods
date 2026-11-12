@@ -130,11 +130,15 @@ class Scenes:
         return scene
 
 
-def projection_geometry(vertices,faces,pose,yaw,elevation,normal=(0,0,1),patches=None,camera=None):
+def projection_geometry(vertices,faces,pose,yaw,elevation,normal=(0,0,1),patches=None,camera=None,contact_band=.008,receiver=None):
     p,_=pose_points(vertices,pose['matrix'],yaw)
     camera=camera or camera_for(p,elevation)
     uv=cv2.convexHull(np.float32(project(p,camera))).reshape(-1,2).astype(float)
-    polys,anchor=contact_geometry(p,faces,camera,normal=normal,patches=patches)
+    if receiver:
+        from .contact_geometry import description
+        polys,anchor=description(p,faces,camera,receiver,contact_band)
+    else:
+        polys,anchor=contact_geometry(p,faces,camera,normal=normal,patches=patches,band=contact_band)
     from .pile import mesh_raster
     silhouette,depth=mesh_raster(p,faces,camera)
     foot=np.zeros(silhouette.shape,np.uint8)

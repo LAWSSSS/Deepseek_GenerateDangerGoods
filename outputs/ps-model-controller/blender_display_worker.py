@@ -141,6 +141,9 @@ def make_receiver(request,normal,physical=False):
 
 
 def settle(request):
+    if 'length_m' in request:
+        from display_batch.metric_physics import run
+        return run(request,reset,rigid,make_receiver)
     data=np.load(request['geometry']);vertices=data['vertices'];faces=data['faces']
     proxy=json.loads(Path(request['proxy']).read_text(encoding='utf8'))
     com=np.asarray(proxy['centroid'])
@@ -408,7 +411,11 @@ def render(request):
     configure_materials(obj,request)
     bpy.context.view_layer.update()
     normal=np.asarray(request.get('plane_normal',[0,0,1]),dtype=float)
-    polys,anchor=contact_geometry(p,faces,camera,normal=normal)
+    if request.get('contact_band') and request.get('receiver'):
+        from display_batch.contact_geometry import description
+        polys,anchor=description(p,faces,camera,request['receiver'],request['contact_band'])
+    else:
+        polys,anchor=contact_geometry(p,faces,camera,normal=normal,band=request.get('contact_band',.008))
     # The receiver also participates in object indirect lighting. Camera invisibility
     # keeps holes transparent while preventing an artificially illuminated underside.
     ground=make_receiver(request,normal)
@@ -799,7 +806,11 @@ def render_parts(request):
         ground.data.materials.append(state['receiver_material'])
         state.update(ground=ground,receiver_key=receiver_key)
     ground=state['ground']
-    polys,anchor=contact_geometry(points,faces,camera,normal=normal)
+    if request.get('contact_band') and request.get('receiver'):
+        from display_batch.contact_geometry import description
+        polys,anchor=description(points,faces,camera,request['receiver'],request['contact_band'])
+    else:
+        polys,anchor=contact_geometry(points,faces,camera,normal=normal,band=request.get('contact_band',.008))
     timings={'asset_import_seconds':import_seconds,'scene_setup_seconds':time.monotonic()-started-import_seconds}
     scene.render.image_settings.color_mode='RGBA'
     scene.cycles.use_denoising=True
