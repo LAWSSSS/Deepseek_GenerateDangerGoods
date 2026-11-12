@@ -13,32 +13,62 @@ def parameters(settings):
             'pool_kernel': str(settings.pool_kernel),
             'surface_dust': format(settings.surface_dust, 'g'),
             'pool_weight': settings.pool_weight, 'effects_lighting': settings.lighting,
-            'effects_ai_adjust': settings.ai_adjust}
+            'effects_ai_adjust': settings.ai_adjust, 'fog_mode':settings.fog_mode,
+            'fog_gain':format(settings.fog_gain,'g'), 'weathering':settings.weathering,
+            'shadow_mode':settings.shadow_mode}
 
 
-def dust_profile(scale):
+def dust_profile(scale, mode='legacy_matte'):
     settings = EffectSettings(surface_dust=scale)
     # Identical shader profile to the user's 0.5 trial. No second weathering layer.
-    return {'version': 'surface-dust-strength-v2', 'dust_scale': settings.surface_dust,
+    if mode=='preserve_source' and scale>.5:raise ValueError('surface_dust_limit')
+    result={'version': 'surface-dust-strength-v2', 'dust_scale': settings.surface_dust,
             'paint_dust_scale': .5, 'single_deposit': True}
+    if mode=='preserve_source':result.update(version='source-weathering-v1',mode=mode)
+    return result
 
 
-def lighting_for(scene, pose, environment, mode):
+def lighting_for(scene, pose, environment, mode, *, preserve=False):
     from .local_light import estimate_local_light
     from .global_light import estimate_global_mean
     try:
-        local, _ = estimate_local_light(scene, pose, environment, statistic='mean', margin_scale=1.75)
+        local, _ = estimate_local_light(scene, pose, environment, statistic='mean', margin_scale=1.75,
+                                       reject_extremes=preserve)
     except ValueError as error:
-        if mode != 'global_mean' or str(error) != 'insufficient_local_neutral_light_evidence':
+        if (mode != 'global_mean' and not preserve) or str(error) != 'insufficient_local_neutral_light_evidence':
             raise
         local = {**environment, 'local_irradiance': {
             'bounds': environment['local_context']['bounds'], 'fill_ratio': .65,
+            'level':float(environment.get('light_level',1.)),
+            'target_clear_rgb_linear': environment['dust_color'],
+            'statistic':'arithmetic_mean','confidence':'unknown',
             'direction': {'direction': None, 'confidence': 0., 'basis': str(error)}}}
     return estimate_global_mean(scene, local)[0] if mode == 'global_mean' else local
 
 
 def optical_delta(clear, veiled, alpha, environment, air, target_px, params):
     from .local import foreground_dust
+    if params.get('fog_mode')=='local_auto':
+        import numpy as np
+        from .local import pool_object_rgb
+        from .photography import linear
+        weight=float(params['pool_weight']) if int(params['pool_kernel'])>1 else 0.
+        optics=environment['camera_psf'];context=environment['local_context']
+        if optics['edge_samples']<12 or context['sample_pixels']<20:weight=0.
+        clear_linear=linear(clear)
+        transmission=air['transmission_field']
+        delta=linear(veiled)-clear_linear
+        delta+=(pool_object_rgb(clear_linear,alpha,int(params['pool_kernel']))-clear_linear)*weight*transmission[...,None]
+        delta*=np.float32(alpha>0)[...,None]
+        fog=1-transmission[alpha>.5]
+        return delta,{'version':'online-local-effects-v2','fog_mode':'local_auto',
+            'fog_gain':float(params.get('fog_gain',1)), 'fog_base':float(np.median(fog)) if fog.size else 0.,
+            'fog_extra_max':0.,'fog_total_median':float(np.median(fog)) if fog.size else 0.,
+            'fog_total_max':float(fog.max()) if fog.size else 0.,'fog_color_linear':air['color_linear'],
+            'pool_kernel':[int(params['pool_kernel'])]*2,'pool_weight':weight,'pool_uniform':True,
+            'edge_samples':optics['edge_samples'],'sample_pixels':context['sample_pixels'],
+            'requested':{k:params.get(k) for k in ('fog_mode','fog_extra','fog_gain','pool_kernel','surface_dust','weathering')},
+            'additional_fog_applied':False,'atmosphere_off':params.get('atmosphere')=='off'}
     settings = EffectSettings(fog_extra=float(params['fog_extra']),
                               pool_kernel=int(params['pool_kernel']),
                               pool_weight=params['pool_weight'],
@@ -61,4 +91,5 @@ def render_identity(params, style):
         fields.append('dust')
     if params.get('effects_enabled'):
         fields.extend(('effects_version', 'surface_dust', 'effects_lighting'))
-    return tuple(params[k] for k in fields)
+        fields.extend(('weathering','shadow_mode'))
+    return tuple(params.get(k) for k in fields)

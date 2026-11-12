@@ -231,6 +231,9 @@ def choose_pile_candidates(asset,scene,seed=0,config=None):
         row['scale']['world_pixels_per_unit']/=factor
         row['scale']['range_px']=[v/factor for v in row['scale']['range_px']]
         row['scale']['anchor_px']=row['anchor_px']
+        if row['scale'].get('fixed_physical_size'):
+            from .consistent_scale import calibration_to_native
+            row['scale']=calibration_to_native(row['scale'],factor,scene['size'])
         geom=cached_projection(asset,data['vertices'],data['faces'],{'matrix':row['matrix']},0,row['elevation'])
         fit=fitted_masks(geom,row['anchor_px'],row['full_px'],scene)
         if fit is None:reject.append({'candidate':row['id'],'reason':'full_resolution_outside_image'});continue
@@ -278,19 +281,24 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
             if native and config.placement_mode in ('auto','embedded'):
                 anchors+=anchors_near_foreground(scene,site,union,anchors)
             for anchor_index,anchor in enumerate(anchors):
-                interval,evidence=local_scale(scene,site,anchor,asset['semantic']['major_mm'])
+                fixed_size = asset.get('physical_size')
+                if fixed_size:
+                    from .consistent_scale import local_scale as physical_scale
+                    interval,evidence=physical_scale(scene,site,anchor,fixed_size)
+                else:
+                    interval,evidence=local_scale(scene,site,anchor,asset['semantic']['major_mm'])
                 if evidence['status']=='unknown' and config.uncertain_policy=='skip':
                     reject.append({'site':site['id'],'anchor':anchor,'reason':'scale_evidence_insufficient'});continue
                 low,high=interval
                 image_scale=scene.get('_image_scale',1.)
-                if low>scene['size'][0]*.28 or high<64*image_scale:
+                if not fixed_size and (low>scene['size'][0]*.28 or high<64*image_scale):
                     evidence={**evidence,'status':'unknown','basis':'bounded_display_scale_from_conflicting_reference',
                               'original_interval':interval}
                     low=max(80*image_scale,min(low,scene['size'][0]*.14));high=max(low*1.2,min(high,scene['size'][0]*.25))
-                scales=sorted(set([math.sqrt(low*high),low*1.05,high*.95]))
+                scales=[low] if fixed_size else sorted(set([math.sqrt(low*high),low*1.05,high*.95]))
                 delta=np.diff(np.asarray(site['reference'])*np.subtract(scene['size'],1),axis=0)[0]
                 correction=np.linalg.norm([delta[0],delta[1]/max(.2,math.sin(math.radians(midpoint)))])/max(1,np.linalg.norm(delta))
-                if evidence['status']=='unknown':correction=1.
+                if evidence['status']=='unknown' or fixed_size:correction=1.
                 for pose in asset['poses']:
                     for yaw in range(0,360,30):
                         matrix=terrain_matrix(pose['matrix'],yaw,[0,0,1])

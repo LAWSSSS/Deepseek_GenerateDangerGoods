@@ -1,0 +1,24 @@
+{
+  "backgrounds": "backgrounds",
+  "assets": ["3", "13", "22", "31", "33"],
+  "count": 15,
+  "seed": 20261112,
+  "output": "outputs/local-adaptation-example",
+  "appearance": "local",
+  "photo_style": "dusty_scrap",
+  "scale_mode": "physical_consistent",
+  "asset_scale_factors": {"31": 0.375, "33": 0.25},
+  "max_iterations": 2,
+  "effects": {
+    "fog_mode": "local_auto",
+    "fog_gain": 1.0,
+    "fog_extra": 0.35,
+    "pool_kernel": 3,
+    "pool_weight": 1.0,
+    "surface_dust": 0.5,
+    "weathering": "preserve_source",
+    "shadow_mode": "matched_receiver",
+    "lighting": "local",
+    "ai_adjust": true
+  }
+}

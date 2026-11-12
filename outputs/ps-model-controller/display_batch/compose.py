@@ -243,7 +243,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     if local:
         clear_rgb=rgb
-        rgb,local_air=local_veil(rgb,environment,params)
+        rgb,local_air=local_veil(rgb,environment,{**params,'atmosphere':'off'} if params.get('fog_mode')=='local_auto' else params)
         photo.update(local_air=local_air,haze=local_air['amount'])
         for label,value in PHOTO_CONTROLS['haze'].items():
             photo['effective_controls'][label]['haze']=float(np.clip(local_air['base_amount']*value,0,local_air['limit'])) if params.get('atmosphere','auto')!='off' else 0.
@@ -261,6 +261,20 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     else:foreground=(scene['depth_native'][y:b,x:r]>site['depth']+.10)&~support
     foreground &= ~protected
     visible_alpha=alpha*((~foreground)&(~protected))
+    local_atmospheric=None
+    if local and params.get('fog_mode')=='local_auto':
+        from .local_atmosphere import fields_for
+        object_t,background_t,airlight,air_summary=fields_for(environment['atmospheric_context'],bounds,
+            object_z,order,candidate,scene,float(params.get('fog_gain',1)),params.get('atmosphere')!='off')
+        rgb=srgb(fogged_radiance(linear(clear_rgb),object_t,airlight))
+        local_atmospheric=(background_t,airlight)
+        core=visible_alpha>.5
+        local_air={'amount':float(np.median(1-object_t[core])) if core.any() else 0.,
+                   'color_linear':np.median(airlight[core],axis=0).tolist() if core.any() else [0.,0.,0.],
+                   'mode':params.get('atmosphere'),'basis':air_summary['basis']}
+        photo.update(local_air=local_air,haze=local_air['amount'],
+                     atmosphere={**air_summary,'mode':params.get('atmosphere'),'transmission_range':
+                         np.percentile(object_t[core],[5,50,95]).tolist() if core.any() else [1.,1.,1.]})
     occlusion_fraction=float(1-visible_alpha.sum()/max(alpha.sum(),1e-6))
     foot=np.zeros((b-y,r-x),np.uint8)
     for poly in render_meta['contact_polygons']:
@@ -354,8 +368,9 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         photo['visible_shadow_pixels']=int(((loss>.025)&(optical_alpha<.10)).sum())
     shaded=shadowed_background(linear(crop),loss,*atmospheric) if native and atmospheric is not None else linear(crop)*(1-loss[:,:,None])
     if local:
-        shaded=shadowed_background(linear(crop),loss,np.full(alpha.shape,1-local_air['amount'],np.float32),
-                                   np.asarray(local_air['color_linear'],np.float32))
+        atmospheric_args=local_atmospheric or (np.full(alpha.shape,1-local_air['amount'],np.float32),
+                                               np.asarray(local_air['color_linear'],np.float32))
+        shaded=shadowed_background(linear(crop),loss,*atmospheric_args)
     result=srgb(shaded*(1-optical_alpha[:,:,None])+premult)
     if native:
         noise=float(np.clip(environment['sensor']['noise_sigma'],0,.012))
@@ -368,14 +383,18 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         object_delta=None
         if effects:
             from .effects import optical_delta
-            object_delta,details=optical_delta(clear_rgb,rgb,visible_alpha,environment,local_air,candidate['target_px'],params)
+            optical_air={**local_air,'transmission_field':object_t} if local_atmospheric else local_air
+            object_delta,details=optical_delta(clear_rgb,rgb,visible_alpha,environment,optical_air,candidate['target_px'],params)
             details.update(surface_dust_applied=bool(render_meta.get('matte_materials')),
                            matte_profile=render_meta.get('matte_profile'))
             photo['effects']=details
         elif dust_overlay:
             object_delta,details=foreground_dust(clear_rgb,rgb,visible_alpha,environment,local_air,candidate['target_px'])
             photo['dust_overlay']=details
-        result,edited,imaging=camera_residual(shaded,rgb,visible_alpha,linear(crop),environment,params,seed,writable,
+        # Treat automatic air as an object-only residual too. Blurring a fogged base
+        # would spread fog changes into holes/background and change the noise estimate.
+        capture_rgb=clear_rgb if local_atmospheric and effects else rgb
+        result,edited,imaging=camera_residual(shaded,capture_rgb,visible_alpha,linear(crop),environment,params,seed,writable,
                                              object_delta=object_delta)
         photo.update(imaging,local_context=environment['local_context'])
         photo['after_luma']=float(np.median((np.clip(result,0,1)@np.float32([.2126,.7152,.0722]))[visible_alpha>.85])*255)
@@ -441,6 +460,18 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         checks['local_samples']={'status':'unknown' if context['confidence']=='unknown' else 'pass','evidence':context}
         checks['patch_boundary']={'status':'pass' if photo['patch_boundary']['after']['loss_p95']<=.04 else 'unknown',
             'evidence':photo['patch_boundary'],'threshold_linear_loss':.04}
+        if params.get('shadow_mode')=='matched_receiver':
+            from .seams import audit_boundary
+            audit=audit_boundary(original,exported[y:b,x:r],visible_alpha,receiver)
+            photo['patch_boundary']['exported']=audit
+            checks['patch_boundary']={'status':'pass' if audit['pass'] else 'fail',
+                                      'evidence':audit,'basis':'exported_multiband_receiver_and_crop_boundary'}
+            checks['shadow_pair']=render_meta.get('shadow_pair_validation',{'status':'unknown','basis':'legacy_metadata_not_available'})
+    if candidate['scale'].get('fixed_physical_size'):
+        checks['projection_size']={'status':'pass' if abs(unoccluded_major-expected)<=tolerance else 'fail',
+                                  'measurement_px':unoccluded_major,'expected_px':expected,'tolerance_px':tolerance}
+        checks['scale']['status']=candidate['scale']['status']
+        checks['scale']['basis']='scene_scale_evidence_separate_from_projected_pixel_agreement'
     crop_image=Image.fromarray(base_rgb).crop((x,y,r,b));crop_image.thumbnail((1000,800));crop_image.save(Path(out).with_suffix('.crop.jpg'),quality=92)
     thumb=Image.fromarray(base_rgb);thumb.thumbnail((1536,1024));thumb.save(Path(out).with_suffix('.full.jpg'),quality=88)
     if candidate.get('placement'):

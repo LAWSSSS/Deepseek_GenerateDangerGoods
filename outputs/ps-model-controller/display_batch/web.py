@@ -59,12 +59,12 @@ async def create(request):
         ident=secrets.token_hex(8)
         raw['output']=str(ROOT/'outputs'/('批量展示-'+time.strftime('%Y%m%d-%H%M%S')+'-'+ident[:6]))
         config=BatchConfig.model_validate(raw)
-        if test and config.count>12:raise ValueError('在线小样测试每批最多 12 项')
+        if test and config.count>15:raise ValueError('在线小样测试每批最多 15 项')
         if not Path(config.backgrounds).is_dir():raise ValueError('背景目录不存在')
         from .pipeline import make_jobs
         catalog=await asyncio.to_thread(load_catalog)
         jobs=await asyncio.to_thread(make_jobs,config,catalog)
-        if test and len(jobs)>12:raise ValueError('在线小样清单最多 12 项')
+        if test and len(jobs)>15:raise ValueError('在线小样清单最多 15 项')
         DATA.mkdir(parents=True,exist_ok=True)
         atomic_json(DATA/(ident+'.json'),config.model_dump())
         launch(ident)
@@ -118,10 +118,13 @@ async def artifact(request):
 
 
 async def effect_options(request):
-    return JSONResponse({'version':'online-effects-v1','defaults':EffectSettings().model_dump(),
+    return JSONResponse({'version':'online-effects-v2','defaults':EffectSettings().model_dump(),
+        'recommended':{'scale_mode':'physical_consistent','effects':{
+            **EffectSettings().model_dump(),'fog_mode':'local_auto','weathering':'preserve_source',
+            'shadow_mode':'matched_receiver','lighting':'local'}},
         'schema':EffectSettings.model_json_schema(),'actions':EFFECT_ACTIONS,
-        'test_endpoint':'/api/batches/test','max_test_jobs':12,
-        'dependencies':{'fog_extra':'compose_and_review','pool_kernel':'compose_and_review',
+        'test_endpoint':'/api/batches/test','max_test_jobs':15,
+        'dependencies':{'fog_extra':'compose_and_review','fog_gain':'compose_and_review','pool_kernel':'compose_and_review',
                         'surface_dust':'material_render_shadow_compose_review'},
         'notes':['fog_extra 为追加雾层，非总雾量','pool_kernel=1 关闭池化',
                  'surface_dust 是独立表面浮灰倍率，漆面另乘 0.5，塑料不加额外灰层',

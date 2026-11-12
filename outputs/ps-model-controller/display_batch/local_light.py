@@ -44,7 +44,7 @@ def fit_direction(centers, luminance):
             'split_agreement': agreement, 'gradient_log': strength}
 
 
-def estimate_local_light(scene, candidate, environment, *, statistic='median', margin_scale=1.):
+def estimate_local_light(scene, candidate, environment, *, statistic='median', margin_scale=1., reject_extremes=False):
     import cv2
     from .photography import linear
     if statistic not in ('median','mean') or not 1 <= margin_scale <= 2.5:
@@ -78,7 +78,7 @@ def estimate_local_light(scene, candidate, environment, *, statistic='median', m
         basis = 'local_under_object_neutral_support_estimate'
     if selected.sum() < 40:
         raise ValueError('insufficient_local_neutral_light_evidence')
-    if statistic == 'median':
+    if statistic == 'median' or reject_extremes:
         lo, hi = np.percentile(gray[selected], [12, 88])
         selected &= (gray >= lo) & (gray <= hi)
     # Erode metal boundaries so adjacent gaps and bright edges cannot bias a tile.
@@ -125,6 +125,7 @@ def estimate_local_light(scene, candidate, environment, *, statistic='median', m
         evidence.update(statistic='arithmetic_mean',margin_scale=margin_scale,original_bounds=original_bounds,
                         aggregation='equal_weight_per_valid_pixel_in_camera_linear_space',
                         version='local-mean-expanded-v2')
+    if reject_extremes:evidence.update(version='local-mean-screened-v3',reject_extremes=True)
     result = {**environment, 'world_color': (.20 * level * tint).tolist(), 'light_color': (tint/tint.max()).tolist(),
               'key_direction': direction['direction'], 'light_level': level, 'local_irradiance': evidence,
               'lighting_basis': 'bounded_local_tiles_and_diffuse_receiver_calibration'}

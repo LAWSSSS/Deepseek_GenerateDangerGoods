@@ -1,5 +1,7 @@
 # DeepSeek Harness 项目交接
 
+当前最新为[统一尺度与局部自动雾化小样](DISPLAY_LOCAL_ADAPTATION.md)：5 件 × 3 场景均出图，三项摄影评分仅 1/15 达标，全部待审；普通批量仍用回退默认。新模式将 31/33 的 0.375/0.25 合入固定估计尺寸一次，浮灰上限 0.5，漆面半量，自动雾不再统一追加 35%。完整图、失败原因、复跑与累计费用见该记录。
+
 ## 项目位置与共享方式
 
 - Git 仓库：`D:\CodexProjects\experiments\scrap-composite`

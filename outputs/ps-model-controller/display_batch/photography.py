@@ -106,11 +106,17 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
             else:high=middle
         base_ev=(low+high)/2
     ev=float(base_ev+extra_ev if reference else np.clip(base_ev+extra_ev,-1.5,2.))
+    preserve=params.get('weathering')=='preserve_source'
+    requested_ev=ev
+    if preserve:ev=float(np.clip(ev,-.5,.5))
     exposure_error=float(np.median(display(sample*2**ev)@LUMA)-goal)
     exposure_limited=bool(abs(exposure_error)>.035 and (ev>1.99 or ev<-1.49))
     if calibration:
         exposure_error=0.
         exposure_limited=calibration['limited']
+    if preserve and abs(requested_ev-ev)>1e-5:
+        exposure_limited=True
+        exposure_error=ev-requested_ev
     radiance=np.maximum(raw,0)*cast*2**ev
     # Local camera veil belongs after display conversion, never in material radiance.
     haze_base=0. if calibration or environment.get('local_context') else environment.get('haze',0)*(1 if reference else .42)
@@ -131,6 +137,11 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     ratio=(scene_chroma+2)/max(source_chroma,1)
     base_gain=float(np.clip(ratio*(.65 if dusty else 1.),chroma_floor,chroma_ceiling) if gray_style else np.clip(ratio,.6,1.))
     gain=float(np.clip(base_gain/control(params,'chroma'),chroma_floor,chroma_ceiling))
+    if preserve:
+        # Retain hue/markings; only excess colour is reduced, never force neutral metal grey.
+        gain=float(np.clip((scene_chroma+6)/max(source_chroma,1),.40,1.) / control(params,'chroma'))
+        gain=float(np.clip(gain,.35,1.))
+        if polymer:gain=max(.75,gain)
     if fixed_tone is not None:
         gain=fixed_tone['chroma_gain']
     # Low-frequency color is altered; original small-scale luminance detail survives.
@@ -154,9 +165,10 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         excess=np.linalg.norm(lab[:,:,1:],axis=2)-scene_chroma-1.5
         chroma_mask *= np.clip(excess/7,0,1)*(1-.78*metal)*(1-.6*highlight)
     modified=lab[:,:,1:]*gain+scene_ab*(1-gain)*(.5 if gray_style else .15)
+    if preserve:modified=lab[:,:,1:]*gain
     lab[:,:,1:]=lab[:,:,1:]*(1-chroma_mask[...,None])+modified*chroma_mask[...,None]
     chroma_cap=None
-    if dusty:
+    if dusty and not preserve:
         # Keep luminance/texture and material reflection intact; bound residual colour
         # including coloured highlights by measured neighbouring chroma, not global tint.
         chroma_cap=float(np.clip(np.percentile(np.linalg.norm(scene_lab[:,1:],axis=1),85)*.8+2,3,10))

@@ -159,7 +159,9 @@ class RenderCache:
                         if image.size!=(window[2]-window[0],window[3]-window[1]):
                             raise ValueError('unexpected_render_window_size')
                 info={'path':path,'camera':response['camera'],'device':response['device'],
-                      'anchor_uv':response['anchor_uv'],'contact_polygons':response['contact_polygons']}
+                      'anchor_uv':response['anchor_uv'],'contact_polygons':response['contact_polygons'],
+                      'window':windows['object' if part=='object' else 'shadow'],
+                      'receiver_signature':signature(request.get('receiver',{}).get('patches',[]))}
                 if part=='object' and request.get('surface_scans'):
                     info['scanned_materials']=response['scanned_materials']
                 if part=='object' and request.get('matte_partitions'):
@@ -172,6 +174,21 @@ class RenderCache:
                 self.totals[part+'_renders']+=1
         self.timings.update(timings)
         obj=entries['object']
+        shadow_pair=None
+        if 'with_shadow' in entries and 'without_shadow' in entries:
+            import cv2
+            expected=(windows['shadow']['rect'][3]-windows['shadow']['rect'][1],
+                      windows['shadow']['rect'][2]-windows['shadow']['rect'][0])
+            for part in ('with_shadow','without_shadow'):
+                entry=entries[part]
+                if entry['camera']!=obj['camera']:raise ValueError('shadow_camera_mismatch')
+                if entry.get('window',windows['shadow'])!=windows['shadow']:raise ValueError('shadow_grid_mismatch')
+                frame=cv2.imread(str(Path(entry['path'])/PART_FILES[part][0]),cv2.IMREAD_UNCHANGED)
+                if frame is None or frame.shape[:2]!=expected:raise ValueError('shadow_pass_dimensions_mismatch')
+            a,b=entries['with_shadow'],entries['without_shadow']
+            if a.get('receiver_signature')!=b.get('receiver_signature'):raise ValueError('shadow_receiver_mismatch')
+            shadow_pair={'status':'pass','camera_equal':True,'window':windows['shadow'],
+                         'receiver_equal':True,'basis':'render_part_metadata_and_EXR_dimensions'}
         window=windows['object']['rect']
         shadow=windows['shadow']['rect']
         meta={k:obj[k] for k in ('camera','device','anchor_uv','contact_polygons')}
@@ -180,6 +197,7 @@ class RenderCache:
                     object_window=windows['object'],shadow_window=windows['shadow'],
                     legacy_grid=full_frame,part_paths={k:v['path'] for k,v in entries.items()},
                     render_cache=cache,render_timings=timings,asset_imports=imports)
+        if shadow_pair:meta['shadow_pair_validation']=shadow_pair
         if request.get('surface_scans'):
             meta['scanned_materials']=obj.get('scanned_materials',[])
         if request.get('matte_partitions'):

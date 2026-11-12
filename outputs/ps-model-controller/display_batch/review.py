@@ -47,14 +47,16 @@ ACTION_CAUSES={
     'haze':{'color','lighting','texture','haze_clear','haze_heavy'},
     'sharpness':{'edge','texture'},
     'fog_extra':{'haze_clear','haze_heavy'},
+    'fog_gain':{'haze_clear','haze_heavy'},
     'pool_kernel':{'too_sharp','too_blurry'},
-    'surface_dust':{'surface_clean','surface_dust_heavy'},
+    'surface_dust':{'surface_clean','surface_dust_heavy','identity_loss'},
 }
 CAUSE_SCORES={'upright':'support','floating':'support','penetration':'support','scale':'support',
               'camera':'support','shadow':'lighting','color':'lighting','haze_clear':'lighting',
               'haze_heavy':'lighting','light_direction':'lighting','reflection_flat':'material',
               'reflection_hard':'material','surface_clean':'material','surface_dust_heavy':'material',
-              'too_sharp':'texture','too_blurry':'texture','patch_seam':'edge'}
+              'too_sharp':'texture','too_blurry':'texture','patch_seam':'edge',
+              'identity_loss':'material','haze_color':'lighting'}
 
 
 def evidence_status(checks):
@@ -78,15 +80,21 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
         for name in ('dust','haze','sharpness','material'):options.pop(name,None)
         if params.get('effects_ai_adjust',True):
             options.update({k:list(values) for k,values in EFFECT_ACTIONS.items()})
+            if params.get('fog_mode')=='local_auto':options.pop('fog_extra',None)
+            else:options.pop('fog_gain',None)
+            if params.get('weathering')=='preserve_source':
+                options['surface_dust']=[v for v in options['surface_dust'] if float(v)<=.5]
             measured=photo.get('effects',{})
             if params.get('atmosphere')=='off' or measured.get('fog_base',0)<=0 or measured.get('sample_pixels',0)<20:
                 options.pop('fog_extra',None)
+                options.pop('fog_gain',None)
             if params.get('pool_weight',0)<=0 or measured.get('edge_samples',0)<12 or measured.get('sample_pixels',0)<20:
                 options.pop('pool_kernel',None)
             if not measured.get('surface_dust_applied'):
                 options.pop('surface_dust',None)
             if photo.get('local_context',{}).get('confidence','estimated')!='estimated':
                 options.pop('fog_extra',None);options.pop('pool_kernel',None)
+                options.pop('fog_gain',None)
     controls=photo.get('effective_controls',{})
     for kind,values in list(options.items()):
         current=params[kind]
@@ -179,7 +187,10 @@ def repair(params, review, allowed, candidate_ids, seen, *, dust_in_shader=False
 
 
 def effect_direction(kind,value,current,causes):
+    if kind=='surface_dust' and 'identity_loss' in causes:
+        return 'surface_clean' not in causes and float(value)<float(current)
     more,less={'fog_extra':('haze_clear','haze_heavy'),
+               'fog_gain':('haze_clear','haze_heavy'),
                'pool_kernel':('too_sharp','too_blurry'),
                'surface_dust':('surface_clean','surface_dust_heavy')}[kind]
     # Conflicting observations cannot justify an automatic numeric change.
@@ -208,6 +219,14 @@ Use exact allowed strings as values. Never compensate wrong lighting with dust o
 If evidence is uncertain or a control is unavailable, give no action for it.
 Assess photographic agreement against the local neighbourhood, not distant bright areas.
 The supplied numerical measurements are not proof of visual acceptance.'''
+        if params.get('weathering')=='preserve_source':
+            prompt+=''' Preserve original identity: moderate weathering, recognizable paint/hue,
+markings and source texture; matte does not mean uniformly grey. Use identity_loss when an
+opaque dust layer erases the original appearance. Do not increase dust to hide lighting defects.
+The user limits surface_dust to 0.5; paint already receives half. Haze_color means wrong airlight
+colour, which an opacity change alone cannot fix. For local_auto, fog_extra is inactive and
+fog_gain multiplies the locally estimated optical depth; 1 is the measured estimate, not 100% fog.
+Never repair a rectangular patch_seam by more haze. Do not invent a different real object size.'''
         payload.update(effects=comp.get('photo',{}).get('effects'),
                        evidence_status=evidence_status(checks),
                        checks={k:v['status'] for k,v in checks.items()})

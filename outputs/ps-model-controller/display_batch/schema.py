@@ -22,6 +22,16 @@ class EffectSettings(Strict):
     surface_dust: float = Field(default=.5, ge=0, le=1, strict=True)
     lighting: Literal['local', 'global_mean'] = 'global_mean'
     ai_adjust: bool = True
+    fog_mode: Literal['manual_extra', 'local_auto'] = 'manual_extra'
+    weathering: Literal['legacy_matte', 'preserve_source'] = 'legacy_matte'
+    shadow_mode: Literal['legacy', 'matched_receiver'] = 'legacy'
+    fog_gain: float = Field(default=1., ge=0, le=1.5, strict=True)
+
+    @model_validator(mode='after')
+    def preserve_limits(self):
+        if self.weathering == 'preserve_source' and self.surface_dust > .5:
+            raise ValueError('preserve_source surface_dust must not exceed 0.5')
+        return self
 
 
 class BatchConfig(Strict):
@@ -53,6 +63,7 @@ class BatchConfig(Strict):
     atmosphere: Literal['auto','off'] = 'auto'
     review_format: Literal['full','compact'] = 'full'
     effects: EffectSettings | None = None
+    scale_mode: Literal['legacy', 'physical_consistent'] = 'legacy'
 
     @model_validator(mode='after')
     def dust_uses_neighbourhood(self):
@@ -151,7 +162,7 @@ class Scores(Strict):
 DefectCode = Literal["upright", "floating", "penetration", "occlusion", "scale", "camera",
                      "material", "lighting", "color", "shadow", "edge", "texture", "structure",
                      "haze_clear", "haze_heavy", "light_direction", "reflection_flat", "reflection_hard", "surface_clean", "patch_seam",
-                     "surface_dust_heavy", "too_sharp", "too_blurry"]
+                     "surface_dust_heavy", "too_sharp", "too_blurry", "identity_loss", "haze_color"]
 
 
 class Defect(Strict):
@@ -165,7 +176,7 @@ class Defect(Strict):
 
 class Action(Strict):
     kind: Literal["candidate", "material", "light", "tone", "chroma", "dust", "contrast", "haze", "sharpness",
-                  "fog_extra", "pool_kernel", "surface_dust"]
+                  "fog_extra", "pool_kernel", "surface_dust", "fog_gain"]
     value: str = Field(max_length=32)
 
 
@@ -181,7 +192,7 @@ class Review(Strict):
         return min(self.scores.lighting,self.scores.material,self.scores.texture)>=3 and not any(
             d.severity in ('major','fatal') and d.code in ('color','lighting','material','texture',
                 'haze_clear','haze_heavy','light_direction','reflection_flat','reflection_hard','surface_clean','patch_seam',
-                'surface_dust_heavy','too_sharp','too_blurry')
+                'surface_dust_heavy','too_sharp','too_blurry','identity_loss','haze_color')
             for d in self.defects)
 
 
@@ -250,6 +261,7 @@ TONE_PROFILES = {"scene": (0., 0.), "darker": (-.25, 0.), "brighter": (.25, 0.),
 PHOTO_CONTROLS = {name: {'auto':1., 'less':.7, 'more':1.3}
                   for name in ('chroma','dust','contrast','haze','sharpness')}
 EFFECT_ACTIONS = {
+    'fog_gain': ('0', '0.5', '0.75', '1', '1.25', '1.5'),
     'fog_extra': ('0', '0.15', '0.25', '0.35', '0.45', '0.55', '0.7', '0.85'),
     'pool_kernel': ('1', '2', '3', '6', '12', '16', '32', '64'),
     'surface_dust': ('0', '0.25', '0.5', '0.75', '1'),
@@ -276,6 +288,7 @@ def version_rank(checks, review):
     failures = sum(c.get("status") == "fail" for c in checks.values())
     unknown = sum(c.get("status") == "unknown" for c in checks.values())
     if review is None:
-        return (-failures, -unknown, hard, -99, -99, 0)
-    return (-failures, -unknown, hard, -sum(d.severity == "fatal" for d in review.defects),
-            -sum(d.severity == "major" for d in review.defects), sum(review.scores.model_dump().values()))
+        return (-failures, -99, -99, -unknown, hard, 0)
+    return (-failures, -sum(d.severity == "fatal" for d in review.defects),
+            -sum(d.severity == "major" for d in review.defects), -unknown, hard,
+            sum(review.scores.model_dump().values()))

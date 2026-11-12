@@ -72,6 +72,8 @@ def opaque_surface_output(tree, shader):
 
 def matte_dust_surface(material, shader, partitions, environment, classes, profile=None):
     """Cover known metal and painted metal with a rough dielectric dust surface."""
+    if (profile or {}).get('mode')=='preserve_source':
+        return source_weathering(material,shader,partitions,environment,profile)
     dust_scale = float((profile or {}).get('dust_scale', 1.))
     if not np.isfinite(dust_scale) or not 0 <= dust_scale <= 1:
         raise ValueError('invalid_surface_dust_scale')
@@ -147,6 +149,60 @@ def matte_dust_surface(material, shader, partitions, environment, classes, profi
     tree.links.new(shader.outputs[0], layer.inputs[1])
     tree.links.new(dust.outputs[0], layer.inputs[2])
     tree.links.new(layer.outputs[0], output.inputs['Surface'])
+    return True
+
+
+def source_weathering(material, shader, partitions, environment, profile):
+    """A bounded deposited layer; original colour/roughness/normal graphs stay intact."""
+    strength=float(profile['dust_scale'])
+    if not 0<=strength<=.5:raise ValueError('source_weathering_dust_limit')
+    tree=material.node_tree
+    dust_rgb=np.asarray(environment['dust_color'],np.float32)
+    luminance=float(dust_rgb@np.array([.2126,.7152,.0722]))
+    tint=.22*np.clip(dust_rgb/max(luminance,.005),.93,1.07)
+    if tree.nodes.get('Source weathering strength'):
+        tree.nodes['Source weathering strength'].inputs[1].default_value=strength
+        tree.nodes['Source weathering color'].outputs[0].default_value=(*tint,1.)
+        return strength>0
+    if strength==0:return False
+    entry=partitions['materials'].get(re.sub(r'\.\d{3}$','',material.name))
+    if not entry or not any(entry['coverage'][:3]):return False
+    output=opaque_surface_output(tree,shader)
+    if output is None:return False
+    coords=tree.nodes.new('ShaderNodeTexCoord')
+    weights=material_weights(tree,entry,coords.outputs['UV'])
+    metal=math_node(tree,'ADD',weights[0],weights[2],clamp=True)
+    metal=math_node(tree,'ADD',metal,math_node(tree,'MULTIPLY',weights[1],.5),clamp=True)
+    geometry=tree.nodes.new('ShaderNodeNewGeometry')
+    split=tree.nodes.new('ShaderNodeSeparateXYZ');tree.links.new(geometry.outputs['Normal'],split.inputs[0])
+    up=math_node(tree,'MAXIMUM',split.outputs['Z'],0)
+    ao=tree.nodes.new('ShaderNodeAmbientOcclusion');ao.inputs['Distance'].default_value=.055
+    cavity=math_node(tree,'SUBTRACT',1.,ao.outputs['AO'],clamp=True)
+    noise=tree.nodes.new('ShaderNodeTexNoise');noise.inputs['Scale'].default_value=9.
+    noise.inputs['Detail'].default_value=2.
+    tree.links.new(coords.outputs['Object'],noise.inputs['Vector'])
+    deposit=math_node(tree,'ADD',.12,math_node(tree,'MULTIPLY',up,.40))
+    deposit=math_node(tree,'ADD',deposit,math_node(tree,'MULTIPLY',cavity,.30))
+    deposit=math_node(tree,'ADD',deposit,math_node(tree,'MULTIPLY',noise.outputs['Fac'],.18),clamp=True)
+    edge=math_node(tree,'MULTIPLY',math_node(tree,'SUBTRACT',geometry.outputs['Pointiness'],.5),8.,clamp=True)
+    deposit=math_node(tree,'MULTIPLY',deposit,math_node(tree,'SUBTRACT',1.,math_node(tree,'MULTIPLY',edge,.65)))
+    coverage=math_node(tree,'MULTIPLY',metal,strength,clamp=True)
+    coverage.node.name='Source weathering strength'
+    amount=math_node(tree,'MULTIPLY',coverage,deposit,clamp=True)
+    base=original(shader.inputs['Base Color'])
+    color=tree.nodes.new('ShaderNodeRGB');color.name='Source weathering color';color.outputs[0].default_value=(*tint,1.)
+    dust=tree.nodes.new('ShaderNodeBsdfPrincipled');dust.name='Source preserving dust';dust['display_deposit']=True
+    assign(tree,mix(tree,.25,color.outputs[0],base),dust.inputs['Base Color'])
+    dust.inputs['Metallic'].default_value=0.
+    dust.inputs['Roughness'].default_value=.88
+    dust.inputs['Specular IOR Level'].default_value=.18
+    if shader.inputs['Normal'].is_linked:assign(tree,original(shader.inputs['Normal']),dust.inputs['Normal'])
+    # Roughening follows actual deposits, including the zero-strength identity.
+    rough=original(shader.inputs['Roughness'])
+    assign(tree,math_node(tree,'ADD',rough,math_node(tree,'MULTIPLY',amount,.18),clamp=True),shader.inputs['Roughness'])
+    layer=tree.nodes.new('ShaderNodeMixShader');assign(tree,amount,layer.inputs[0])
+    tree.links.new(shader.outputs[0],layer.inputs[1]);tree.links.new(dust.outputs[0],layer.inputs[2])
+    tree.links.new(layer.outputs[0],output.inputs['Surface'])
     return True
 
 

@@ -152,7 +152,7 @@ class EffectTests(unittest.TestCase):
             with patch.object(web,'ROOT',root),patch.object(web,'DATA',root/'configs'),\
                  patch.object(web,'load_catalog',return_value=catalog),patch.object(web,'launch') as launch,TestClient(app) as client:
                 self.assertEqual(client.get('/api/batches/effects').json()['defaults']['fog_extra'],.35)
-                for extra in ({'effects':{'fog_extra':35}},{'effects':None},{'offline':True},{'count':13}):
+                for extra in ({'effects':{'fog_extra':35}},{'effects':None},{'offline':True},{'count':16}):
                     response=client.post('/api/batches/test',json={'backgrounds':str(bg),'assets':['3'],**extra})
                     self.assertEqual(response.status_code,400)
                 launch.assert_not_called()

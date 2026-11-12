@@ -223,19 +223,24 @@ class Pipeline:
 
     async def render(self,asset,scene,candidate,params,resolution):
         style=self.render_style
-        if style=='native':
+        if style=='native' or params.get('fog_mode')=='local_auto':
             scene['atmosphere']=await self.atmospheres.prepare(scene)
         environment,samples=await asyncio.to_thread(sample_environment,scene,candidate,
             scene_lighting=style in ('scene','native'),native=style=='native',local=self.config.appearance=='local')
         extras={}
+        if params.get('fog_mode')=='local_auto':
+            from .local_atmosphere import prepare as prepare_local_atmosphere
+            context=await asyncio.to_thread(prepare_local_atmosphere,scene,candidate,environment,self.cache)
+            environment={**environment,'atmospheric_context':context}
         if params.get('effects_enabled'):
             from .effects import dust_profile, lighting_for
             from .surface_maps import prepare_uv_masks
-            environment=await asyncio.to_thread(lighting_for,scene,candidate,environment,params['effects_lighting'])
+            environment=await asyncio.to_thread(lighting_for,scene,candidate,environment,params['effects_lighting'],
+                                               preserve=params.get('weathering')=='preserve_source')
             partitions,_=await asyncio.to_thread(prepare_uv_masks,asset,self.cache/'scanned-uv')
-            extras={'matte_partitions':partitions,'matte_profile':dust_profile(float(params['surface_dust']))}
+            extras={'matte_partitions':partitions,'matte_profile':dust_profile(float(params['surface_dust']),params.get('weathering','legacy_matte'))}
         render_candidate=candidate
-        if style=='native':
+        if style=='native' or params.get('shadow_mode')=='matched_receiver':
             # Cast onto the visible neighboring support as well. Physics retains
             # its original finite contact receiver and its separate evidence.
             receiver=await asyncio.to_thread(receiver_mesh,scene,candidate,bounds=edit_bounds(candidate,scene['size']))
@@ -256,6 +261,12 @@ class Pipeline:
         return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
 
     async def choose_placements(self,asset,scene,seed):
+        if self.config.scale_mode == 'physical_consistent':
+            from .consistent_scale import scaled_asset, scene_calibration
+            asset = scaled_asset(asset,self.config.asset_scale_factors.get(str(asset.get('id','')),1.))
+            atomic_json(self.out/'scale-models'/(str(asset['id'])+'.json'),asset['physical_size'])
+            atomic_json(self.out/'scale-scenes'/(scene['key']+'.json'),scene_calibration(scene))
+            return await asyncio.to_thread(choose_candidates,asset,scene,seed,self.config)
         candidates,rejected=await asyncio.to_thread(choose_candidates,asset,scene,seed,self.config)
         factor=self.config.asset_scale_factors.get(str(asset.get('id','')),1.)
         if factor!=1:
@@ -544,7 +555,7 @@ class Pipeline:
                 rank=version_rank(comp['checks'],review)
                 if isinstance(review,(FusionReview,EffectsReview)):
                     trace_rank={'none':2,'uncertain':1,'visible':0}[review.trace]
-                    rank=(*rank[:3],trace_rank,*rank[3:])
+                    rank=(*rank,trace_rank)
                 if best_rank is None or rank>best_rank:
                     best,best_rank=entry,rank;no_gain=0
                 else:no_gain+=1
