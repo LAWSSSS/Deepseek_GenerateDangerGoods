@@ -69,6 +69,8 @@ async def create(request):
         atomic_json(DATA/(ident+'.json'),config.model_dump())
         launch(ident)
         return JSONResponse({'id':ident,'output':config.output,
+            'geometry_preset':config.geometry_preset,'vehicle_reference':config.vehicle_reference,
+            'effective_modes':{'scale':config.scale_mode,'contact':config.contact_mode,'chroma':config.chroma_mode},
             'effects':config.effects.model_dump() if config.effects else None,
             'status_url':f'/api/batches/{ident}',
             'report_url':f'/api/batches/{ident}/files/index.html'},status_code=202)
@@ -82,6 +84,13 @@ async def status(request):
         config=BatchConfig.model_validate_json(path.read_text(encoding='utf8'));out=Path(config.output)
         result={'id':ident,'output':str(out),'running':bool(ident in PROCESSES and PROCESSES[ident].poll() is None)}
         result['effects']=config.effects.model_dump() if config.effects else None
+        result['geometry_preset']=config.geometry_preset
+        result['vehicle_reference']=config.vehicle_reference
+        from .collision import VERSION as collision_version
+        from .vehicle_scale import VERSION as scale_version
+        result['effective_geometry']={'scale_mode':config.scale_mode,'contact_mode':config.contact_mode,
+            'collision_version':collision_version if config.contact_mode=='strict' else 'legacy',
+            'vehicle_scale_version':scale_version if config.geometry_preset=='rebuild' else None}
         lease=FileLease(out/'.batch.lock')
         if not lease.acquire():result['running']=True
         else:lease.release()
@@ -124,6 +133,11 @@ async def effect_options(request):
             'shadow_mode':'matched_receiver','lighting':'local'}},
         'reference_projection_trial':{'scale_mode':'reference_projection','contact_mode':'strict',
                                       'chroma_mode':'local_budget','legacy_display_factors_applied':False},
+        'geometry_rebuild_trial':{'geometry_preset':'rebuild','requires':'vehicle_reference',
+            'example_reference':{'vehicle_class':'semitrailer','internal_width_m':2.45,
+                'nominal_internal_length_m':12.85,'nominal_internal_height_m':2.2,
+                'source':{'kind':'user_supplied','reference':'用户提供的车厢内部尺寸，长高仅作辅助估计'}},
+            'promoted_default':False},
         'global_saturation_trial':{'chroma_mode':'global_mean','promoted_default':False,
                                    'basis':'full_background_mean_HSV_S_additional_cap_after_local_budget'},
         'schema':EffectSettings.model_json_schema(),'actions':EFFECT_ACTIONS,

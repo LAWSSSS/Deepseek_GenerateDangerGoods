@@ -20,10 +20,12 @@ def visual_veto(review):
 async def simulate(asset,blender,matrices,receiver=None,normal=(0,0,1)):
     profile=asset['physical_size'];length=profile['nominal_mm']/1000
     key=signature(VERSION,asset['physics_signature'],profile['signature'],matrices,receiver,normal,
-                  file_hash(Path(__file__).with_name('metric_physics.py')))
+                  file_hash(Path(__file__).with_name('metric_physics.py')),
+                  file_hash(Path(__file__).with_name('contact_audit.py')),
+                  file_hash(Path(__file__).parents[1]/'blender_display_worker.py'))
     path=Path(asset['folder'])/'metric-physics'/(key+'.json')
     if path.is_file():return {**json.loads(path.read_text(encoding='utf8')),'cache_hit':True}
-    request={'geometry':asset['geometry'],'proxy':str(Path(asset['folder'])/'collision.json'),
+    request={'geometry':asset['geometry'],'proxy':asset.get('proxy',str(Path(asset['folder'])/'collision.json')),
              'axis':asset['axis'],'assembly':asset['semantic']['assembly'],'initial_matrices':matrices,
              'plane_normal':list(normal),'length_m':length}
     if receiver:request['receiver']=receiver

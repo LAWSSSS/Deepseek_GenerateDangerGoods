@@ -209,12 +209,12 @@ class Pipeline:
                 row=self.catalog[k]
                 key=signature('asset-preparation-failure-v1',row['mesh_hash'],
                     file_hash(row['board']) if row.get('board') else None,
-                    self.vision.endpoint.model_dump(),implementation_manifest())
+                    self.vision.endpoint.model_dump(),implementation_manifest(),self.config.contact_mode)
                 failure_path=self.cache/'asset-failures'/(key+'.json')
                 if failure_path.is_file():
                     self.assets[k]=json.loads(failure_path.read_text(encoding='utf8'))
                 else:
-                    try:self.assets[k]=await prepare_asset(row,self.cache,self.blender,self.vision)
+                    try:self.assets[k]=await prepare_asset(row,self.cache,self.blender,self.vision,strict=self.config.contact_mode=='strict')
                     except (ProviderUnavailable,RenderUnavailable):raise
                     except Exception as error:
                         self.assets[k]={**row,'signature':key,'poses':[],
@@ -274,6 +274,10 @@ class Pipeline:
                     data=np.load(asset['geometry']);_,initial=initial_poses(data['vertices'])
                     physics=await simulate(asset,self.blender,initial)
                     poses=[p for p in physics['poses'] if p['stable']]
+                    unique=[]
+                    for p in sorted(poses,key=lambda q:q['height']):
+                        if not any(np.linalg.norm(np.asarray(p['matrix'])[:3,:3]-np.asarray(q['matrix'])[:3,:3])<.05 for q in unique):unique.append(p)
+                    poses=unique
                     ext=sorted(asset['inspection']['extents'])
                     if poses and ext[-1]/max(ext[-2],1e-6)<1.5:
                         low=min(p['height'] for p in poses);poses=[p for p in poses if p['height']<=low*1.15]
@@ -281,6 +285,11 @@ class Pipeline:
                     atomic_json(self.out/'physics-models'/(str(asset['id'])+'.json'),physics)
             scene['reference_audit']=audit(scene,self.config.scene_reference_registry)
             scene['reference_audit']['visual_observations']=await scene_observations(scene,self.vision,self.cache)
+            if self.config.geometry_preset=='rebuild':
+                from .vehicle_scale import prepare as prepare_vehicle
+                if 'vehicle_scale' not in scene:
+                    scene['vehicle_scale']=await prepare_vehicle(scene,self.config.vehicle_reference,self.vision,self.cache)
+                scene['reference_audit']['vehicle_scale']=scene['vehicle_scale']
             atomic_json(self.out/'scale-models'/(str(asset['id'])+'.json'),asset['physical_size'])
             atomic_json(self.out/'scale-scenes'/(scene['key']+'.json'),scene['reference_audit'])
             if not asset['poses']:
@@ -399,7 +408,7 @@ class Pipeline:
             anchor_uv=geom['anchor'].tolist(),contact_polygons=[p.tolist() for p in geom['contacts']],
             contact_min=min(cover) if cover else 0,axis_angle_deg=tilt)
         endpoint_risks=[]
-        for elevation in candidate['elevation_interval']:
+        for elevation in ([] if candidate['scale'].get('calibration',{}).get('projectable') else candidate['elevation_interval']):
             endpoint=projection_geometry(data['vertices'],data['faces'],pose,0,elevation,
                                          candidate['plane_normal'] if strict else (0,0,1),
                                          contact_band=candidate.get('contact_band',.008),receiver=receiver if strict else None)
@@ -411,6 +420,12 @@ class Pipeline:
             if np.any(m&scene['protected'][oy:bb,ox:rr]) or not coverage or min(coverage)<.9:
                 endpoint_risks.append({'elevation':elevation,'reason':'support_or_clearance_uncertain'})
         candidate['camera_risks']=endpoint_risks
+        if candidate['scale'].get('version','').startswith('vehicle-width-projection'):
+            from .vehicle_scale import check_projection_interval
+            interval=check_projection_interval(scene,candidate,pose,data['vertices'],data['faces'])
+            candidate['camera_interval_check']=interval
+            candidate['camera_risks']=[{'reason':interval['reason']}]+[
+                r for r in interval['checks'] if r['status']!='pass']
         if endpoint_risks and not candidate['allow_uncertain']:raise ValueError('camera_interval_uncertain')
         if receiver['height_confidence']=='unknown':
             candidate['uncertainties']=list(candidate['uncertainties'])+['support_heights_uncertain']

@@ -96,6 +96,9 @@ def audit(scene, registry_path=None):
 
 
 def local_scale(scene,site,anchor,profile):
+    if 'vehicle_scale' in scene:
+        from .vehicle_scale import local_scale as vehicle_local_scale
+        return vehicle_local_scale(scene,site,anchor,profile)
     # Native evidence is kept separate from the search pyramid. Scale once at its boundary.
     audit_data=scene['reference_audit'];factor=scene.get('_image_scale',1.)
     native_anchor=np.asarray(anchor)/factor
@@ -149,5 +152,6 @@ def metric_projection(camera_evidence, anchor, physical_mm, image_size, contact_
     translation=np.r_[ground,0]-np.asarray(contact_center)*unit
     eye=(np.asarray(cam['eye_m'])-translation)/unit
     basis=np.stack([R[0],-R[1],R[2]]);full=float(max(image_size))
-    return {'eye':eye.tolist(),'target':(eye+R[2]).tolist(),'basis':basis.tolist(),
+    distance=float(np.linalg.norm(eye-np.asarray(contact_center)))
+    return {'eye':eye.tolist(),'target':(eye+R[2]*distance).tolist(),'basis':basis.tolist(),
             'fov':math.degrees(2*math.atan(full/(2*K[0,0])))},full

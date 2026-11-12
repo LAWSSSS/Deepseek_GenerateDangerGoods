@@ -6,4 +6,7 @@ from pathlib import Path
 from display_batch.assets import make_proxy
 
 if __name__=='__main__':
-    make_proxy(Path(sys.argv[1]),Path(sys.argv[2]))
+    if '--components' in sys.argv:
+        from display_batch.collision import build
+        build(Path(sys.argv[1]),Path(sys.argv[2]))
+    else:make_proxy(Path(sys.argv[1]),Path(sys.argv[2]))

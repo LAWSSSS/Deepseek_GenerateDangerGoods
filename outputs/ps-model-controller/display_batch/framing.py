@@ -43,5 +43,8 @@ def render_windows(candidate, size, resolution, *, full_frame=False):
         start = [max(0, min(frame-n, (a+b-n)//2)) for a, b, n in zip(lo, hi, dims)]
         return {'frame': frame, 'rect': [*start, *(a+n for a, n in zip(start, dims))]}
 
+    shadow_box=uv(edit_bounds(candidate,size))
+    shadow_extent=max(shadow_box[2]-shadow_box[0],shadow_box[3]-shadow_box[1])
+    shadow_frame=max(512,math.ceil(512/max(shadow_extent,.001))) if candidate.get('scale',{}).get('calibration',{}).get('projectable') else 512
     return {'object': crop(box, frame, 64, resolution),
-            'shadow': crop(uv(edit_bounds(candidate, size)), 512, 1)}
+            'shadow': crop(shadow_box, shadow_frame, 1)}

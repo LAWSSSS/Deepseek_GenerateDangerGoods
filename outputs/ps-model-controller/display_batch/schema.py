@@ -68,9 +68,20 @@ class BatchConfig(Strict):
     chroma_mode: Literal['legacy', 'local_budget', 'global_mean'] = 'legacy'
     dimension_registry: str | None = None
     scene_reference_registry: str | None = None
+    geometry_preset: Literal['legacy', 'rebuild'] = 'legacy'
+    vehicle_reference: dict | None = None
 
     @model_validator(mode='after')
     def dust_uses_neighbourhood(self):
+        if self.geometry_preset=='rebuild':
+            if not self.vehicle_reference:
+                raise ValueError('geometry rebuild requires a vehicle_reference with internal_width_m and source')
+            from .vehicle_scale import validate_reference
+            validate_reference(self.vehicle_reference)
+            self.scale_mode='reference_projection';self.contact_mode='strict';self.chroma_mode='local_budget'
+            self.effects=EffectSettings(fog_extra=0.,pool_kernel=3,surface_dust=.5,lighting='local',
+                fog_mode='local_auto',weathering='preserve_source',shadow_mode='matched_receiver')
+            self.asset_scale_factors={}
         # Selecting this style in either CLI or web must actually use local evidence.
         if self.photo_style=='dusty_scrap':self.appearance='local'
         if self.effects is not None:

@@ -127,7 +127,10 @@ def make_receiver(request,normal,physical=False):
         vertices=[];faces=[]
         for patch in patches:
             offset=len(vertices);vertices.extend(patch['vertices'])
-            faces.extend([[offset+i for i in face] for face in patch['faces']])
+            for face in patch['faces']:
+                face=list(face);v=np.asarray(patch['vertices'])[face[:3]]
+                if np.cross(v[1]-v[0],v[2]-v[0])[2]<0:face.reverse()
+                faces.append([offset+i for i in face])
         mesh=bpy.data.meshes.new('separate support faces');mesh.from_pydata(vertices,[],faces);mesh.update()
         ground=bpy.data.objects.new('finite support patches',mesh);bpy.context.scene.collection.objects.link(ground)
         if physical:rigid(ground,'MESH',True)
@@ -785,6 +788,9 @@ def render_parts(request):
     camera=request.get('camera') or camera_for(points,request['elevation'])
     cam=state['camera'];cam.location=camera['eye']
     cam.rotation_euler=(Vector(camera['target'])-cam.location).to_track_quat('-Z','Y').to_euler()
+    if camera.get('basis'):
+        b=np.asarray(camera['basis'])
+        cam.rotation_euler=Matrix(np.column_stack([b[0],b[1],-b[2]]).tolist()).to_euler()
     cam.data.angle=math.radians(camera['fov'])
     hdri=request.get('scanned_hdri')
     scene_lighting(state,camera,request['environment'],request.get('light_gain',1.),reference and not hdri,hdri)

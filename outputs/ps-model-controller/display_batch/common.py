@@ -46,7 +46,7 @@ def implementation_manifest():
     files=sorted((HERE/'display_batch').glob('*.py'))+[HERE/'blender_display_worker.py',HERE/'display_collision_worker.py']
     files += [HERE/name for name in ('blender_worker.py','scene_v2.py','run.py','placement-web/review_viewer.py')]
     versions={}
-    for name in ('numpy','trimesh','coacd','Pillow','opencv-python','pydantic','httpx','torch','transformers','opencolorio','numba'):
+    for name in ('numpy','trimesh','coacd','rtree','scipy','Pillow','opencv-python','pydantic','httpx','torch','transformers','opencolorio','numba'):
         try:versions[name]=importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:versions[name]='unavailable'
     weights={str(p.relative_to(WEIGHTS)):file_hash(p) for p in

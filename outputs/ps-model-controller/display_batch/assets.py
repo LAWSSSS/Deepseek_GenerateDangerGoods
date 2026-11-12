@@ -65,12 +65,12 @@ def make_proxy(geometry, path):
     return result
 
 
-async def bounded_proxy(geometry,path):
+async def bounded_proxy(geometry,path,strict=False):
     from .common import HERE
     log=Path(path).with_suffix('.log')
     with log.open('w',encoding='utf8') as output:
         proc=await asyncio.create_subprocess_exec(sys.executable,'-X','utf8',str(HERE/'display_collision_worker.py'),
-                str(geometry),str(path),stdout=output,stderr=asyncio.subprocess.STDOUT,
+                str(geometry),str(path),*(['--components'] if strict else []),stdout=output,stderr=asyncio.subprocess.STDOUT,
                 creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         try:
             code=await asyncio.wait_for(proc.wait(),timeout=240)
@@ -96,7 +96,7 @@ def initial_poses(vertices):
     return long.tolist(),matrices
 
 
-async def prepare(row, root, blender, vision):
+async def prepare(row, root, blender, vision,strict=False):
     start=time.monotonic()
     key=signature(ASSET_VERSION,row['mesh_hash'],file_hash(row['board']),
                   file_hash(row['original']) if row.get('original') else None)
@@ -123,14 +123,20 @@ async def prepare(row, root, blender, vision):
             'semantic':semantic.model_dump(),'signature':key,'poses':[]}
     if semantic.assembly in ('loose_parts','unknown'):
         result['reason']='assembly_relationship_unknown_or_loose'
-        atomic_json(folder/'result.json',result);return result
-    proxy=folder/'collision.json'
+        atomic_json(folder/('result-strict.json' if strict else 'result.json'),result);return result
+    from .collision import VERSION as COLLISION_VERSION, cache_signature
+    proxy=folder/(('collision-'+COLLISION_VERSION+'-'+cache_signature()[:12]+'.json') if strict else 'collision.json')
     if not proxy.is_file():
-        await bounded_proxy(geometry,proxy)
+        await bounded_proxy(geometry,proxy,strict)
     data=np.load(geometry)
     axis,initial=initial_poses(data['vertices'])
     pose_key=signature(PHYSICS_VERSION,file_hash(proxy),file_hash(geometry),axis,initial,
                        'blender-4.5.3',semantic.assembly)
+    if strict:
+        result.update(axis=axis,proxy=str(proxy),physics_signature=pose_key,
+                      preparation_seconds=round(time.monotonic()-start,3),reason=None)
+        atomic_json(folder/'result-strict.json',result)
+        return result
     pose_file=folder/f'poses-{pose_key[:16]}.json'
     hit=pose_file.is_file()
     if hit:physics=json.loads(pose_file.read_text(encoding='utf8'))

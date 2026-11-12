@@ -297,6 +297,7 @@ class APITests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as d:
             root=Path(d);pipe=Pipeline.__new__(Pipeline);pipe.prepare_lock=asyncio.Lock()
             pipe.assets={};pipe.cache=root;pipe.blender=None
+            pipe.config=BatchConfig(backgrounds='unused',output=str(root))
             pipe.catalog={'A':{'mesh_hash':'mesh','name':'test'}}
             endpoint=type('Endpoint',(),{'model_dump':lambda self:{'model':'fake'}})()
             pipe.vision=type('Vision',(),{'endpoint':endpoint})()

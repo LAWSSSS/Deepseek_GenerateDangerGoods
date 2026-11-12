@@ -7,6 +7,7 @@ import cv2
 from PIL import Image
 from display_batch.common import ROOT, atomic_json
 from display_batch.worker import Blender
+from display_batch.strict_contact import retryable
 
 
 def check_images(out):
@@ -35,6 +36,31 @@ async def main():
             assert not pose['result_translation_adjusted']
             assert pose['max_contact_gap_m']<=pose['tolerances']['contact_m']
         # A narrow, displaced steel piece cannot support the box's centre of mass.
+        # Image-space winding is clockwise: receiver construction must turn the
+        # passive triangles upward, otherwise objects ABOVE it look penetrating.
+        reversed_patch={'site_id':'reversed','vertices':[[-2,-2,0],[2,-2,0],[2,2,0],[-2,2,0]],
+                        'faces':[[0,2,1],[0,3,2]]}
+        request={'geometry':str(geometry),'proxy':str(proxy),'axis':[1,0,0],
+            'assembly':'single_piece','initial_matrices':[np.eye(4).tolist()],'length_m':.2,
+            'receiver':{'patches':[reversed_patch]}}
+        result=await worker.ask('settle',request,timeout=120)
+        if retryable(result['poses'][0]):
+            first=result
+            result=await worker.ask('settle',{**request,'high_precision':True},timeout=120)
+            result['first_attempt']=first;result['precision_retries']=1
+        # This regression is about winding, not relaxing convergence. Bullet may
+        # jitter on a zero-thickness triangle receiver; that stays rejected.
+        pose=result['poses'][0]
+        assert set(pose['failure_codes']) <= {'not_converged'},pose['failure_codes']
+        assert pose['max_penetration_m']==0 and pose['contact_count']>0 and pose['center_supported']
+        rows.append(result)
+        forward={**reversed_patch,'faces':[[0,1,2],[0,2,3]]}
+        comparison=await worker.ask('settle',{**request,'receiver':{'patches':[forward]},
+            'high_precision':bool(result.get('precision_retries'))},timeout=120)
+        other=comparison['poses'][0]
+        assert pose['failure_codes']==other['failure_codes']
+        np.testing.assert_allclose(pose['matrix'],other['matrix'],atol=1e-6)
+        rows.append(comparison)
         patch={'site_id':'test','vertices':[[.35,-.4,0],[.6,-.4,0],[.6,.4,0],[.35,.4,0]],'faces':[[0,1,2],[0,2,3]]}
         result=await worker.ask('settle',{'geometry':str(geometry),'proxy':str(proxy),'axis':[1,0,0],
             'assembly':'single_piece','initial_matrices':[np.eye(4).tolist()],'length_m':.2,
@@ -51,6 +77,8 @@ async def main():
         atomic_json(out/'validation.json',{'fixtures':rows,'renders':renders,
             'image_checks':check_images(out),
             'object_renders':2,'shadow_related_renders':4,'api_calls':0,'seconds':worker.seconds,
+            'finite_receiver_not_converged':not pose['stable'],
+            'finite_receiver_winding_equivalent':True,
             'synthetic_not_visual_acceptance':True,'passed':True})
         print('actual_blender_metric_fixtures_passed',flush=True)
     finally:await worker.close()

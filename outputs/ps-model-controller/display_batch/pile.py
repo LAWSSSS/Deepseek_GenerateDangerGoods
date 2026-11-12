@@ -8,7 +8,7 @@ from numba import njit
 from .common import signature
 from .geometry import project,contact_support,scale_from_reference
 
-VERSION='piecewise-pile-v3-depth-order'
+VERSION='piecewise-pile-v4-vehicle-projection'
 _grab_lock=threading.Lock()
 
 
@@ -34,8 +34,8 @@ def zbuffer(xy,z,faces,size):
     return output
 
 
-def mesh_raster(points,faces,camera,size=384):
-    xy=project(points,camera)*size
+def mesh_raster(points,faces,camera,size=384,origin=(0,0),span=1.):
+    xy=(project(points,camera)-origin)/span*size
     z=(points-np.asarray(camera['eye']))@np.asarray(camera['basis'])[2]
     depth=zbuffer(xy,z,np.asarray(faces,np.int32),size)
     return np.isfinite(depth),np.where(np.isfinite(depth),depth,0)
@@ -283,7 +283,7 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
     strict=config.contact_mode=='strict'
     native=config.appearance=='native'
     data=np.load(asset['geometry']);vertices=data['vertices'];faces=data['faces']
-    midpoint=sum(scene['answer']['elevation'])/2;records=[];reject=[];seen=set();geometries={}
+    midpoint=sum(scene['answer']['elevation'])/2;records=[];reject=[];seen=set();geometries={};world_patches={}
     rng=np.random.default_rng(seed);diagonal=np.linalg.norm(scene['size'])
     # Diversify sites before any expensive model render, using only image-derived locations.
     primary=[]
@@ -335,7 +335,7 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                 for pose in asset['poses']:
                     for yaw in range(0,360,30):
                         normal=site.get('plane_normal',[0,0,1]) if strict else [0,0,1]
-                        if evidence.get('calibration',{}).get('status')=='pass':normal=[0,0,1]
+                        calibrated=(evidence.get('calibration',{}).get('status')=='pass' or evidence.get('calibration',{}).get('projectable'))
                         matrix=terrain_matrix(pose['matrix'],yaw,normal)
                         tilt=horizontal_angle(asset['axis'],matrix)
                         if tilt>15:continue
@@ -351,17 +351,21 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                             world_ppm=target*correction
                             full_px=world_ppm*2*distance*math.tan(math.radians(geom['camera']['fov']/2))
                             projected_major=full_px*projected_span
-                            if evidence.get('calibration',{}).get('status')=='pass':
+                            if calibrated:
                                 from .reference_projection import metric_projection
                                 from .geometry import contact_world, transformed
                                 from .scene import projection_geometry
-                                patches=contact_world(transformed(vertices,matrix),faces,normal=normal)
+                                patch_key=(pose['id'],yaw,tuple(normal))
+                                if patch_key not in world_patches:
+                                    world_patches[patch_key]=contact_world(transformed(vertices,matrix),faces,normal=normal)
+                                patches=world_patches[patch_key]
                                 if not patches:continue
                                 points=np.concatenate(patches);center=(points.min(0)+points.max(0))/2
                                 factor=scene.get('_image_scale',1.)
                                 cam,frame=metric_projection(evidence['calibration'],np.asarray(anchor)/factor,
                                     fixed_size['nominal_mm'],np.asarray(scene['size'])/factor,center)
-                                geom=projection_geometry(vertices,faces,{'matrix':matrix.tolist()},0,midpoint,normal,camera=cam)
+                                geom=projection_geometry(vertices,faces,{'matrix':matrix.tolist()},0,midpoint,normal,camera=cam,
+                                    patches=patches,raster_size=128 if image_scale<1 else 384)
                                 full_px=frame*factor;projected_major=full_px*float(np.ptp(geom['uv'],axis=0).max())
                                 key=(pose['id'],yaw,tuple(normal),site['id'],anchor_index)
                                 geometries[key]=geom
@@ -395,7 +399,7 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                             ident=f"{site['id']}-{mode}-{pose['id']}-Y{yaw}-Z{scale_index}-A{anchor_index}"
                             if ident in seen:continue
                             seen.add(ident);site_count+=1
-                            calibrated=evidence.get('calibration',{}).get('status')=='pass'
+                            calibrated=bool(evidence.get('calibration',{}).get('metric_camera'))
                             actual_elevation=math.degrees(math.asin(-geom['camera']['basis'][2][2])) if calibrated else midpoint
                             records.append({'id':ident,'site_id':site['id'],'support_ids':ids,'placement':mode,
                                 'material_classes':asset['semantic']['material_classes'],

@@ -460,8 +460,9 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
       'support':{'status':('unknown' if hidden_contacts>.10 or 'support_geometry_uncertain' in candidate.get('uncertainties',[]) else 'pass')
                  if cover and min(cover)>=.9 else 'unknown' if candidate.get('allow_uncertain') else 'fail',
                  'measurements':cover,'threshold':.9,'basis':'estimated_surface','hidden_contact_fraction':hidden_contacts},
-      'camera_clearance':{'status':'unknown' if candidate.get('camera_risks') else 'pass',
-                 'risks':candidate.get('camera_risks',[]),'elevation_interval':candidate['elevation_interval'],'basis':'interval_projection'},
+      'camera_clearance':candidate.get('camera_interval_check',{
+                 'status':'unknown' if candidate.get('camera_risks') else 'pass',
+                 'risks':candidate.get('camera_risks',[]),'elevation_interval':candidate['elevation_interval'],'basis':'interval_projection'}),
       'physics':{'status':physics.get('status','pass' if physics.get('stable') else 'unknown'),'evidence':physics,
                  'basis':'estimated_plane_not_measured_irregular_pile'},
       'occlusion':{'status':'fail' if foreground_changes or (native and occlusion_fraction>.45) else 'unknown' if

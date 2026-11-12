@@ -1,0 +1,24 @@
+{
+  "backgrounds": "C:/Users/zhaoc/Desktop/背景图",
+  "output": "outputs/车宽尺度重生成-新批次",
+  "manifest": "outputs/车宽尺度重新摆位-20261112/all-jobs.json",
+  "assets": ["3", "13", "22", "31", "33"],
+  "count": 15,
+  "seed": 20261112,
+  "max_iterations": 2,
+  "render_device": "OPTIX",
+  "cpu_concurrency": 1,
+  "ai_concurrency": 2,
+  "geometry_preset": "rebuild",
+  "vehicle_reference": {
+    "vehicle_class": "semitrailer",
+    "internal_width_m": 2.45,
+    "nominal_internal_length_m": 12.85,
+    "nominal_internal_height_m": 2.2,
+    "variable_dimensions": ["nominal_internal_length_m", "nominal_internal_height_m"],
+    "source": {
+      "kind": "user_supplied",
+      "reference": "用户确认半挂车内宽 2.45 米；长、高可变，仅作辅助估计。"
+    }
+  }
+}

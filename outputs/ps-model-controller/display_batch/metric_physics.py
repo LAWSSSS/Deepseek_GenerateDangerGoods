@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import numpy as np
 
-VERSION='metre-contact-v1'
+VERSION='metre-contact-v3-upward-receivers'
 
 
 def tolerances(length_m):
@@ -24,6 +24,8 @@ def run(request, reset, rigid, make_receiver):
     unit=float(request['length_m']);tol=tolerances(unit)
     data=np.load(request['geometry']);v=data['vertices']*unit;faces=data['faces']
     proxy=json.loads(Path(request['proxy']).read_text(encoding='utf8'))
+    if proxy.get('max_outward_error',0)*unit+2*tol['margin_m']>tol['contact_m']:
+        raise ValueError('proxy_and_margin_exceed_contact_budget')
     com=np.asarray(proxy['centroid'])*unit
     receiver={**request.get('receiver',{})}
     receiver['patches']=[{**p,'vertices':(np.asarray(p['vertices'])*unit).tolist()}
@@ -67,10 +69,14 @@ def run(request, reset, rigid, make_receiver):
             last=m
         m=obj.evaluated_get(bpy.context.evaluated_depsgraph_get()).matrix_world.copy()@Matrix.Translation(Vector(-com))
         matrix=np.asarray(m).copy();points=transformed(v,matrix);center=transformed(com[None],matrix)[0]
-        floor_v=[ground.matrix_world@p.co for p in ground.data.vertices]
-        tree=BVHTree.FromPolygons(floor_v,[list(f.vertices) for f in ground.data.polygons])
+        floor_v=np.asarray([ground.matrix_world@p.co for p in ground.data.vertices])
+        ground.data.calc_loop_triangles()
+        floor_f=np.asarray([list(f.vertices) for f in ground.data.loop_triangles])
+        tree=BVHTree.FromPolygons(floor_v.tolist(),floor_f.tolist(),all_triangles=True)
+        from .contact_audit import contact_witnesses, support
+        witnesses=contact_witnesses(points,faces,floor_v,floor_f,tol['contact_m'])
         contacts=[];gaps=[];penetrations=[];nearest_points=[]
-        for point in points:
+        for point in witnesses:
             hit=tree.find_nearest(Vector(point))
             if hit[0] is None:continue
             delta=point-np.asarray(hit[0]);n=np.asarray(hit[1]);signed=float(delta@n)
@@ -79,14 +85,20 @@ def run(request, reset, rigid, make_receiver):
                 contacts.append(point);gaps.append(max(0,signed));nearest_points.append(list(hit[0]))
             if tangent<=tol['contact_m'] and signed < -tol['penetration_m']:
                 penetrations.append(-signed)
-        contacts=np.asarray(contacts).reshape(-1,3);supported=False
-        if len(contacts)>=3:
-            vec=[Vector(tuple(p[:2])) for p in contacts]
-            hull=np.asarray([vec[j] for j in convex_hull_2d(vec)])
-            if len(hull)>=3:
-                edge=np.roll(hull,-1,axis=0)-hull
-                distance=(edge[:,0]*(center[1]-hull[:,1])-edge[:,1]*(center[0]-hull[:,0]))/np.maximum(np.linalg.norm(edge,axis=1),1e-12)
-                supported=bool(np.all(distance>=-tol['contact_m']) or np.all(distance<=tol['contact_m']))
+        # Reverse witnesses catch a narrow receiver crossing a large render face
+        # whose vertices/centroid all lie outside the finite receiving patch.
+        object_tree=BVHTree.FromPolygons(points.tolist(),faces.tolist(),all_triangles=True)
+        reverse=np.concatenate([floor_v,floor_v[floor_f].mean(1),
+                                (floor_v[floor_f[:,0]]+floor_v[floor_f[:,1]])*.5])
+        for q in reverse:
+            hit=object_tree.find_nearest(Vector(q))
+            if hit[0] is None or hit[3]>tol['contact_m']:continue
+            p=np.asarray(hit[0]);ground_hit=tree.find_nearest(Vector(p))
+            if ground_hit[0] is None or ground_hit[1].z<=.15:continue
+            contacts.append(p);nearest_points.append(q.tolist());gaps.append(float(hit[3]))
+        contacts=np.asarray(contacts).reshape(-1,3)
+        support_info=support(contacts,center,points,tol['contact_m'],tol['motion_m'],quiet>=3)
+        supported=support_info['supported']
         normalized=matrix.copy();normalized[:3,3]/=unit
         tilt=horizontal_angle(request['axis'],normalized)
         failures=[]
@@ -101,8 +113,10 @@ def run(request, reset, rigid, make_receiver):
             'motion_m':move,'rotation_motion_deg':angle,'length_m':unit,'units':'metres',
             'tolerances':tol,'max_penetration_m':max(penetrations,default=0.),
             'contact_count':len(contacts),'max_contact_gap_m':max(gaps,default=None),
+            'support_detail':support_info,'contact_method':'triangle_edge_and_bidirectional_receiver_witnesses',
             'contact_points':(contacts[::max(1,len(contacts)//1024)]/unit).tolist(),
             'receiver_points':(np.asarray(nearest_points).reshape(-1,3)[::max(1,len(contacts)//1024)]/unit).tolist(),
-            'high_precision':high,'result_translation_adjusted':False})
+            'high_precision':high,'result_translation_adjusted':False,
+            'collision_kind':'component_convex'})
     return {'version':VERSION,'poses':results,'mass_basis':'uniform_density_closed_volume_7800kg_m3_estimate',
             'length_m':unit,'assembly':request['assembly'],'tolerances':tol}

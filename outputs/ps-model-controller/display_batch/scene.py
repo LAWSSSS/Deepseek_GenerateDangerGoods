@@ -130,7 +130,7 @@ class Scenes:
         return scene
 
 
-def projection_geometry(vertices,faces,pose,yaw,elevation,normal=(0,0,1),patches=None,camera=None,contact_band=.008,receiver=None):
+def projection_geometry(vertices,faces,pose,yaw,elevation,normal=(0,0,1),patches=None,camera=None,contact_band=.008,receiver=None,raster_size=384):
     p,_=pose_points(vertices,pose['matrix'],yaw)
     camera=camera or camera_for(p,elevation)
     uv=cv2.convexHull(np.float32(project(p,camera))).reshape(-1,2).astype(float)
@@ -140,15 +140,20 @@ def projection_geometry(vertices,faces,pose,yaw,elevation,normal=(0,0,1),patches
     else:
         polys,anchor=contact_geometry(p,faces,camera,normal=normal,patches=patches,band=contact_band)
     from .pile import mesh_raster
-    silhouette,depth=mesh_raster(p,faces,camera)
+    origin=np.zeros(2);span=1.
+    if float(np.ptp(uv,axis=0).max())<.3:
+        span=float(np.ptp(uv,axis=0).max())*1.10
+        origin=(uv.min(0)+uv.max(0))/2-span/2
+    silhouette,depth=mesh_raster(p,faces,camera,size=raster_size,origin=origin,span=span)
     foot=np.zeros(silhouette.shape,np.uint8)
-    for poly in polys:cv2.fillConvexPoly(foot,np.rint(poly*len(foot)*16).astype(np.int32),255,shift=4)
+    for poly in polys:cv2.fillConvexPoly(foot,np.rint((poly-origin)/span*len(foot)*16).astype(np.int32),255,shift=4)
     return {'camera':camera,'uv':uv,'contacts':polys,'anchor':anchor,
-            'silhouette':silhouette,'zbuffer':depth,'foot_mask':foot}
+            'silhouette':silhouette,'zbuffer':depth,'foot_mask':foot,
+            'raster_origin_uv':origin.tolist(),'raster_span_uv':span}
 
 
 def cached_projection(asset,vertices,faces,pose,yaw,elevation,normal=(0,0,1),patches=None):
-    key=signature('projection-v4-true-mesh',asset['signature'],pose['matrix'],yaw,elevation,normal)
+    key=signature('projection-v5-adaptive-true-mesh',asset['signature'],pose['matrix'],yaw,elevation,normal)
     folder=Path(asset['folder'])/'projections';folder.mkdir(exist_ok=True)
     path=folder/(key+'.npz')
     if path.is_file():
@@ -157,7 +162,8 @@ def cached_projection(asset,vertices,faces,pose,yaw,elevation,normal=(0,0,1),pat
             return {'camera':json.loads(str(data['camera'])),'uv':data['uv'],
                     'contacts':[points[a:b] for a,b in zip(offsets[:-1],offsets[1:])],
                     'anchor':anchor if len(anchor) else None,'silhouette':data['silhouette'],
-                    'zbuffer':data['zbuffer'],'foot_mask':data['foot_mask']}
+                    'zbuffer':data['zbuffer'],'foot_mask':data['foot_mask'],
+                    'raster_origin_uv':data['raster_origin_uv'],'raster_span_uv':float(data['raster_span_uv'])}
     geom=projection_geometry(vertices,faces,pose,yaw,elevation,normal,patches)
     offsets=np.cumsum([0]+[len(p) for p in geom['contacts']])
     fd,name=tempfile.mkstemp(dir=folder,suffix='.npz');os.close(fd)
@@ -165,7 +171,8 @@ def cached_projection(asset,vertices,faces,pose,yaw,elevation,normal=(0,0,1),pat
         np.savez_compressed(name,uv=geom['uv'],points=np.concatenate(geom['contacts']) if geom['contacts'] else np.empty((0,2)),
                             offsets=offsets,anchor=geom['anchor'] if geom['anchor'] is not None else [],
                             camera=json.dumps(geom['camera']),silhouette=geom['silhouette'],
-                            zbuffer=geom['zbuffer'],foot_mask=geom['foot_mask'])
+                            zbuffer=geom['zbuffer'],foot_mask=geom['foot_mask'],
+                            raster_origin_uv=geom['raster_origin_uv'],raster_span_uv=geom['raster_span_uv'])
         os.replace(name,path)
     finally:
         if os.path.exists(name):os.unlink(name)
@@ -182,7 +189,9 @@ def fitted_masks(geom, anchor_px, full_px, scene):
     x,y=low;cw,ch=high-low
     if min(cw,ch)<12*scene.get('_image_scale',1.) or max(cw,ch)>w*.6:return None
     raster_size=geom['silhouette'].shape[0]
-    transform=np.float32([[full_px/raster_size,0,offset[0]-x],[0,full_px/raster_size,offset[1]-y]])
+    origin=np.asarray(geom.get('raster_origin_uv',[0,0]));span=geom.get('raster_span_uv',1.)
+    transform=np.float32([[full_px*span/raster_size,0,offset[0]+origin[0]*full_px-x],
+                         [0,full_px*span/raster_size,offset[1]+origin[1]*full_px-y]])
     contact=cv2.warpAffine(geom['foot_mask'],transform,(int(cw),int(ch)),flags=cv2.INTER_NEAREST)
     silhouette=cv2.warpAffine(geom['silhouette'].astype(np.uint8),transform,(int(cw),int(ch)),flags=cv2.INTER_NEAREST)
     depth=cv2.warpAffine(geom['zbuffer'],transform,(int(cw),int(ch)),flags=cv2.INTER_NEAREST)
