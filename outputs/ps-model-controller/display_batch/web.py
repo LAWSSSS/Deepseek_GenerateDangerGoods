@@ -52,9 +52,11 @@ async def create(request):
         test=request.url.path=='/api/batches/test'
         if test:
             raw.setdefault('count',1)
-            raw.setdefault('effects',{})
+            # Let the coherent preset supply its own defaults. An empty effects
+            # object would instantiate legacy manual haze before schema validation.
+            if raw.get('integration_mode','legacy')!='coherent':raw.setdefault('effects',{})
             raw.setdefault('max_iterations',2)
-            if raw.get('offline') or raw.get('effects') is None:
+            if raw.get('offline') or ('effects' in raw and raw['effects'] is None):
                 raise ValueError('在线测试必须启用效果和在线复核')
         ident=secrets.token_hex(8)
         raw['output']=str(ROOT/'outputs'/('批量展示-'+time.strftime('%Y%m%d-%H%M%S')+'-'+ident[:6]))
@@ -70,7 +72,9 @@ async def create(request):
         launch(ident)
         return JSONResponse({'id':ident,'output':config.output,
             'geometry_preset':config.geometry_preset,'vehicle_reference':config.vehicle_reference,
-            'effective_modes':{'scale':config.scale_mode,'contact':config.contact_mode,'chroma':config.chroma_mode},
+            'integration_mode':config.integration_mode,
+            'effective_modes':{'scale':config.scale_mode,'contact':config.contact_mode,'chroma':config.chroma_mode,
+                               'integration':config.integration_mode},
             'effects':config.effects.model_dump() if config.effects else None,
             'status_url':f'/api/batches/{ident}',
             'report_url':f'/api/batches/{ident}/files/index.html'},status_code=202)
@@ -85,6 +89,7 @@ async def status(request):
         result={'id':ident,'output':str(out),'running':bool(ident in PROCESSES and PROCESSES[ident].poll() is None)}
         result['effects']=config.effects.model_dump() if config.effects else None
         result['geometry_preset']=config.geometry_preset
+        result['integration_mode']=config.integration_mode
         result['vehicle_reference']=config.vehicle_reference
         from .collision import VERSION as collision_version
         from .vehicle_scale import VERSION as scale_version
@@ -127,7 +132,11 @@ async def artifact(request):
 
 
 async def effect_options(request):
-    return JSONResponse({'version':'online-effects-v2','defaults':EffectSettings().model_dump(),
+    return JSONResponse({'version':'online-effects-v3','defaults':EffectSettings().model_dump(),
+        'integration_modes':{'default':'legacy','options':[
+            {'value':'legacy','label':'原融合流程'},
+            {'value':'coherent','label':'局部受光与反射协同（小样）'}],
+            'promoted_default':False,'dependency':'lighting_material_render_shadow_compose_review'},
         'recommended':{'scale_mode':'physical_consistent','effects':{
             **EffectSettings().model_dump(),'fog_mode':'local_auto','weathering':'preserve_source',
             'shadow_mode':'matched_receiver','lighting':'local'}},

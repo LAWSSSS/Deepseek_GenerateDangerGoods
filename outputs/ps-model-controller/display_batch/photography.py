@@ -108,7 +108,12 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     ev=float(base_ev+extra_ev if reference else np.clip(base_ev+extra_ev,-1.5,2.))
     preserve=params.get('weathering')=='preserve_source'
     requested_ev=ev
-    if preserve:ev=float(np.clip(ev,-.5,.5))
+    coherent=params.get('integration_mode')=='coherent'
+    if preserve:
+        # Calibration is shared by every material under this light. It is not an
+        # object-median brightness correction; only the extra photographic action
+        # is limited to half a stop. Legacy replay keeps its original clipping.
+        ev=float(base_ev+np.clip(extra_ev,-.5,.5)) if coherent and calibration else float(np.clip(ev,-.5,.5))
     exposure_error=float(np.median(display(sample*2**ev)@LUMA)-goal)
     exposure_limited=bool(abs(exposure_error)>.035 and (ev>1.99 or ev<-1.49))
     if calibration:
@@ -234,7 +239,9 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
     return rgb,{'version':environment.get('local_context',{}).get('version') or (REFERENCE_VERSION if reference else VERSION),
         'color_pipeline':'scene_linear_EXR_calibration_AgX_once_camera_linear_atmosphere' if calibration else 'scene_linear_EXR_exposure_WB_haze_then_OCIO_AgX_once',
         'calibration':calibration,
-        'exposure_ev':ev,'white_balance':cast.tolist(),'chroma_gain':gain,'contrast_gain':contrast,
+        'exposure_ev':ev,'calibration_ev':float(base_ev) if calibration else None,
+        'photographic_adjustment_ev':float(ev-base_ev),'integration_mode':params.get('integration_mode','legacy'),
+        'white_balance':cast.tolist(),'chroma_gain':gain,'contrast_gain':contrast,
         'exposure_limited':exposure_limited,'exposure_error':exposure_error,'effective_controls':effective,
         'dust_mean':dust_mean,'haze':haze,'noise_sigma':noise,'added_noise_sigma':added,
         'blur_sigma':blur_sigma,'before_luma':before*255,'target_luma':target*255,

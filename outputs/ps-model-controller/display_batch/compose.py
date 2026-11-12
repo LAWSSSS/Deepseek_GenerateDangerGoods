@@ -19,6 +19,21 @@ from .atmosphere import (calibrate_environment, transmission_fields, fogged_radi
 from .local import neighbourhood, camera_residual, seam_measurement, local_veil, foreground_dust
 
 
+def contact_shading_supported(candidate,coverage,coherent=False):
+    """Estimated receiver height need not erase an otherwise simulated contact.
+
+    This only permits a small contact-light term. It never changes the physical
+    evidence status, and cannot supply missing contacts or hide failed dynamics.
+    """
+    physics=candidate.get('terrain_physics',{})
+    if not coverage or min(coverage)<.9 or not physics.get('stable'):return False
+    if physics.get('status')=='pass':return True
+    return bool(coherent and physics.get('status')=='unknown'
+        and not physics.get('failure_codes') and physics.get('center_supported')
+        and physics.get('contact_count',0)>0
+        and candidate.get('contact_gap',{}).get('status')=='pass')
+
+
 def linear(rgb):
     rgb=np.asarray(rgb,dtype=np.float32)
     return np.where(rgb<=.04045,rgb/12.92,((rgb+.055)/1.055)**2.4)
@@ -324,10 +339,11 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             photo['patch_boundary']={'before':before_seam,'after':seam_measurement(loss,receiver,alpha),
                 'feather_px':width,'object_alpha_changed':False}
             physics=candidate.get('terrain_physics',{})
-            supported=bool(cover and min(cover)>=.9 and physics.get('stable') and physics.get('status')=='pass')
+            supported=contact_shading_supported(candidate,cover,params.get('integration_mode')=='coherent')
             contact=contact_darkening(foot,support,foreground|protected,candidate['target_px'],supported)
             loss=np.maximum(loss,contact)
             photo['contact_ambient_loss']=float(contact.max())
+            photo['contact_shading_basis']='verified_simulation_on_estimated_receiver' if supported and physics.get('status')!='pass' else 'measured_or_disabled'
     base_rgb=np.asarray(scene['frame']).copy();crop=base_rgb[y:b,x:r].astype(np.float32)/255
     if native:
         physics=candidate.get('terrain_physics',{})

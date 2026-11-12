@@ -9,9 +9,35 @@ from .photography import linear, LUMA
 from .atmosphere import masked_smooth, field_crop, regions_mask
 
 VERSION='bounded-atmosphere-v1'
+COHERENT_VERSION='bounded-atmosphere-v2-dark-tail'
+
+
+def constrain_dark_floor(amount,radiance,valid,air,coarse):
+    """A reflective patch's minimum is not evidence of atmospheric extinction.
+
+    Bound the field by the neighbourhood's dark tail, and require an observable
+    dark/bright range. This remains a single-image estimate, never air density.
+    """
+    values=radiance.min(axis=2)[valid]
+    if len(values)<60:
+        return np.minimum(amount,.08),{'confidence':'unknown','fog_upper_bound':.08,'basis':'insufficient_dark_samples'}
+    dark,bright=np.percentile(values,[5,80])
+    contrast=float((bright-dark)/max(bright,.03))
+    informative=contrast>.28 and dark<max(float(air.min())*.55,.04)
+    upper=float(np.clip((dark-.008)/max(float(air.min())-.008,.05)*.78,0,.35))
+    if not informative:upper=min(upper,.10)
+    if coarse.get('kind')=='clear' and coarse.get('confidence',0)>=.65:upper=0.
+    elif coarse.get('kind') in ('uncertain',None):upper=min(upper,.18)
+    # The bound is computed from all same-layer valid pixels, not a selected bright
+    # surface. It cannot increase the original estimate or create a spatial edge.
+    return np.minimum(amount,upper),{'confidence':'estimated' if informative else 'unknown',
+        'fog_upper_bound':upper,'dark_tail_linear':float(dark),'relative_local_contrast':contrast,
+        'basis':'same_layer_dark_tail_bound','bright_surface_ambiguous':not informative}
 
 
 def estimate(scene,candidate,environment):
+    coherent=environment.get('integration_mode')=='coherent'
+    version=COHERENT_VERSION if coherent else VERSION
     l,t,r,b=environment['local_context']['bounds']
     frame=np.float32(np.asarray(scene['frame'])[t:b,l:r])/255
     factor=min(1.,256/max(frame.shape[:2]));size=(max(8,round(frame.shape[1]*factor)),max(8,round(frame.shape[0]*factor)))
@@ -35,7 +61,7 @@ def estimate(scene,candidate,environment):
     if not sample.any():
         return {'transmission':np.ones(gray.shape,np.float32),'airlight':np.full((*gray.shape,3),.4,np.float32),
                 'sample_mask':np.zeros(gray.shape,np.uint8),'inverse_depth':depth}, {
-                'version':VERSION,'bounds':[l,t,r,b],'confidence':'unknown','sample_pixels':0,
+                'version':version,'bounds':[l,t,r,b],'confidence':'unknown','sample_pixels':0,
                 'basis':'no_local_neutral_evidence','depth_coefficient':0.,'depth_confidence':'unknown',
                 'transmission_range':[1.,1.,1.],'depth_near':0.,'depth_far':0.}
     # Air colour is supported by neutral material agreement, not the brightest metal.
@@ -57,6 +83,10 @@ def estimate(scene,candidate,environment):
     if coarse.get('kind')=='clear' and coarse.get('confidence',0)>=.65:amount[:]=0.
     if agreement>.08:confidence='unknown'
     if confidence=='unknown':amount=np.minimum(amount,.15)
+    constraint={}
+    if coherent:
+        amount,constraint=constrain_dark_floor(amount,radiance,valid,air,coarse)
+        if constraint['confidence']=='unknown':confidence='unknown'
     amount=np.float32(np.clip(amount,0,.50));tau=-np.log(np.maximum(1-amount,.5))
     near,far=np.percentile(depth[valid],[95,5]);distance=np.clip((near-depth)/max(near-far,.01),0,1)
     beta=0.;correlation=0.
@@ -67,18 +97,19 @@ def estimate(scene,candidate,environment):
     screen=np.maximum(tau-beta*distance,0).astype(np.float32)
     fields={'transmission':np.exp(-(screen+beta*distance)).astype(np.float32),
             'screen_tau':screen,'airlight':a_field,'sample_mask':sample.astype(np.uint8),'inverse_depth':depth}
-    summary={'version':VERSION,'bounds':[l,t,r,b],'confidence':confidence,'sample_pixels':int(sample.sum()),
+    summary={'version':version,'bounds':[l,t,r,b],'confidence':confidence,'sample_pixels':int(sample.sum()),
              'basis':'bounded_neutral_airlight_multiscale_dark_floor','depth_confidence':'estimated' if beta else 'unknown',
              'depth_coefficient':beta,'depth_near':float(near),'depth_far':float(far),'depth_correlation':correlation,
              'scale_disagreement':agreement,'airlight_camera_linear':air.tolist(),
              'transmission_range':np.percentile(fields['transmission'],[5,50,95]).tolist(),
-             'surface_reflection_excluded':True,'metric_air_density_known':False}
+             'surface_reflection_excluded':True,'metric_air_density_known':False,'dark_floor_constraint':constraint}
     return fields,summary
 
 
 def prepare(scene,candidate,environment,cache):
     context=environment['local_context']
-    key=signature(VERSION,scene['key'],context['bounds'],candidate['site_id'],
+    version=COHERENT_VERSION if environment.get('integration_mode')=='coherent' else VERSION
+    key=signature(version,scene['key'],context['bounds'],candidate['site_id'],
                   scene.get('atmosphere',{}).get('signature'))
     folder=Path(cache)/'local-atmosphere'/key;path=folder/'summary.json'
     if path.exists() and (folder/'fields.npz').exists():summary=json.loads(path.read_text(encoding='utf8'))

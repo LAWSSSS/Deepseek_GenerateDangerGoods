@@ -191,7 +191,7 @@ class Pipeline:
         self.vision=Vision(config,self.cache/'vision',self.out/f'usage-{self.run_id}.json')
         self.blender=Blender(self.cache/('worker-'+str(os.getpid())),config.render_device)
         self.renders=RenderCache(self.cache,self.blender)
-        self.scenes=Scenes(self.cache,self.vision);self.assets={}
+        self.scenes=Scenes(self.cache,self.vision,structured=config.support_geometry=='structured');self.assets={}
         self.atmospheres=Atmospheres(self.cache,self.vision)
         self.catalog=load_catalog();self.store=Store(self.out/'jobs.sqlite')
         self.cpu=asyncio.Semaphore(config.cpu_concurrency)
@@ -228,6 +228,7 @@ class Pipeline:
             scene['atmosphere']=await self.atmospheres.prepare(scene)
         environment,samples=await asyncio.to_thread(sample_environment,scene,candidate,
             scene_lighting=style in ('scene','native'),native=style=='native',local=self.config.appearance=='local')
+        environment={**environment,'integration_mode':params.get('integration_mode','legacy')}
         extras={}
         if params.get('fog_mode')=='local_auto':
             from .local_atmosphere import prepare as prepare_local_atmosphere
@@ -262,6 +263,16 @@ class Pipeline:
         return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
 
     async def choose_placements(self,asset,scene,seed):
+        if self.config.geometry_preset=='rebuild':
+            from .vehicle_scale import prepare as prepare_vehicle, projection_preflight
+            if 'vehicle_scale' not in scene:
+                scene['vehicle_scale']=await prepare_vehicle(scene,self.config.vehicle_reference,self.vision,self.cache)
+            scene['vehicle_scale']['enforce_projection_preflight']=self.config.integration_mode=='coherent'
+            gate=scene['vehicle_scale'].get('projection_preflight') or projection_preflight(scene['vehicle_scale']['calibration'])
+            if self.config.integration_mode=='coherent' and not gate['allow_expensive_steps']:
+                atomic_json(self.out/'scale-scenes'/(scene['key']+'.json'),{'vehicle_scale':scene['vehicle_scale'],
+                    'projection_preflight':gate})
+                return [],[{'reason':'high_risk_vehicle_projection','evidence':gate}]
         if self.config.scale_mode=='reference_projection' or self.config.contact_mode=='strict':
             from .specifications import identify, scene_observations
             from .reference_projection import audit
@@ -461,6 +472,8 @@ class Pipeline:
         return {'candidate':candidate,'material':'original','light':'scene','tone':'scene','photo_model':photo_model,
                 'photo_style':self.config.photo_style,'atmosphere':self.config.atmosphere,
                 'chroma_mode':self.config.chroma_mode,
+                'integration_mode':self.config.integration_mode,
+                'camera_pipeline':self.config.camera_pipeline,
                 **{k:'auto' for k in PHOTO_CONTROLS},**effect_parameters(self.config.effects)}
 
     @staticmethod

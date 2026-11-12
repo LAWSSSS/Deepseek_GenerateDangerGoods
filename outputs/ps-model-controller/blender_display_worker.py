@@ -757,7 +757,8 @@ def render_parts(request):
     started=time.monotonic()
     reference=request['appearance'] in ('reference','local')
     matte=request.get('matte_partitions')
-    mode=(request['appearance'],bool(request.get('surface_scans')),matte is not None)
+    integration_mode=request['environment'].get('integration_mode','legacy')
+    mode=(request['appearance'],bool(request.get('surface_scans')),matte is not None,integration_mode)
     if LIVE_RENDER is None or LIVE_RENDER['mode']!=mode:
         scene=reset(request['device'])
         for obj in list(scene.objects):bpy.data.objects.remove(obj,do_unlink=True)
@@ -770,7 +771,7 @@ def render_parts(request):
     scene.render.use_persistent_data=request.get('persistent_data',True)
     imported=0.;import_seconds=0.
     mesh_key=(request['mesh'],request['mesh_hash'],matte['signature'] if matte is not None else None,
-              request.get('matte_profile'))
+              request.get('matte_profile'),integration_mode)
     if state.get('mesh_key')!=mesh_key:
         begin=time.monotonic()
         if 'asset' in state:
@@ -860,6 +861,8 @@ def render_parts(request):
             'contact_polygons':[q.tolist() for q in polys],'camera':camera,'device':DEVICE,
             'scanned_materials':adapted if matte is None else [],
             'matte_materials':adapted if matte is not None else [],
+            'integration_mode':integration_mode,
+            'lighting_basis':request['environment'].get('lighting_basis'),
             'shadow_basis':shadow_basis,'shadow_catcher_fallback':catcher_fallback,
             'imports':int(imported),'timings':timings}
 

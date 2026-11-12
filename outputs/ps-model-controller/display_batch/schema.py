@@ -70,6 +70,9 @@ class BatchConfig(Strict):
     scene_reference_registry: str | None = None
     geometry_preset: Literal['legacy', 'rebuild'] = 'legacy'
     vehicle_reference: dict | None = None
+    integration_mode: Literal['legacy', 'coherent'] = 'legacy'
+    camera_pipeline: Literal['legacy_residual', 'premultiplied'] = 'legacy_residual'
+    support_geometry: Literal['legacy', 'structured'] = 'legacy'
 
     @model_validator(mode='after')
     def dust_uses_neighbourhood(self):
@@ -82,6 +85,9 @@ class BatchConfig(Strict):
             self.effects=EffectSettings(fog_extra=0.,pool_kernel=3,surface_dust=.5,lighting='local',
                 fog_mode='local_auto',weathering='preserve_source',shadow_mode='matched_receiver')
             self.asset_scale_factors={}
+        if self.integration_mode=='coherent' and self.effects is None:
+            self.effects=EffectSettings(fog_extra=0.,pool_kernel=3,surface_dust=.5,lighting='local',
+                fog_mode='local_auto',weathering='preserve_source',shadow_mode='matched_receiver')
         # Selecting this style in either CLI or web must actually use local evidence.
         if self.photo_style=='dusty_scrap':self.appearance='local'
         if self.effects is not None:
@@ -128,6 +134,14 @@ class SceneAnswer(Strict):
         if self.light_direction and any(abs(v)>1 for v in self.light_direction):
             raise ValueError("invalid screen light direction")
         return self
+
+
+class StructuredSurface(Surface):
+    geometry_kind: Literal['planar','curved','compound','unknown']
+
+
+class StructuredSceneAnswer(SceneAnswer):
+    surfaces: list[StructuredSurface] = Field(max_length=8)
 
 
 class AtmosphereAnswer(Strict):

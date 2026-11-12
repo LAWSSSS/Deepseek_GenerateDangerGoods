@@ -1,0 +1,25 @@
+{
+  "backgrounds": "C:/Users/zhaoc/Desktop/背景图",
+  "output": "outputs/局部受光反射协同-新小样",
+  "assets": ["3", "13", "22", "31", "33"],
+  "count": 15,
+  "seed": 20261112,
+  "max_iterations": 2,
+  "integration_mode": "coherent",
+  "camera_pipeline": "premultiplied",
+  "support_geometry": "structured",
+  "geometry_preset": "rebuild",
+  "render_device": "OPTIX",
+  "cpu_concurrency": 1,
+  "ai_concurrency": 2,
+  "vehicle_reference": {
+    "vehicle_class": "semitrailer",
+    "internal_width_m": 2.45,
+    "nominal_internal_length_m": 12.85,
+    "nominal_internal_height_m": 2.2,
+    "source": {
+      "kind": "user_supplied",
+      "reference": "用户确认半挂车内宽 2.45 米；长度和高度可变，仅辅助估计。"
+    }
+  }
+}

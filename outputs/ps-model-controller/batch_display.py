@@ -28,11 +28,16 @@ def main():
     sub=parser.add_subparsers(dest='command',required=True)
     run=sub.add_parser('run');run.add_argument('--config',type=Path,required=True)
     diagnostic=sub.add_parser('diagnose');diagnostic.add_argument('--config',type=Path,required=True)
+    for command in (run,diagnostic):
+        command.add_argument('--integration-mode',choices=('legacy','coherent'),default=None,
+            help='覆盖配置中的融合路径：legacy 复现原流程；coherent 使用局部受光与反射协同小样策略')
     bench=sub.add_parser('evaluation-manifests');bench.add_argument('--backgrounds',required=True);bench.add_argument('--out',required=True)
     args=parser.parse_args()
     if args.command=='evaluation-manifests':
         print(evaluation_manifests(args.backgrounds,args.out));return
-    config=BatchConfig.model_validate_json(args.config.read_text(encoding='utf8'))
+    raw=json.loads(args.config.read_text(encoding='utf8'))
+    if args.integration_mode is not None:raw['integration_mode']=args.integration_mode
+    config=BatchConfig.model_validate(raw)
     if args.command=='diagnose':
         from display_batch.diagnostics import diagnose
         print(asyncio.run(diagnose(config)));return

@@ -12,7 +12,7 @@ from PIL import Image, ImageOps
 
 from scene_v2 import Perception
 from .common import WEIGHTS, atomic_json, file_hash, signature
-from .schema import SceneAnswer
+from .schema import SceneAnswer, StructuredSceneAnswer
 from .geometry import (camera_for, contact_geometry, contact_world, pose_points, project, contact_support,
                        scale_from_reference, terrain_matrix, horizontal_angle, transformed)
 
@@ -32,6 +32,10 @@ PILE_PROMPT=SCENE_PROMPT.replace('a contiguous floor patch or one broad steel fa
     'a floor patch OR the top face of steel within the pile. Include distributed pile interiors and overlapping steel, '
     'not only empty floor. Each polygon is one visible surface; separate pieces will be combined by geometry. '
     'A surface may be partially hidden by foreground bars. Never treat a gap as solid support.')
+STRUCTURED_PROMPT=PILE_PROMPT+''' Each surface must include geometry_kind: planar,
+curved, compound (multiple overlapping faces), or unknown. A broad image mask is
+not evidence of a plane. Curled sheets, bent sheets and layered stacks require
+their corresponding kind; never silently flatten them into a supporting plane.'''
 
 
 def polygon_mask(polygons, size):
@@ -43,11 +47,12 @@ def polygon_mask(polygons, size):
 
 
 class Scenes:
-    def __init__(self, root, vision, legacy=False):
+    def __init__(self, root, vision, legacy=False, structured=False):
         self.root=Path(root);self.root.mkdir(parents=True,exist_ok=True)
         self.vision=vision;self.engine=None;self.engine_lock=asyncio.Lock()
         self.loaded={};self.locks={}
         self.legacy=legacy
+        self.structured=structured
 
     async def prepare(self, path):
         key=file_hash(path)
@@ -55,14 +60,15 @@ class Scenes:
         async with lock:return await self._prepare(path)
 
     async def _prepare(self, path):
-        key=signature('independent-scene-v3' if self.legacy else SCENE_VERSION,file_hash(path))
+        key=signature('independent-scene-v5-surface-geometry' if self.structured else 'independent-scene-v3' if self.legacy else SCENE_VERSION,file_hash(path))
         if key in self.loaded:return self.loaded[key]
         start=time.monotonic();folder=self.root/'scenes'/key;folder.mkdir(parents=True,exist_ok=True)
         with Image.open(path) as im:frame=ImageOps.exif_transpose(im).convert('RGB')
         preview=folder/'background.jpg'
         if not preview.is_file():
             thumb=frame.copy();thumb.thumbnail((1536,1024));thumb.save(preview,quality=88)
-        answer=await self.vision.ask('scene',SceneAnswer,SCENE_PROMPT if self.legacy else PILE_PROMPT,{},[preview])
+        answer=await self.vision.ask('scene',StructuredSceneAnswer if self.structured else SceneAnswer,
+            STRUCTURED_PROMPT if self.structured else SCENE_PROMPT if self.legacy else PILE_PROMPT,{},[preview])
         atomic_json(folder/'analysis.json',answer.model_dump())
         async with self.engine_lock:
             if self.engine is None:self.engine=Perception(WEIGHTS,self.root)
@@ -116,6 +122,7 @@ class Scenes:
                         'reference_mm':[2000,5000],'reference_status':'unknown','plane_normal':[0,0,1],
                         'slope_deg':0,'plane_residual':1}
                 derived.append({**nearest,'id':f'D{len(derived)+1}','label':'segmented interior steel; estimated support',
+                    'geometry_kind':'unknown','normal_inherited':True,
                     'mask':cv2.resize(valid.astype(np.uint8),size,interpolation=cv2.INTER_NEAREST)>0,
                     'anchor_px':anchor,'anchor':(np.asarray(anchor)/np.subtract(size,1)).tolist(),
                     'depth':float(np.median(depth[valid])),'confidence':.35,'evidence_status':'unknown',

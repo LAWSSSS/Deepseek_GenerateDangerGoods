@@ -37,6 +37,7 @@ def render_request(asset,candidate,params,environment):
              'roughness_delta':MATERIAL_PROFILES[params['material']],
              'dust_gain':1.6 if params['material']=='weathered' else 1.,
              'light_gain':LIGHT_PROFILES[params['light']]}
+    request['integration_mode']=params.get('integration_mode','legacy')
     if candidate.get('camera'):request['camera']=candidate['camera']
     if candidate.get('contact_band'):request['contact_band']=candidate['contact_band']
     if candidate.get('receiver',{}).get('patches'):request['receiver']=candidate['receiver']
@@ -60,12 +61,12 @@ def render_dependencies():
 
 def part_keys(request, device, dependencies):
     windows=request['windows']
-    fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe','local_irradiance')
+    fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe','local_irradiance','integration_mode')
     environment=request['environment']
     light={k:environment[k] for k in fields if k in environment}
     light['calibrated']=bool(environment.get('calibration'))
     shared=(RENDER_VERSION,dependencies,device,request['appearance'],request['camera'],
-            request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'])
+            request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'],request.get('integration_mode','legacy'))
     if request.get('contact_band'):shared=(*shared,request['contact_band'])
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
              request['dust_gain'],request['dust_control'],request['material_classes'],

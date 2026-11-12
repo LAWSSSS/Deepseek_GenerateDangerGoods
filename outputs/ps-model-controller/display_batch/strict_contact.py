@@ -1,5 +1,7 @@
 """Strict eligibility is independent of display-review uncertainty policy."""
 import json
+import math
+import re
 import time
 from pathlib import Path
 import numpy as np
@@ -15,6 +17,51 @@ def retryable(pose):
 def visual_veto(review):
     return [d.model_dump() for d in review.defects if d.code in ('floating','penetration','occlusion','upright')
             and d.visibility=='visible']
+
+
+def pose_review_context(checks):
+    """A geometric measurement informs interpretation, not visual acceptance."""
+    lying=checks.get('lying',{})
+    angle=lying.get('measurement_deg')
+    measured=isinstance(angle,(int,float)) and not isinstance(angle,bool) and math.isfinite(angle)
+    return {'required_pose':'lying_on_side', 'reference_pose_is_not_target':True,
+            'measured_axis_angle_deg':angle if measured else None,
+            'maximum_axis_angle_deg':15, 'measurement_status':lying.get('status','unknown'),
+            'limitation':'Estimated geometry does not override visible floating, penetration or depth-order defects.'}
+
+
+def reconcile_pose_evidence(review,checks):
+    """Keep a contradictory reference-pose complaint unknown, never accepted.
+
+    This narrowly handles an observed invalid review: the model says the object
+    lies on its side, but calls that an upright defect because the source photo
+    is upright. A plausible upright cue, or any contact defect, still vetoes.
+    """
+    context=pose_review_context(checks)
+    angle=context['measured_axis_angle_deg']
+    if context['measurement_status']!='pass' or angle is None or not 0<=angle<=15:
+        return review
+    reconciled=[];defects=[]
+    for defect in review.defects:
+        evidence=defect.evidence.lower()
+        # Both an explicit current lying pose and an upright *reference* are
+        # required; a measured low axis angle alone can never clear an AI veto.
+        lying=bool(re.search(r'横向侧躺|横躺|侧卧|平躺|lies? (?:flat|on (?:its|the) side)|lying (?:flat|on (?:its|the) side)|horizontally (?:placed|lying)',evidence))
+        denied_lying=bool(re.search(r'(?:并非|不是|没有|未|不|应该|应当|必须|需要)[^，。；,;.!?]{0,8}(?:横向侧躺|横躺|侧卧|平躺)|(?:not|should be|must be)[^.;!?]{0,12}(?:lying|horizontally|flat)',evidence))
+        reference=bool(re.search(r'(?:参考图|源图|原图)[^。；;.!?]{0,32}(?:直立|竖立)|(?:reference|source)(?: image| photo)?[^.;!?]{0,48}(?:upright|standing|vertical)',evidence))
+        contact_cue=bool(re.search(r'悬空|穿透|浮起|floating|penetrat|hovering|unsupported',evidence))
+        if defect.code=='upright' and defect.visibility=='visible' and lying and reference and not denied_lying and not contact_cue:
+            reconciled.append(defect.model_dump())
+            defects.append(defect.model_copy(update={'visibility':'unassessable',
+                'evidence':('参考姿态误用，与已测横躺姿态矛盾；原评语：'+defect.evidence)[:160]}))
+        else:defects.append(defect)
+    if not reconciled:return review
+    checks['review_pose_consistency']={'status':'unknown','reason':'reference_pose_conflicts_with_required_lying_pose',
+        'measurement_deg':angle,'threshold_deg':15,'original_defects':reconciled,
+        'policy':'retain_review_only; preserve severity and all independent physical vetoes'}
+    # Do not raise scores, erase severity or set trace=none. A contradictory
+    # assessment is an unresolved review, not evidence of physical success.
+    return review.model_copy(update={'defects':defects})
 
 
 async def simulate(asset,blender,matrices,receiver=None,normal=(0,0,1)):

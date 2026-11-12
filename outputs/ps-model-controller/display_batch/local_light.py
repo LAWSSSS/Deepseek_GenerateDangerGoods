@@ -10,7 +10,59 @@ import numpy as np
 
 
 VERSION = 'local-tile-irradiance-v1'
+COHERENT_VERSION = 'local-hemisphere-reflection-v1'
 LUMA = np.float32([.2126, .7152, .0722])
+
+
+def clear_reflection_samples(observed, environment, bounds, selected):
+    """Remove the same bounded local camera veil used by object compositing.
+
+    The expanded lighting neighbourhood can exceed the fitted veil field. Only
+    a short, low-strength edge continuation is allowed there; distant pixels are
+    left observed rather than borrowing a scene-wide atmosphere estimate.
+    """
+    from pathlib import Path
+    from .atmosphere import field_crop
+    context = environment.get('atmospheric_context')
+    if environment.get('integration_mode') != 'coherent' or not context:
+        air = environment.get('airborne_dust', {})
+        amount = min(.28, max(0., air.get('amount', 0.)))
+        air_color = np.asarray(air.get('color_linear', environment['dust_color']), np.float32)
+        if environment.get('integration_mode') == 'coherent':
+            # Missing local evidence never silently reinstates a global haze fit.
+            return observed.copy(), {'source':'missing_local_field_observed_radiance',
+                'confidence':'unknown','global_fallback':False,'compensated_fraction':0.}
+        clear = np.clip((observed-amount*air_color)/max(.72,1-amount), observed*.65, observed*1.15)
+        return clear, {'source':'legacy_local_scalar','amount':amount}
+    summary=context['summary'];l,t,r,b=summary['bounds'];x,y,rr,bb=bounds
+    with np.load(Path(context['folder'])/'fields.npz') as fields:
+        transmission=np.asarray(fields['transmission'],np.float32)
+        airlight=np.asarray(fields['airlight'],np.float32)
+    if (transmission.ndim!=2 or airlight.shape!=(*transmission.shape,3) or
+            not np.isfinite(transmission).all() or not np.isfinite(airlight).all()):
+        raise ValueError('invalid_local_atmosphere_reflection_field')
+    translated=[x-l,y-t,rr-l,bb-t]
+    transmission=field_crop(transmission,translated,(r-l,b-t))
+    airlight=field_crop(airlight,translated,(r-l,b-t))
+    yy,xx=np.mgrid[y:bb,x:rr].astype(np.float32)
+    inside=(xx>=l)&(xx<r)&(yy>=t)&(yy<b)
+    distance=np.maximum.reduce([l-xx,xx-(r-1),t-yy,yy-(b-1),np.zeros_like(xx)])
+    halo=min(32.,max(8.,min(r-l,b-t)*.08))
+    edge_amount=np.minimum(1-np.clip(transmission,.45,1.),.08)*np.clip(1-distance/halo,0,1)
+    effective_t=np.where(inside,np.clip(transmission,.45,1.),1-edge_amount)
+    corrected=(observed-(1-effective_t[...,None])*airlight)/effective_t[...,None]
+    clear=np.clip(corrected,observed*.65,observed*1.15)
+    # Unknown exterior evidence may only make a very small radiometric change.
+    clear=np.where(inside[...,None],clear,np.clip(clear,observed*.95,observed*1.05))
+    samples=selected if selected.any() else np.ones(inside.shape,bool)
+    return clear, {'source':'local_atmosphere_transmission_and_airlight_fields',
+        'signature':context.get('signature'),'version':summary.get('version'),
+        'confidence':summary.get('confidence','unknown'),'field_bounds':[l,t,r,b],
+        'sampling_bounds':list(bounds),'covered_sample_fraction':float(inside[samples].mean()),
+        'compensated_fraction':float((effective_t[samples]<1).mean()),
+        'transmission_range':np.percentile(effective_t[samples],[5,50,95]).tolist(),
+        'outside_policy':'edge_halo_max_8pct_veil_5pct_radiance_then_unmodified',
+        'outside_halo_px':halo,'radiance_ratio_bounds':[.65,1.15],'global_fallback':False}
 
 
 def fit_direction(centers, luminance):
@@ -86,10 +138,7 @@ def estimate_local_light(scene, candidate, environment, *, statistic='median', m
     if eroded.sum() >= 40:
         selected = eroded
     observed = linear(rgb)
-    air = environment.get('airborne_dust', {})
-    amount = min(.28, max(0., air.get('amount', 0.)))
-    air_color = np.asarray(air.get('color_linear', environment['dust_color']), np.float32)
-    clear = np.clip((observed - amount * air_color) / max(.72, 1-amount), observed * .65, observed * 1.15)
+    clear, veil_compensation = clear_reflection_samples(observed,environment,[x,y,r,b],selected)
     h, w = selected.shape
     tiles, centers, colors, counts = [], [], [], []
     for iy in range(6):
@@ -121,6 +170,8 @@ def estimate_local_light(scene, candidate, environment, *, statistic='median', m
                 'target_clear_rgb_linear': color.tolist(), 'direction': direction,
                 'level': level, 'fill_ratio': fill, 'depth_tolerance': .085, 'global_fallback': False,
                 'assumptions': ['same_depth_neutral_surface', 'receiver_reflectance_0.3', 'unknown_HDR_and_surface_normals']}
+    if environment.get('integration_mode') == 'coherent':
+        evidence['veil_compensation'] = veil_compensation
     if statistic != 'median' or margin_scale != 1.:
         evidence.update(statistic='arithmetic_mean',margin_scale=margin_scale,original_bounds=original_bounds,
                         aggregation='equal_weight_per_valid_pixel_in_camera_linear_space',
@@ -130,12 +181,16 @@ def estimate_local_light(scene, candidate, environment, *, statistic='median', m
               'key_direction': direction['direction'], 'light_level': level, 'local_irradiance': evidence,
               'lighting_basis': 'bounded_local_tiles_and_diffuse_receiver_calibration'}
     # Keep air, surface dust and camera characteristics independent of this estimate.
+    if environment.get('integration_mode') == 'coherent':
+        result = coherent_probe(result, candidate)
     return result, mask
 
 
 def light_rig(environment, camera, gain=1., shape=(128, 256)):
     from .geometry import illumination_axis
     evidence = environment['local_irradiance']
+    if environment.get('integration_mode') == 'coherent':
+        return coherent_rig(environment, camera, gain, shape)
     height, width = shape
     yy, xx = np.mgrid[0:height, 0:width]
     sky = .55 + .95 * (yy / height) ** 2
@@ -161,6 +216,86 @@ def light_rig(environment, camera, gain=1., shape=(128, 256)):
         # World radiance now supplies directional fill; avoid counting it twice.
         lights = [(offset,power*.40,size*1.15) for offset,power,size in lights]
     return np.float32(sky), lights
+
+
+def coherent_rig(environment, camera, gain=1., shape=(128, 256)):
+    """A broad upper source and restrained fill, retaining material curvature.
+
+    A local brightness gradient is not a measured light. Unknown directions keep
+    an azimuthally symmetric sky rather than inventing a studio reflection strip.
+    """
+    from .geometry import illumination_axis
+    evidence = environment['local_irradiance']
+    direction = evidence['direction']['direction']
+    confidence = float(evidence['direction']['confidence'])
+    height, width = shape
+    latitude = (np.arange(height)+.5)/height*math.pi-math.pi/2
+    z = np.sin(latitude)[:, None]
+    # The truck/scrap hemisphere is substantially dimmer than the open sky. The
+    # legacy nearly uniform hemisphere and equal frontal fill erased curved form.
+    sky = np.broadcast_to(np.where(z >= 0, .38+1.05*z, .12+.26*(z+1)), shape).copy()
+    offset = np.asarray(illumination_axis(camera, direction))*4.6 if direction else np.array([0.,0.,4.6])
+    toward = np.asarray(camera.get('eye',[0,-6,6]),float)-np.asarray(camera.get('target',[0,0,0]),float)
+    toward[2] = max(.5, abs(toward[2]))
+    toward *= 4./max(np.linalg.norm(toward),1e-6)
+    key = 115*float(evidence['level'])*gain
+    fill_ratio = .14+.16*float(np.clip(evidence['fill_ratio'],0,1))
+    lights = [(tuple(offset), key, 4.8-1.4*confidence), (tuple(toward), key*fill_ratio, 5.8)]
+    return np.float32(sky), lights
+
+
+def coherent_probe(environment, candidate):
+    """Use bounded local tile contrast for reflection, not photo pixels as albedo.
+
+    The unobserved sky and lower hemisphere remain explicit priors. Local tiles
+    only modulate broad lobes; their unknown normals/albedo limit confidence.
+    """
+    evidence = environment['local_irradiance']
+    camera = candidate['camera']
+    right, up, _ = np.asarray(camera['basis'], np.float64)
+    anchor = np.asarray(candidate['anchor_px'], np.float64)
+    x,y,r,b = evidence['bounds']
+    height,width = 64,128
+    yy,xx = np.mgrid[:height,:width]
+    latitude = (yy+.5)/height*math.pi-math.pi/2
+    longitude = math.pi-(xx+.5)/width*2*math.pi
+    rays = np.stack((np.cos(latitude)*np.cos(longitude),np.cos(latitude)*np.sin(longitude),np.sin(latitude)),axis=-1)
+    mean = np.maximum(evidence['target_clear_rgb_linear'],.005)
+    numerator = np.zeros((height,width,3),np.float64)
+    denominator = np.zeros((height,width),np.float64)
+    sectors = set()
+    tiles = evidence.get('tiles',[])
+    for tile in tiles:
+        l,t,rr,bb = tile['bounds']
+        delta = (np.array([(l+rr)/2,(t+bb)/2])-anchor)/[max(1,r-x),max(1,b-y)]
+        axis = right*delta[0]-up*delta[1]
+        axis[2] = 0.
+        length = np.linalg.norm(axis)
+        if length < .025:continue
+        axis /= length
+        axis[2] = .12
+        axis /= np.linalg.norm(axis)
+        weight = np.exp(4.*(rays@axis-1.))
+        # Reflectance and irradiance are inseparable from one photograph. Do not
+        # let bright steel or a dark gap become an inferred high-energy emitter.
+        ratio = np.clip(np.asarray(tile['rgb_linear'])/mean,.45,1.7)-1.
+        numerator += weight[...,None]*ratio
+        denominator += weight
+        sectors.add(int((math.atan2(delta[1],delta[0])+math.pi)/math.pi*4)%8)
+    confidence = min(.4,len(sectors)/8*.4)*min(1.,len(tiles)/12)
+    z = rays[...,2]
+    field = np.where(z>=0,.38+1.05*z,.12+.26*(z+1))[...,None]
+    field = field*(1+confidence*numerator/np.maximum(denominator[...,None],1e-6))
+    probe = np.float32(np.maximum(field,.02)*np.asarray(environment['world_color']))
+    info = {'version':COHERENT_VERSION,'status':'estimated','confidence':confidence,
+            'basis':'bounded_nearby_reflected_radiance_with_unobserved_sky_prior',
+            'observed_tiles':len(tiles),'observed_sectors':len(sectors),
+            'unobserved_sky':'broad_upper_hemisphere_not_measured_HDR',
+            'fill_ratio_policy':'restrained_camera_fill_preserves_curved_form',
+            'sha256':hashlib.sha256(probe.tobytes()).hexdigest()}
+    return {**environment,'reflection_probe':probe.tolist(),
+            'local_irradiance':{**evidence,'reflection_field':info},
+            'lighting_basis':COHERENT_VERSION}
 
 
 def receiver_calibration(render_dir, meta, environment):

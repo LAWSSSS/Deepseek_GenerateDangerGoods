@@ -3,6 +3,16 @@ import math
 
 from .schema import (Action, LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS, TONE_PROFILES,
                      EFFECT_ACTIONS, Review, EffectsReview, FusionObservation, apply_actions, effects_review_schema)
+from .strict_contact import pose_review_context, reconcile_pose_evidence
+
+
+POSE_GUIDANCE = """ The required pose is lying on its side in the scrap pile, including cans and cylinders.
+Reference images show identity and visible structure only; their upright or studio pose is not a target.
+Never label a sideways object upright because the reference stands upright. Use upright only for
+a visibly upright final object. An axis-angle measurement can corroborate lying but cannot disprove
+visible floating, penetration or wrong depth order; report those concrete contact defects separately."""
+POSE_GUIDANCE += """ Lighting, haze, edge, colour and camera texture are always IMAGE scope.
+Asset scope is reserved for intrinsic, independently confirmed structural damage, never atmosphere."""
 
 
 COMPACT_PROMPT = """Inspect this exported scrap-hopper composite: panorama, crop, current model reference.
@@ -13,7 +23,7 @@ Normal partial occlusion and foreshortening can hide features. Mark hidden or ti
 unassessable; reserve asset scope for visible intrinsic damage. Respect intentional model revisions.
 Use major/fatal only for concrete defects that compromise display. Judge the actual image.
 Offer up to three effective actions from allowed values for a single cause, or none.
-Candidate IDs identify geometric alternatives. More chroma means more desaturation."""
+Candidate IDs identify geometric alternatives. More chroma means more desaturation.""" + POSE_GUIDANCE
 
 FUSION_PROMPT = """Judge whether the inserted part belongs to the photographed scrap pile.
 The first image is the delivered panorama and the second is its crop. Subsequent images are
@@ -33,7 +43,7 @@ Use patch_seam for an artificial rectangular inserted region or shadow receiver 
 and edge for the object's own outline. These are different defects.
 Judge airlight, raised shadow levels and contrast against nearby surfaces of similar depth.
 Do not demand a hazy object to have showroom crispness or all materials to match the ground colour.
-Return JSON with trace, scores, defects and evidence. Each defect has only code, severity and evidence."""
+Return JSON with trace, scores, defects and evidence. Each defect has only code, severity and evidence.""" + POSE_GUIDANCE
 
 PLACEMENT_DEFECTS={'upright','floating','penetration','occlusion','scale','camera','shadow','structure'}
 ACTION_CAUSES={
@@ -113,8 +123,8 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
 
 def fusion_actions(review, comp, allowed):
     """Select the repair in the program, using the recognizer's visible evidence."""
-    defects={d.code for d in review.defects if d.visibility=='visible' and d.scope=='image'}
-    severe={d.code for d in review.defects if d.visibility=='visible' and d.scope=='image'
+    defects={d.code for d in review.defects if d.visibility=='visible' and (d.scope=='image' or d.code!='structure')}
+    severe={d.code for d in review.defects if d.visibility=='visible' and (d.scope=='image' or d.code!='structure')
             and d.severity in ('major','fatal')}
     issues=severe or defects
     photo=comp['photo']
@@ -162,8 +172,10 @@ def repair(params, review, allowed, candidate_ids, seen, *, dust_in_shader=False
             'material' if kind in ('material','surface_dust') or (kind=='dust' and dust_in_shader) else 'photography')
         causes=ACTION_CAUSES[kind]&(severe or limiting or visible)
         if kind in EFFECT_ACTIONS:
-            causes=ACTION_CAUSES[kind]&{d.code for d in review.defects
-                                       if d.visibility=='visible' and d.scope=='image'}
+            # Haze/camera/dust defects on a rendered image remain actionable even
+            # when a provider incorrectly labels their scope as an asset defect.
+            # This never authorizes structural repair or changes any score/veto.
+            causes=ACTION_CAUSES[kind]&{d.code for d in review.defects if d.visibility=='visible'}
         if kind=='candidate':
             causes&={d.code for d in review.defects if d.visibility=='visible' and d.scope=='image'}
         row={'action':action.model_dump(),'from':params.get(kind),'stage':dependency,'causes':sorted(causes)}
@@ -203,7 +215,8 @@ async def inspect(vision,prompt,asset,comp,params,allowed,render_dir,*,compact=F
                   candidate_evidence=(),geometry_board=None):
     checks=comp['checks']
     payload={'name':asset['name'],'features':asset['semantic']['key_features'],'params':params,
-             'allowed':allowed,'placement_options':list(candidate_evidence)}
+             'allowed':allowed,'placement_options':list(candidate_evidence),
+             'pose_policy':pose_review_context(checks)}
     images=[comp['preview'],comp['crop'],asset['board']]
     if params.get('effects_enabled'):
         prompt=FUSION_PROMPT.replace(
@@ -238,8 +251,9 @@ Never repair a rectangular patch_seam by more haze. Do not invent a different re
         from pathlib import Path
         context=Path(comp['image']).with_suffix('.context.jpg')
         if context.is_file():images[1]=context
-        return await vision.ask('effects-review',effects_review_schema(allowed),prompt,payload,images,
+        answer=await vision.ask('effects-review',effects_review_schema(allowed),prompt,payload,images,
             image_limits=[(1280,720),(1200,900),(512,512)],max_output_tokens=2048,plain_json=True)
+        return reconcile_pose_evidence(answer,checks)
     native=params.get('photo_model') in ('native','local')
     if native:
         # The recognizer sees material references, without physics histories.
@@ -258,8 +272,9 @@ Never repair a rectangular patch_seam by more haze. Do not invent a different re
             prompt+=' Faded paint and deposited dust are intentional: do not demand the fresh saturated reference colour. Keep material differences; do not demand all materials to look like rusty steel.'
         answer=await vision.ask('fusion-recognition',FusionObservation,prompt,
             {'name':asset['name'],'features':asset['semantic']['key_features'],
-             'material_classes':asset['semantic'].get('material_classes',[])},images,plain_json=True)
-        return answer.review()
+             'material_classes':asset['semantic'].get('material_classes',[]),
+             'pose_policy':pose_review_context(checks)},images,plain_json=True)
+        return reconcile_pose_evidence(answer.review(),checks)
     if compact:
         fields=('status','measurement_px','expected_px','measurement_deg','measurements','projection_error_px')
         payload['checks']={k:{f:c[f] for f in fields if f in c} for k,c in checks.items()}
@@ -268,8 +283,9 @@ Never repair a rectangular patch_seam by more haze. Do not invent a different re
         limits=[(768,512),(1024,900),(512,512)]
         if geometry_board:
             images.append(geometry_board);limits.append((768,512))
-        return await vision.ask('review-compact',Review,COMPACT_PROMPT,payload,images,
+        answer=await vision.ask('review-compact',Review,COMPACT_PROMPT,payload,images,
                                 image_limits=limits,max_output_tokens=1536)
+        return reconcile_pose_evidence(answer,checks)
     payload.update(checks=checks,estimated_size_mm=asset['semantic']['major_mm'],
         source_note='Use the current model and its intentional revisions. Assess visible structure at the actual pose.',
         profile_meanings={'clearer':'reduce roughness','softer':'soften reflection',
@@ -277,4 +293,5 @@ Never repair a rectangular patch_seam by more haze. Do not invent a different re
                           'defined':'stronger broad light','darker':'reduce exposure'})
     images.insert(2,render_dir/'object.png')
     if geometry_board:images.append(geometry_board)
-    return await vision.ask('review',Review,prompt,payload,images)
+    answer=await vision.ask('review',Review,prompt+POSE_GUIDANCE,payload,images)
+    return reconcile_pose_evidence(answer,checks)

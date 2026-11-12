@@ -1,5 +1,7 @@
 """Local piecewise support and depth ordering. All uncalibrated evidence stays explicit."""
 import math
+import json
+import re
 import threading
 from pathlib import Path
 import cv2
@@ -10,6 +12,72 @@ from .geometry import project,contact_support,scale_from_reference
 
 VERSION='piecewise-pile-v4-vehicle-projection'
 _grab_lock=threading.Lock()
+
+
+def support_plane_evidence(site):
+    """A single segmentation mask is not proof of one physical plane."""
+    measured=site.get('plane_status')=='measured' and site.get('plane_origin_m') is not None
+    label=str(site.get('label','')).lower()
+    kind=site.get('geometry_kind','unknown')
+    nonplanar=kind in ('curved','compound') or bool(re.search(r'曲面|弯曲|卷曲|卷板|弯板|堆叠|叠放|叠层|多层|钢筋堆|curved|curled|stacked|pile of|overlapping',label))
+    inherited=bool(str(site.get('id','')).startswith('D') or site.get('normal_inherited'))
+    return {'eligible':bool(measured or not nonplanar),'geometry_kind':kind,
+            'basis':'measured_planes' if measured else 'nonplanar_label' if nonplanar else
+                    'inherited_neighbour_normal' if inherited else 'independent_visible_surface_estimate',
+            'penalty':0. if measured else .45 if inherited else .08,
+            'status':'pass' if measured else 'unknown'}
+
+
+def shape_priority(vertices,axis):
+    """Geometry only: estimate round transverse section and elongation once per asset."""
+    v=np.asarray(vertices,float);axis=np.asarray(axis,float);axis/=max(np.linalg.norm(axis),1e-12)
+    centered=v-v.mean(0);axial=centered@axis
+    radial=centered-axial[:,None]*axis
+    _,singular,basis=np.linalg.svd(radial,full_matrices=False)
+    spread=np.ptp(radial@basis[:2].T,axis=0)
+    ratio=float(max(spread)/max(min(spread),1e-8))
+    radii=np.linalg.norm(radial,axis=1)
+    outer=np.percentile(radii,[50,90])
+    roundness=float(np.clip((1.55-ratio)/.40,0,1)*np.clip((1.6-outer[1]/max(outer[0],1e-8))/.40,0,1))
+    return {'elongation':float(np.ptp(axial)/max(spread.max(),1e-8)),'roundness':roundness}
+
+
+def stability_priority(vertices,matrix,normal,axis,centroid,shape,band=.002):
+    """Static gravity hints order costly simulations; they never certify stability."""
+    from .geometry import transformed
+    from .contact_audit import hull2
+    points=transformed(vertices,matrix);center=transformed(np.asarray(centroid)[None],matrix)[0]
+    n=np.asarray(normal,float);n/=max(np.linalg.norm(n),1e-12)
+    heights=points@n;contact=points[heights<=heights.min()+band]
+    hull=hull2(contact[:,:2]);outside=0.
+    if len(hull)>=3:
+        edge=np.roll(hull,-1,axis=0)-hull
+        distance=(edge[:,0]*(center[1]-hull[:,1])-edge[:,1]*(center[0]-hull[:,0]))/np.maximum(np.linalg.norm(edge,axis=1),1e-12)
+        outside=max(0.,-float(distance.min()))
+    elif len(hull)==2:
+        edge=hull[1]-hull[0];u=np.clip(np.dot(center[:2]-hull[0],edge)/max(np.dot(edge,edge),1e-12),0,1)
+        outside=float(np.linalg.norm(center[:2]-hull[0]-u*edge))
+    else:outside=float(np.linalg.norm(center[:2]-hull[0])) if len(hull) else 1.
+    world_axis=np.asarray(matrix)[:3,:3]@np.asarray(axis)
+    world_axis-=np.dot(world_axis,n)*n;world_axis/=max(np.linalg.norm(world_axis),1e-12)
+    gravity=np.array([0.,0.,-1.]);down=gravity-n*np.dot(gravity,n)
+    rolling=float(np.linalg.norm(np.cross(down,world_axis))*shape['roundness'])
+    slope=math.degrees(math.acos(np.clip(n[2],-1,1)))
+    sensitivity=1. if shape['elongation']>1.5 or shape['roundness']>.4 else .5
+    penalty=2.2*rolling+.015*slope*sensitivity+min(.8,outside*5)
+    return {'penalty':float(penalty),'gravity_outside_contact_envelope':outside,
+            'slope_deg':slope,'cross_axis_rolling_risk':rolling,'shape':shape,
+            'status':'unknown','basis':'static_ordering_only; finite_support_simulation_still_required'}
+
+
+def diverse_candidates(rows,limit):
+    """Visit distinct supporting surfaces before alternate yaw on the same surface."""
+    ranked=sorted(rows,key=lambda r:-r['score']);seen=set();first=[];remaining=[]
+    for row in ranked:
+        key=tuple(sorted(row.get('support_ids',[row['site_id']])))
+        if key in seen:remaining.append(row)
+        else:seen.add(key);first.append(row)
+    return (first+remaining)[:limit]
 
 
 @njit(cache=True)
@@ -282,12 +350,24 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
     config=config or BatchConfig(backgrounds='unused',output='unused')
     strict=config.contact_mode=='strict'
     native=config.appearance=='native'
+    coherent=getattr(config,'integration_mode','legacy')=='coherent'
     data=np.load(asset['geometry']);vertices=data['vertices'];faces=data['faces']
     midpoint=sum(scene['answer']['elevation'])/2;records=[];reject=[];seen=set();geometries={};world_patches={}
+    priorities={};shape=shape_priority(vertices,asset['axis']) if coherent else None
+    centroid=vertices.mean(0)
+    if coherent and asset.get('proxy'):
+        centroid=np.asarray(json.loads(Path(asset['proxy']).read_text(encoding='utf8'))['centroid'])
     rng=np.random.default_rng(seed);diagonal=np.linalg.norm(scene['size'])
     # Diversify sites before any expensive model render, using only image-derived locations.
     primary=[]
-    for s in sorted(scene['supports'],key=lambda s:-s['confidence']):
+    def site_rank(s):
+        hint=support_plane_evidence(s)
+        return -s['confidence']+(hint['penalty']+.02*s.get('slope_deg',0) if coherent else 0)
+    for s in sorted(scene['supports'],key=site_rank):
+        if coherent and strict and not support_plane_evidence(s)['eligible']:
+            reject.append({'site':s['id'],'reason':'nonplanar_surface_requires_independent_planes',
+                           'evidence':support_plane_evidence(s),'label':s.get('label')})
+            continue
         if any(np.linalg.norm(np.subtract(s['anchor_px'],q['anchor_px']))<diagonal*.045 for q in primary):continue
         primary.append(s)
         if len(primary)==8:break
@@ -340,6 +420,9 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                         tilt=horizontal_angle(asset['axis'],matrix)
                         if tilt>15:continue
                         key=(pose['id'],yaw,tuple(normal))
+                        if coherent and key not in priorities:
+                            priorities[key]=stability_priority(vertices,matrix,normal,asset['axis'],centroid,shape)
+                        priority=priorities.get(key)
                         if key not in geometries:
                             geometries[key]=cached_projection(asset,vertices,faces,{**pose,'matrix':matrix.tolist()},0,midpoint,normal)
                         geom=geometries[key]
@@ -390,12 +473,15 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                             if minimum<.9:uncertain.append('contact_support_incomplete_or_hidden')
                             if evidence['status']=='unknown':uncertain.append('scale_evidence_insufficient')
                             if any(s.get('evidence_status')=='unknown' for s in group):uncertain.append('support_geometry_uncertain')
+                            if coherent and any(support_plane_evidence(s)['basis']=='inherited_neighbour_normal' for s in group):
+                                uncertain.append('inherited_support_normal_unverified')
                             if uncertain and config.uncertain_policy=='skip':continue
                             if mode=='embedded' and fraction<.05:continue
                             bonus=.30 if mode=='embedded' and .10<=fraction<=.40 else .08 if mode=='combined' else 0
                             score=site['confidence']*.5+minimum*.7+bonus-.18*len(uncertain)-max(0,fraction-.4)*2
                             score-=abs(target-math.sqrt(low*high))/max(high,1)*.1
                             if strict:score+=(.35 if len(group)==1 else 0)-pose['height']*.2-site.get('slope_deg',0)*.01
+                            if coherent:score-=priority['penalty']+support_plane_evidence(site)['penalty']
                             ident=f"{site['id']}-{mode}-{pose['id']}-Y{yaw}-Z{scale_index}-A{anchor_index}"
                             if ident in seen:continue
                             seen.add(ident);site_count+=1
@@ -412,6 +498,7 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
                                 'anchor_uv':geom['anchor'].tolist(),
                                 'contact_min':minimum,'contact_coverages':cover,'inside':inside,'foreground_fraction':fraction,
                                 'uncertainties':uncertain,'base_pose':pose,
+                                **({'stability_priority':priority,'support_plane_evidence':support_plane_evidence(site)} if coherent else {}),
                                 'scale':{**evidence,'major_mm':asset['semantic']['major_mm'],'range_px':[low,high],
                                     'reference_projection_correction':float(correction),'world_pixels_per_unit':world_ppm},
                                 'score':score+float(rng.uniform(0,.005)),'projection_key':key})
@@ -421,7 +508,8 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
     for row in sorted(records,key=lambda r:-r['score']):
         if sum(q['site_id']==row['site_id'] and q['placement']==row['placement'] for q in shortlist)>=2:continue
         shortlist.append(row)
-        if len(shortlist)>=12:break
+        if not coherent and len(shortlist)>=12:break
+    if coherent:shortlist=diverse_candidates(shortlist,12)
     chosen=[]
     for row in shortlist:
         geom=geometries[row.pop('projection_key')]
@@ -451,10 +539,11 @@ def _choose_pile_candidates(asset,scene,seed=0,config=None,limit=3):
         row['receiver']=receiver_mesh(scene,row)
         row['evidence_confidence']='unknown' if row['uncertainties'] else 'estimated'
         chosen.append(row)
-        if not native and len(chosen)==limit:break
+        if not native and not coherent and len(chosen)==limit:break
     if native:
         selected={}
         for row in sorted(chosen,key=lambda r:(len(set(r['uncertainties'])),-r['score'])):
             selected.setdefault((row['site_id'],row['placement']),row)
         chosen=list(selected.values())[:limit]
+    if coherent:chosen=diverse_candidates(chosen,limit)
     return chosen,reject

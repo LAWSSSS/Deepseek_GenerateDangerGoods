@@ -193,6 +193,9 @@ def seam_measurement(loss, receiver, alpha):
 def camera_residual(shaded, rgb, alpha, background, environment, params, seed, writable, *, object_delta=None,
                     fixed_sensor=None):
     """Filter only the inserted radiance difference, never a pasted rectangular background."""
+    if params.get('camera_pipeline') == 'premultiplied':
+        return camera_premultiplied(shaded,rgb,alpha,background,environment,params,seed,writable,
+                                    object_delta=object_delta,fixed_sensor=fixed_sensor)
     from .schema import PHOTO_CONTROLS
     sharpness=PHOTO_CONTROLS['sharpness'][params.get('sharpness','auto')]
     target=environment['camera_psf']['sigma_px']
@@ -240,3 +243,66 @@ def camera_residual(shaded, rgb, alpha, background, environment, params, seed, w
     return encoded,edited,{'blur_sigma':float(sigma),'measured_camera_sigma':target,
         'optical_iou':overlap,'added_noise_sigma':added,'existing_noise_sigma':existing,
         'geometric_alpha_unchanged':True,'compositing':'filtered_insertion_difference_only'}
+
+
+def camera_premultiplied(shaded, rgb, alpha, background, environment, params, seed, writable, *,
+                         object_delta=None, fixed_sensor=None):
+    """Filter the full object radiance and coverage once, retaining photographed B.
+
+    B + G(alpha*F - alpha*B) reintroduces B-G(B) inside an opaque object.
+    The photographed background is already camera-filtered, so the foreground
+    camera layer is G(alpha*F) + (1-G(alpha))*shaded_background instead.
+    """
+    from .schema import PHOTO_CONTROLS
+    target=environment['camera_psf']['sigma_px']
+    sharpness=PHOTO_CONTROLS['sharpness'][params.get('sharpness','auto')]
+    nominal=math.sqrt(max(target**2-.38**2,0))/sharpness
+    topology_before=topology(alpha>.5)
+    sigma=0.;overlap=1.;optical_alpha=alpha.copy()
+    for trial in (nominal,nominal*.75,nominal*.5,nominal*.25):
+        if trial<=.18:continue
+        softened=cv2.GaussianBlur(alpha,(0,0),trial,borderType=cv2.BORDER_CONSTANT)
+        a,b=softened>.5,alpha>.5
+        iou=float((a&b).sum()/max(1,(a|b).sum()))
+        if iou>=.995 and topology(a)==topology_before:
+            sigma=trial;optical_alpha=softened;overlap=iou;break
+    # Pooling and atmosphere are camera-linear RGB changes, not extra alpha.
+    # Combine them before filtering so the same PSF applies at optical edges.
+    radiance=linear(rgb)
+    if object_delta is not None:radiance=radiance+object_delta
+    premult=np.maximum(radiance,0)*alpha[...,None]
+    if sigma:premult=cv2.GaussianBlur(premult,(0,0),sigma,borderType=cv2.BORDER_CONSTANT)
+    optical_alpha*=writable
+    premult*=writable[...,None]
+    # Shadows are newly rendered radiance too. Filter only their difference,
+    # preserving the already photographed background and the legacy shadow view
+    # through clear hole centers. This is not G(background).
+    shadow_delta=shaded-background
+    if sigma:shadow_delta=cv2.GaussianBlur(shadow_delta,(0,0),sigma,borderType=cv2.BORDER_CONSTANT)
+    plate=background+shadow_delta
+    captured=plate*(1-optical_alpha[...,None])+premult
+    captured[~writable]=background[~writable]
+    captured=np.maximum(captured,0)
+    encoded=np.where(captured<=.0031308,captured*12.92,1.055*captured**(1/2.4)-.055)
+    core=cv2.erode((alpha>.9).astype(np.uint8),np.ones((5,5),np.uint8))>0
+    gray=np.float32(encoded)@LUMA
+    residual=gray-cv2.GaussianBlur(gray,(0,0),.8)
+    gradient=cv2.magnitude(cv2.Sobel(gray,cv2.CV_32F,1,0),cv2.Sobel(gray,cv2.CV_32F,0,1))
+    flat=core&(gradient<=np.percentile(gradient[core],35)) if core.any() else core
+    existing=float(np.median(abs(residual[flat]-np.median(residual[flat])))*1.4826) if flat.any() else 0.
+    target_noise=min(.012,environment['sensor']['noise_sigma'])
+    added=math.sqrt(max(0,target_noise**2-existing**2))
+    if fixed_sensor is not None:
+        existing=float(fixed_sensor['existing_noise_sigma']);added=float(fixed_sensor['added_noise_sigma'])
+        if not np.isfinite([existing,added]).all() or min(existing,added)<0:
+            raise ValueError('invalid_fixed_sensor_statistics')
+    noise=np.random.default_rng(seed).normal(0,added,alpha.shape).astype(np.float32)
+    encoded+=np.clip(noise,-3*target_noise,3*target_noise)[...,None]*optical_alpha[...,None]
+    edited=((np.max(abs(captured-background),axis=2)>1e-7)|(optical_alpha>0))&writable
+    return encoded,edited,{'blur_sigma':float(sigma),'measured_camera_sigma':target,
+        'optical_iou':overlap,'added_noise_sigma':added,'existing_noise_sigma':existing,
+        'geometric_alpha_unchanged':True,'camera_pipeline':'premultiplied',
+        'camera_pipeline_version':'foreground-premultiplied-PSF-v1',
+        'compositing':'filtered_premultiplied_foreground_over_photographed_background',
+        'background_texture_reintroduced':False,'effects_filtered_once':object_delta is not None,
+        'shadow_psf':'rendered_difference_only_background_not_refiltered'}

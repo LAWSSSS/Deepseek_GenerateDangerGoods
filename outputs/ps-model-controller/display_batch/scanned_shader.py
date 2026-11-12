@@ -197,9 +197,12 @@ def source_weathering(material, shader, partitions, environment, profile):
     dust.inputs['Roughness'].default_value=.88
     dust.inputs['Specular IOR Level'].default_value=.18
     if shader.inputs['Normal'].is_linked:assign(tree,original(shader.inputs['Normal']),dust.inputs['Normal'])
-    # Roughening follows actual deposits, including the zero-strength identity.
-    rough=original(shader.inputs['Roughness'])
-    assign(tree,math_node(tree,'ADD',rough,math_node(tree,'MULTIPLY',amount,.18),clamp=True),shader.inputs['Roughness'])
+    # A dielectric deposit already broadens the covered reflection. Keep the
+    # original PBR lobe intact in the coherent path; roughening the underlying
+    # shader as well made even the remaining bare surface lose its finish.
+    if environment.get('integration_mode') != 'coherent':
+        rough=original(shader.inputs['Roughness'])
+        assign(tree,math_node(tree,'ADD',rough,math_node(tree,'MULTIPLY',amount,.18),clamp=True),shader.inputs['Roughness'])
     layer=tree.nodes.new('ShaderNodeMixShader');assign(tree,amount,layer.inputs[0])
     tree.links.new(shader.outputs[0],layer.inputs[1]);tree.links.new(dust.outputs[0],layer.inputs[2])
     tree.links.new(layer.outputs[0],output.inputs['Surface'])
