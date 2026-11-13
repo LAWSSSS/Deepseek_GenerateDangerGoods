@@ -366,7 +366,8 @@ def rust_spot_detail(material,node,strength,material_classes=(),environment=None
     links.new(scars.outputs['Fac'],scars_map.inputs['Value'])
     rust_shape=nodes.new('ShaderNodeMath');rust_shape.name='batch_rust_spots_and_scars';rust_shape.operation='MAXIMUM'
     links.new(clustered_spots.outputs[0],rust_shape.inputs[0]);links.new(scars_map.outputs[0],rust_shape.inputs[1])
-    shape_output=rust_shape.outputs[0];scan_image=None;scan_roughness=None;scan_height=None
+    shape_output=rust_shape.outputs[0];scan_image=None;scan_roughness=None;scan_height=None;scan_detail=None
+    relief_strength=float(np.clip((rust_scan or {}).get('relief_strength',1.),1.,3.))
     if rust_scan:
         mapping=nodes.new('ShaderNodeVectorMath');mapping.operation='SCALE';mapping.inputs['Scale'].default_value=1.4
         links.new(coordinates.outputs['Generated'],mapping.inputs[0])
@@ -392,6 +393,12 @@ def rust_spot_detail(material,node,strength,material_classes=(),environment=None
             links.new(mapping.outputs['Vector'],scan_depth.inputs['Vector'])
             scan_height=nodes.new('ShaderNodeMath');scan_height.name='batch_photo_rust_relief';scan_height.operation='MULTIPLY'
             links.new(scan_depth.outputs['Color'],scan_height.inputs[0]);links.new(scan_mask.outputs['Result'],scan_height.inputs[1])
+            if rust_scan.get('detail_path'):
+                scan_detail=nodes.new('ShaderNodeTexImage');scan_detail.name='batch_photo_rust_detail'
+                scan_detail.image=bpy.data.images.load(rust_scan['detail_path'],check_existing=True)
+                scan_detail.image.colorspace_settings.name='Non-Color'
+                scan_detail.projection='BOX';scan_detail.projection_blend=.25
+                links.new(mapping.outputs['Vector'],scan_detail.inputs['Vector'])
     metal_mask=nodes.new('ShaderNodeMath');metal_mask.name='batch_rust_metal_mask';metal_mask.operation='MULTIPLY';metal_mask.use_clamp=True
     if metallic_source is not None:links.new(metallic_source,metal_mask.inputs[0])
     else:metal_mask.inputs[0].default_value=metallic_value
@@ -453,6 +460,18 @@ def rust_spot_detail(material,node,strength,material_classes=(),environment=None
     if metallic_source is not None:links.new(metallic_source,eligible.inputs[0])
     else:eligible.inputs[0].default_value=metallic_value
     links.new(paint_ramp.outputs[0],eligible.inputs[1])
+    surface_color=color.outputs['Color']
+    if scan_detail:
+        detail_gain=nodes.new('ShaderNodeMath');detail_gain.name='batch_photo_detail_gain';detail_gain.operation='MULTIPLY_ADD'
+        detail_gain.inputs[1].default_value=1.4*(relief_strength-1.)
+        detail_gain.inputs[2].default_value=1.-.7*(relief_strength-1.)
+        links.new(scan_detail.outputs['Color'],detail_gain.inputs[0])
+        bounded=nodes.new('ShaderNodeClamp');bounded.name='batch_photo_detail_bounded'
+        bounded.inputs['Min'].default_value=.45;bounded.inputs['Max'].default_value=1.55
+        links.new(detail_gain.outputs[0],bounded.inputs['Value'])
+        detail_mix=nodes.new('ShaderNodeMixRGB');detail_mix.name='batch_photo_detail_color';detail_mix.blend_type='MULTIPLY'
+        links.new(eligible.outputs[0],detail_mix.inputs[0]);links.new(surface_color,detail_mix.inputs[1]);links.new(bounded.outputs[0],detail_mix.inputs[2])
+        surface_color=detail_mix.outputs['Color']
     dust_noise=nodes.new('ShaderNodeTexNoise');dust_noise.name='batch_deposit_patches'
     dust_noise.inputs['Scale'].default_value=7;dust_noise.inputs['Detail'].default_value=5;dust_noise.inputs['Roughness'].default_value=.78
     links.new(coordinates.outputs['Generated'],dust_noise.inputs['Vector'])
@@ -472,7 +491,7 @@ def rust_spot_detail(material,node,strength,material_classes=(),environment=None
     dust_strength.inputs[1].default_value=.96*float(np.clip(dust_scale,0.,.5))*strength;links.new(dust_surface.outputs[0],dust_strength.inputs[0])
     dust_color=nodes.new('ShaderNodeMixRGB');dust_color.name='batch_irregular_dust_color'
     dust_color.inputs[2].default_value=(*((environment or {}).get('dust_color',[.16,.145,.12])),1.)
-    links.new(color.outputs['Color'],dust_color.inputs[1]);links.new(dust_strength.outputs[0],dust_color.inputs[0])
+    links.new(surface_color,dust_color.inputs[1]);links.new(dust_strength.outputs[0],dust_color.inputs[0])
     for old in list(base.links):links.remove(old)
     links.new(dust_color.outputs['Color'],base)
 
@@ -507,7 +526,8 @@ def rust_spot_detail(material,node,strength,material_classes=(),environment=None
     final_normal=bump.outputs['Normal']
     if scan_height:
         fine_bump=nodes.new('ShaderNodeBump');fine_bump.name='batch_photo_rust_microrelief'
-        fine_bump.inputs['Strength'].default_value=.28*strength;fine_bump.inputs['Distance'].default_value=.0008
+        fine_bump.inputs['Strength'].default_value=.28*strength*min(relief_strength,2.)
+        fine_bump.inputs['Distance'].default_value=.0008*relief_strength
         links.new(scan_height.outputs[0],fine_bump.inputs['Height']);links.new(final_normal,fine_bump.inputs['Normal'])
         final_normal=fine_bump.outputs['Normal']
     for old in list(normal.links):links.remove(old)
@@ -985,7 +1005,8 @@ def render_parts(request):
               request.get('rust_spots',0.),request.get('surface_dust',0.),
               tuple(request['environment'].get('dust_color',())) if request.get('rust_spots',0.) else (),
               request.get('rust_scan',{}).get('sha256'),request.get('rust_scan',{}).get('roughness_sha256'),
-              request.get('rust_scan',{}).get('height_sha256'))
+              request.get('rust_scan',{}).get('height_sha256'),request.get('rust_scan',{}).get('detail_sha256'),
+              request.get('rust_scan',{}).get('relief_strength',1.))
     if state.get('mesh_key')!=mesh_key:
         begin=time.monotonic()
         if 'asset' in state:
@@ -1087,7 +1108,9 @@ def render_parts(request):
                 'rust_source':request.get('rust_scan',{}).get('source','procedural'),
                 'rust_source_sha256':request.get('rust_scan',{}).get('sha256'),
                 'rust_roughness_sha256':request.get('rust_scan',{}).get('roughness_sha256'),
-                'rust_height_sha256':request.get('rust_scan',{}).get('height_sha256')},
+                'rust_height_sha256':request.get('rust_scan',{}).get('height_sha256'),
+                'rust_detail_sha256':request.get('rust_scan',{}).get('detail_sha256'),
+                'rust_relief_strength':request.get('rust_scan',{}).get('relief_strength',1.)},
             'lighting_basis':request['environment'].get('lighting_basis'),
             'shadow_basis':shadow_basis,'shadow_catcher_fallback':catcher_fallback,
             'imports':int(imported),'timings':timings}

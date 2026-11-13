@@ -26,3 +26,9 @@
 素材为 Poly Haven 的 [Rusty Metal 03](https://polyhaven.com/a/rusty_metal_03)，[CC0 许可](https://polyhaven.com/license)。底色、粗糙度及高度图均从 `work/render-materials/polyhaven/rusty_metal_03` 加载，参与缓存签名；缺少贴图时返回明确错误。高度图来源 `https://dl.polyhaven.org/file/ph-assets/Textures/exr/2k/rusty_metal_03/rusty_metal_03_disp_2k.exr`，供应方 MD5 `5c45f969a809d1c8b5417480d9be5006`，本地 SHA-256 `f657adc76d08d348c4f7ad616b46ef9834b5932d38126071ac58e79a0181917d`。素材和生成图不提交到 Git。
 
 最终完整画面为 `D:\测试1\液压杆-实拍锈层质感优化-20261113.png`。相同摆位下与上一张的差异局限于物体及其附近，锈层微细变化在全景中不明显。现场尺度与真实接触仍为未知，图片保持 `review`。
+
+## 2026-11-13 锈层细节加强试验
+
+新增 `effects.rust_relief_strength`，范围 1.0–3.0，默认 1.0；高于 1.0 时需开启实拍锈层凹凸，将同一材质的实拍细节图用于受限的明暗变化，并加强高度图的凹凸响应。试样使用 3.0 和 `rust_spots=0.95`，其余构图与场景摄影参数沿用上一版。细节图是本地已缓存的 `rusty_metal_03_detail_2k.png`，SHA-256 为 `4cbe33be9f950fe117e1d94af3677a24eaeda6061f42b28fb5f361e282670f15`；加强强度和贴图散列均参与缓存签名。
+
+完整画面为 `D:\测试1\液压杆-锈层质感加强-20261113.png`。磨损和明暗比上一版更明显，仍需检查是否符合现场锈蚀；接触与尺度的现场证据继续为未知。

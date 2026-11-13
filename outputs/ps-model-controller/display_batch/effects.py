@@ -17,6 +17,7 @@ def parameters(settings):
             'fog_gain':format(settings.fog_gain,'g'), 'weathering':settings.weathering,
             'shadow_mode':settings.shadow_mode, 'render_detail':settings.render_detail,
             'rust_spots':format(settings.rust_spots,'g'), 'rust_pattern':settings.rust_pattern, 'rust_relief':settings.rust_relief,
+            'rust_relief_strength':settings.rust_relief_strength,
             'contrast_matching':settings.contrast_matching}
 
 
@@ -98,5 +99,5 @@ def render_identity(params, style):
     if params.get('effects_enabled'):
         fields.extend(('effects_version', 'surface_dust', 'effects_lighting'))
         fields.extend(('weathering','shadow_mode'))
-    fields.extend(('render_detail','rust_spots','rust_pattern','rust_relief'))
+    fields.extend(('render_detail','rust_spots','rust_pattern','rust_relief','rust_relief_strength'))
     return tuple(params.get(k) for k in fields)

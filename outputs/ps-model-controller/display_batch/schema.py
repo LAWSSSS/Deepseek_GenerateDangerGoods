@@ -31,6 +31,7 @@ class EffectSettings(Strict):
     rust_spots: float = Field(default=0., ge=0, le=1., strict=True)
     rust_pattern: Literal['procedural', 'photo'] = 'procedural'
     rust_relief: bool = False
+    rust_relief_strength: float = Field(default=1., ge=1., le=3., strict=True)
     contrast_matching: Literal['legacy', 'local'] = 'legacy'
 
     @model_validator(mode='after')
@@ -39,6 +40,8 @@ class EffectSettings(Strict):
             raise ValueError('preserve_source surface_dust must not exceed 0.5')
         if self.rust_relief and self.rust_pattern != 'photo':
             raise ValueError('rust_relief requires rust_pattern=photo')
+        if self.rust_relief_strength != 1. and not self.rust_relief:
+            raise ValueError('rust_relief_strength requires rust_relief')
         return self
 
 

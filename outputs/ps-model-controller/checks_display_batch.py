@@ -103,11 +103,17 @@ class GeometryTests(unittest.TestCase):
         changed_height=part_keys({**request,'rust_spots':.8,'rust_scan':{'sha256':'albedo','roughness_sha256':'r1','height_sha256':'h2'}},'OPTIX','test')
         self.assertNotEqual(height['object'],changed_height['object'])
         self.assertEqual(height['without_shadow'],changed_height['without_shadow'])
+        stronger=part_keys({**request,'rust_spots':.8,'rust_scan':{'sha256':'albedo','roughness_sha256':'r1','height_sha256':'h1','relief_strength':3.}},'OPTIX','test')
+        self.assertNotEqual(height['object'],stronger['object'])
+        self.assertEqual(height['without_shadow'],stronger['without_shadow'])
 
     def test_photo_relief_is_explicit_and_requires_photo(self):
         self.assertFalse(EffectSettings().rust_relief)
         self.assertTrue(EffectSettings(rust_pattern='photo',rust_relief=True).rust_relief)
+        self.assertEqual(EffectSettings(rust_pattern='photo',rust_relief=True,rust_relief_strength=3.).rust_relief_strength,3.)
         with self.assertRaises(ValueError):EffectSettings(rust_relief=True)
+        with self.assertRaises(ValueError):EffectSettings(rust_relief_strength=3.)
+        with self.assertRaises(ValueError):EffectSettings(rust_pattern='photo',rust_relief=True,rust_relief_strength=3.1)
 
     def test_separated_feet_do_not_create_support_in_gap(self):
         foot=np.zeros((80,100),np.uint8);foot[30:40,10:20]=255;foot[30:40,70:80]=255

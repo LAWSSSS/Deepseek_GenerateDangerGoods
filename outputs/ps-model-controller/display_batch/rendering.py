@@ -51,7 +51,12 @@ def render_request(asset,candidate,params,environment):
             height=path.with_name('rusty_metal_03_disp_2k.exr')
             if not height.is_file():raise FileNotFoundError('photo rust height missing: '+str(height))
             request['rust_scan'].update(roughness_path=str(rough),roughness_sha256=file_hash(rough),
-                                        height_path=str(height),height_sha256=file_hash(height))
+                                        height_path=str(height),height_sha256=file_hash(height),
+                                        relief_strength=float(params.get('rust_relief_strength',1.)))
+            if request['rust_scan']['relief_strength']>1.:
+                detail=path.with_name('rusty_metal_03_detail_2k.png')
+                if not detail.is_file():raise FileNotFoundError('photo rust detail missing: '+str(detail))
+                request['rust_scan'].update(detail_path=str(detail),detail_sha256=file_hash(detail))
     if candidate.get('camera'):request['camera']=candidate['camera']
     if candidate.get('contact_band'):request['contact_band']=candidate['contact_band']
     if candidate.get('receiver',{}).get('patches'):request['receiver']=candidate['receiver']
