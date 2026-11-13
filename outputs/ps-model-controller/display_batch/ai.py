@@ -31,6 +31,10 @@ class ProviderUnavailable(RuntimeError):
     pass
 
 
+class InvalidStructuredReply(RuntimeError):
+    pass
+
+
 def semantic_payload(value):
     """Operational cache metadata must not turn an identical review into a paid request."""
     if isinstance(value,dict):
@@ -134,7 +138,12 @@ class Vision:
                         " Write evidence in concise Chinese, at most 60 Chinese characters. Respect all schema string limits.",
                         retry_payload, images, tool=None if use_json else "inspect_display",
                         detail=None if qwen else "high",qwen_json=qwen,plain_json=use_json)
-                    if validate is not None:validate(answer)
+                    if validate is not None:
+                        try:
+                            validate(answer)
+                        except ValueError as error:
+                            report['calls'][-1]['validation_error'] = str(error)[:180]
+                            raise
                     if cache:
                         atomic_json(path, answer.model_dump())
                     return answer
@@ -144,8 +153,9 @@ class Vision:
                     if code in (400, 401, 403, 404):
                         raise ProviderUnavailable(f"视觉服务不可用：HTTP {code}") from None
                     if attempt == 0:
-                        retry_payload={**payload,'format_correction':(report['calls'][-1].get('schema_errors')
-                            if report['calls'] else []) or 'Previous reply was invalid. Use exactly the JSON schema.'}
+                        last_call=report['calls'][-1] if report['calls'] else {}
+                        retry_payload={**payload,'format_correction':last_call.get('schema_errors')
+                            or last_call.get('validation_error') or 'Previous reply was invalid. Use exactly the JSON schema.'}
                         await asyncio.sleep(1)
                 finally:
                     for call in report["calls"]:
@@ -159,4 +169,4 @@ class Vision:
             transport_failed=bool(report['calls'] and report['calls'][-1].get('transport_error'))
             if transport_failed or isinstance(last_error,httpx.TransportError) or code in (429,500,502,503,504):
                 raise ProviderUnavailable(f'视觉服务暂不可用：{code or type(last_error).__name__}，已用完一次重试') from None
-            raise RuntimeError(f"{role} 两次请求未得到有效结果：{type(last_error).__name__}") from None
+            raise InvalidStructuredReply(f"{role} 两次请求未得到有效结果：{type(last_error).__name__}") from None

@@ -33,9 +33,7 @@ class Scores(Strict):
     structure: Score
 
 
-class Finding(Strict):
-    id: Identifier
-    target: Identifier
+class FindingDetails(Strict):
     code: DefectCode
     region: tuple[Unit, Unit, Unit, Unit] | None
     severity: Literal['minor', 'major', 'fatal']
@@ -54,6 +52,42 @@ class Finding(Strict):
         elif self.visibility == 'visible':
             raise ValueError('visible findings need a region')
         return self
+
+
+PHYSICAL_CUES = {'floating':'visible_air_gap', 'penetration':'surface_intersection',
+                 'occlusion':'reversed_overlap', 'upright':'standing_on_end'}
+PhysicalCue = Literal['visible_air_gap', 'surface_intersection', 'reversed_overlap', 'standing_on_end']
+
+
+class Finding(FindingDetails):
+    id: Identifier
+    target: Identifier
+    physical_cue: PhysicalCue | None = None
+
+
+class FrameFinding(FindingDetails):
+    physical_cue: PhysicalCue | None = None
+
+    @model_validator(mode='after')
+    def check_physical_cue(self):
+        expected = PHYSICAL_CUES.get(self.code) if self.visibility == 'visible' else None
+        if self.physical_cue != expected:
+            raise ValueError('visible geometric defects require their matching direct physical cue')
+        return self
+
+
+class VisualObservation(Strict):
+    """The single-object provider response, before the host assigns identity."""
+    trace: Literal['none', 'uncertain', 'visible']
+    scores: Scores
+    findings: list[FrameFinding] = Field(max_length=8)
+    summary: str = Field(default='', max_length=240)
+
+    def for_frame(self, image_sha256, target):
+        return VisualReport(version=VERSION, image_sha256=image_sha256, trace=self.trace,
+                            scores=self.scores, summary=self.summary,
+                            findings=[Finding(id=f'f{i}', target=target, **finding.model_dump())
+                                      for i, finding in enumerate(self.findings, 1)])
 
 
 class VisualReport(Strict):
@@ -76,19 +110,20 @@ class VisualReport(Strict):
         return self
 
 
-class Operation(Strict):
+class ProposedOperation(Strict):
     capability: Identifier
-    target: Identifier
     value: Value
     evidence_ids: list[Identifier] = Field(min_length=1, max_length=4)
     expected_effect: str = Field(min_length=1, max_length=120)
 
 
-class ExecutionPlan(Strict):
-    version: Literal['execution-plan-v1']
-    image_sha256: Digest
+class Operation(ProposedOperation):
+    target: Identifier
+
+
+class PlanProposal(Strict):
     status: Literal['ready', 'noop', 'unsupported']
-    operations: list[Operation] = Field(max_length=3)
+    operations: list[ProposedOperation] = Field(max_length=3)
     note: str = Field(max_length=200)
 
     @model_validator(mode='after')
@@ -96,6 +131,18 @@ class ExecutionPlan(Strict):
         if bool(self.operations) != (self.status == 'ready'):
             raise ValueError('ready requires operations and other statuses require an empty plan')
         return self
+
+    def for_frame(self, image_sha256, target):
+        return ExecutionPlan(version='execution-plan-v1', image_sha256=image_sha256,
+                             status=self.status, note=self.note,
+                             operations=[Operation(target=target, **operation.model_dump())
+                                         for operation in self.operations])
+
+
+class ExecutionPlan(PlanProposal):
+    version: Literal['execution-plan-v1']
+    image_sha256: Digest
+    operations: list[Operation] = Field(max_length=3)
 
 
 def validate_plan(plan, report, current, capabilities, *, target='object'):
@@ -111,7 +158,8 @@ def validate_plan(plan, report, current, capabilities, *, target='object'):
         capability = capabilities[name]
         causes = [evidence.get(key) for key in operation.evidence_ids]
         if any(f is None or f.target != target or f.visibility != 'visible'
-               or f.code not in capability['causes'] for f in causes):
+               or f.code not in capability['causes'] or f.id not in capability.get('evidence_ids', [f.id])
+               for f in causes):
             raise ValueError('operation lacks current visible evidence')
         if value == current.get(name):
             raise ValueError('unchanged absolute parameter')

@@ -69,6 +69,7 @@ class BatchConfig(Strict):
     dimension_registry: str | None = None
     scene_reference_registry: str | None = None
     geometry_preset: Literal['legacy', 'rebuild'] = 'legacy'
+    scale_evidence_policy: Literal['observed', 'estimate_preview'] = 'observed'
     vehicle_reference: dict | None = None
     integration_mode: Literal['legacy', 'coherent'] = 'legacy'
     camera_pipeline: Literal['legacy_residual', 'premultiplied'] = 'legacy_residual'
@@ -85,6 +86,9 @@ class BatchConfig(Strict):
         from scrap_composite.configuration import evidence_settings
 
         self._requested = self.model_dump(exclude_unset=True)
+        if self.scale_evidence_policy=='estimate_preview' and (
+                self.workflow!='evidence_v1' or self.geometry_preset!='rebuild' or self.uncertain_policy!='render_review'):
+            raise ValueError('estimate_preview requires evidence_v1, geometry rebuild and render_review')
         if self.workflow == 'evidence_v1':
             resolved, self._resolution_notes = evidence_settings(self.model_dump(), self.model_fields_set)
             for field in ('integration_mode', 'camera_pipeline', 'support_geometry'):

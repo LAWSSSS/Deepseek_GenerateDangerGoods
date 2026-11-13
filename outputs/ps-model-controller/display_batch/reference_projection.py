@@ -96,7 +96,11 @@ def audit(scene, registry_path=None):
 
 
 def local_scale(scene,site,anchor,profile):
-    if 'vehicle_scale' in scene:
+    preview='estimated_preview_scale' in scene
+    if preview and scene['reference_audit']['planes'].get(site['id'],{}).get('status')!='pass':
+        from .estimated_scale import local_scale as preview_local_scale
+        return preview_local_scale(scene,site,anchor,profile)
+    if 'vehicle_scale' in scene and not preview:
         from .vehicle_scale import local_scale as vehicle_local_scale
         return vehicle_local_scale(scene,site,anchor,profile)
     # Native evidence is kept separate from the search pyramid. Scale once at its boundary.

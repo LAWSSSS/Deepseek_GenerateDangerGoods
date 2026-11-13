@@ -17,6 +17,8 @@ from display_batch.chroma_budget import masks, budget, measure, compress, lab_of
 from display_batch.geometry import project
 from display_batch.pile import receiver_mesh
 from display_batch.pipeline import Pipeline
+from display_batch.estimated_scale import prepare_preview_scale
+from display_batch.consistent_scale import calibration_to_native
 
 
 def reference():
@@ -83,8 +85,78 @@ class ScaleTests(unittest.TestCase):
         self.assertIn('cross_depth_reference',[r['reason'] for r in evidence['rejected_references']])
         self.assertEqual(len(scene['reference_audit']['references']),2)
 
+    def test_preview_estimates_only_from_visible_same_layer_references(self):
+        mask = np.ones((120,240),bool)
+        depth = np.full(mask.shape,.2)
+        depth[60:,:] = .6
+        first = {'id':'S1','depth':.2,'reference':[[.2,.3],[.4,.3]],'reference_mm':[350,650],
+                 'confidence':.8,'mask':mask}
+        hidden = {**first, 'id':'S2', 'reference':[[.2,.7],[.4,.7]]}
+        other = {**hidden, 'id':'S3', 'depth':.6}
+        inherited = {**first, 'id':'D4', 'normal_inherited':True}
+        duplicate = {**first, 'id':'S4', 'reference':list(reversed(first['reference']))}
+        scene = {'key':'fixture','size':[240,120],'depth_native':depth,'allowed':mask,
+                 'protected':~mask,'supports':[first,hidden,other,inherited,duplicate],
+                 'answer':{'hopper':[[0,0],[1,0],[1,1]],'elevation':[35,55]}}
+        scene['estimated_preview_scale'] = prepare_preview_scale(scene, {'internal_width_m':2.45}, {})
+        scene['reference_audit'] = {'planes':{}}
+        profile = {'nominal_mm':206,'status':'pass'}
+        interval, full = local_scale(scene, first, [72,36], profile)
+        self.assertEqual(full['status'],'unknown')
+        self.assertFalse(full['size_selected_to_fit'])
+        self.assertFalse(full['depth_is_metric'])
+        self.assertEqual(full['physical_size'],profile)
+        self.assertEqual([ref['id'] for ref in full['references']], ['S1'])
+        self.assertEqual({ref['id']:ref['reason'] for ref in full['rejected_references']}, {
+            'D4':'inherited_or_unidentified_reference','S2':'reference_not_on_visible_support_layer',
+            'S3':'cross_depth_reference','S4':'duplicate_reference_line'})
+        small_interval, small = local_scale({**scene, 'size':[60,30], '_image_scale':.25}, first, [18,9], profile)
+        np.testing.assert_allclose(np.array(small_interval)*4, interval)
+        np.testing.assert_allclose(calibration_to_native(small,.25,[240,120])['references'][0]['endpoints_px'],
+                                   full['references'][0]['endpoints_px'])
+        _, fallback = local_scale(scene, {'id':'D5','depth':.9}, [72,80], profile)
+        self.assertEqual(fallback['references'],[])
+        self.assertAlmostEqual(fallback['pixels_per_mm'],239/2450)
+        self.assertEqual(fallback['status'],'unknown')
+
+    def test_preview_requires_explicit_evidence_config(self):
+        raw = {'backgrounds':'x','output':'x','workflow':'evidence_v1','geometry_preset':'rebuild',
+               'vehicle_reference':{'vehicle_class':'semitrailer','internal_width_m':2.45,
+                                    'source':{'kind':'user_supplied','reference':'fixture'}}}
+        self.assertEqual(BatchConfig.model_validate(raw).scale_evidence_policy,'observed')
+        preview = BatchConfig.model_validate({**raw,'scale_evidence_policy':'estimate_preview'})
+        self.assertEqual(preview.contact_mode,'strict')
+        self.assertEqual(preview.asset_scale_factors,{})
+        for changes in ({'workflow':'legacy'}, {'geometry_preset':'legacy'}, {'uncertain_policy':'skip'}):
+            with self.subTest(changes=changes), self.assertRaisesRegex(ValueError,'estimate_preview requires'):
+                BatchConfig.model_validate({**raw,'scale_evidence_policy':'estimate_preview',**changes})
+
 
 class PhysicalTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_vehicle_evidence_uses_preview_without_refitting(self):
+        mask = np.ones((40,80),bool)
+        scene = {'key':'fixture','size':[80,40],'supports':[],
+                 'answer':{'hopper':[[0,0],[1,0],[1,1]],'elevation':[35,55]},
+                 'allowed':mask,'protected':~mask}
+        gate = {'allow_expensive_steps':False,'risk_codes':['insufficient_observed_width_correspondences']}
+        pipeline = object.__new__(Pipeline)
+        pipeline.prepare_lock = asyncio.Lock()
+        with tempfile.TemporaryDirectory() as directory:
+            pipeline.out = Path(directory)
+            for policy, risk, expected in [('observed',None,False),
+                                           ('estimate_preview','vehicle_class_conflicts_with_supplied_reference',False),
+                                           ('estimate_preview','inconsistent_width_correspondences',False),
+                                           ('estimate_preview',None,True)]:
+                pipeline.config = type('Config',(),{'scale_evidence_policy':policy,
+                    'vehicle_reference':{'internal_width_m':2.45}})()
+                check = {**gate,'risk_codes':[risk]} if risk else gate
+                with patch('display_batch.vehicle_scale.prepare', new=AsyncMock()) as fit:
+                    _, used = await pipeline.prepare_scene_scale(scene, check)
+                fit.assert_not_awaited()
+                self.assertEqual(used,expected)
+                self.assertEqual('estimated_preview_scale' in scene,expected)
+            self.assertTrue((Path(directory)/'scale-scenes/fixture-estimated.json').is_file())
+
     async def test_contact_clusters_keep_independent_heights(self):
         from display_batch.contact_geometry import patches, description
         from display_batch.geometry import camera_for

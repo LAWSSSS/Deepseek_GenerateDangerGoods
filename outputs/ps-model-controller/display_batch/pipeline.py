@@ -17,6 +17,7 @@ from . import VERSION
 from .ai import Vision, ProviderUnavailable, token_summary
 from .assets import prepare as prepare_asset
 from .common import ROOT, HERE, atomic_json, file_hash, load_catalog, resolve, signature, implementation_manifest
+from .estimated_scale import allows_estimate, prepare_preview_scale
 from .compose import compose, sample_environment
 from .scene import Scenes, choose_candidates, projection_geometry, fitted_masks, fit_checks
 from .schema import (Review, FusionReview, EffectsReview, Probe, PHOTO_CONTROLS, StructureConfirmation, version_rank)
@@ -243,6 +244,24 @@ class Pipeline:
                 atomic_json(self.out/'width-observations'/(key+'.json'),gate)
         return self.width_gates[key]
 
+    async def prepare_scene_scale(self, scene, gate):
+        from .vehicle_scale import prepare as prepare_vehicle
+
+        async with self.prepare_lock:
+            if 'estimated_preview_scale' in scene:
+                return scene['estimated_preview_scale']['projection_preflight'], True
+            if gate['allow_expensive_steps']:
+                if scene.get('vehicle_scale',{}).get('observation_mode')!='audited':
+                    scene['vehicle_scale']=await prepare_vehicle(
+                        scene,self.config.vehicle_reference,self.vision,self.cache,observation_mode='audited')
+                gate=scene['vehicle_scale']['projection_preflight']
+            if (not gate['allow_expensive_steps'] and self.config.scale_evidence_policy=='estimate_preview'
+                    and allows_estimate(gate)):
+                scene['estimated_preview_scale']=prepare_preview_scale(scene,self.config.vehicle_reference,gate)
+                atomic_json(self.out/'scale-scenes'/(scene['key']+'-estimated.json'),scene['estimated_preview_scale'])
+                return gate, True
+            return gate, False
+
     async def evidence_scene(self, payload):
         key=payload['background_hash']
         async with self.prepare_lock:
@@ -298,7 +317,8 @@ class Pipeline:
         return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
 
     async def choose_placements(self,asset,scene,seed):
-        if self.config.geometry_preset=='rebuild':
+        preview='estimated_preview_scale' in scene
+        if self.config.geometry_preset=='rebuild' and not preview:
             from .vehicle_scale import prepare as prepare_vehicle, projection_preflight
             observation_mode='audited' if self.config.integration_mode=='coherent' else 'legacy'
             if ('vehicle_scale' not in scene or
@@ -333,8 +353,11 @@ class Pipeline:
                     asset.update(poses=poses,metric_prepared=True,metric_physics=physics)
                     atomic_json(self.out/'physics-models'/(str(asset['id'])+'.json'),physics)
             scene['reference_audit']=audit(scene,self.config.scene_reference_registry)
-            scene['reference_audit']['visual_observations']=await scene_observations(scene,self.vision,self.cache)
-            if self.config.geometry_preset=='rebuild':
+            if preview:
+                scene['reference_audit']['preview_scale']=scene['estimated_preview_scale']
+            else:
+                scene['reference_audit']['visual_observations']=await scene_observations(scene,self.vision,self.cache)
+            if self.config.geometry_preset=='rebuild' and not preview:
                 from .vehicle_scale import prepare as prepare_vehicle
                 if 'vehicle_scale' not in scene:
                     scene['vehicle_scale']=await prepare_vehicle(scene,self.config.vehicle_reference,self.vision,self.cache)
@@ -560,6 +583,8 @@ class Pipeline:
             if held and held.get('independent_confirmation') and held.get('mesh_hash')==payload.get('mesh_hash'):
                 result.update(reason='asset_structure_requires_review',model_review=held);return result
             structured=getattr(self.config,'workflow','legacy')=='evidence_v1'
+            preview_policy=getattr(self.config,'scale_evidence_policy','observed')=='estimate_preview'
+            if preview_policy:result['preview_policy']='estimate_preview'
             scene=None
             if structured:
                 result['configuration']={'requested':self.config._requested,'resolved':self.config.model_dump(),
@@ -569,7 +594,7 @@ class Pipeline:
                 if self.config.geometry_preset=='rebuild':
                     gate=await self.width_preflight(payload)
                     result['width_preflight']=gate
-                    if not gate['allow_expensive_steps']:
+                    if not gate['allow_expensive_steps'] and not (preview_policy and allows_estimate(gate)):
                         result.update(status='failed',evidence_status='fail',reason='high_risk_vehicle_projection',
                                       rejections=[{'reason':'high_risk_vehicle_projection','evidence':gate}])
                         return result
@@ -578,13 +603,11 @@ class Pipeline:
                 result['scene_signature']=scene['key']
                 if self.config.geometry_preset=='rebuild':
                     # Reject unobservable calibration before asset preparation or Blender.
-                    from .vehicle_scale import prepare as prepare_vehicle
-                    async with self.prepare_lock:
-                        if scene.get('vehicle_scale',{}).get('observation_mode')!='audited':
-                            scene['vehicle_scale']=await prepare_vehicle(
-                                scene,self.config.vehicle_reference,self.vision,self.cache,observation_mode='audited')
-                    gate=scene['vehicle_scale']['projection_preflight']
-                    if not gate['allow_expensive_steps']:
+                    gate,estimated=await self.prepare_scene_scale(scene,gate)
+                    if estimated:
+                        result['scene_basis']='estimated_visible_layer_preview'
+                        result['projection_preflight']=gate
+                    elif not gate['allow_expensive_steps']:
                         atomic_json(self.out/'scale-scenes'/(scene['key']+'.json'),scene['vehicle_scale'])
                         result.update(status='failed',evidence_status='fail',reason='high_risk_vehicle_projection',
                                       rejections=[{'reason':'high_risk_vehicle_projection','evidence':gate}])
@@ -757,7 +780,7 @@ class Pipeline:
                 if best_rank is None or rank>best_rank:
                     best,best_rank=entry,rank;no_gain=0
                 else:no_gain+=1
-                if all(c['status']=='pass' for c in comp['checks'].values()) and review.passes():
+                if not preview_policy and all(c['status']=='pass' for c in comp['checks'].values()) and review.passes():
                     result['status']='accepted_display';reason='display_checks_passed';best=entry;break
                 suspects=[d for d in review.defects if d.code=='structure' and d.scope=='asset'
                           and d.visibility=='visible' and d.severity in ('major','fatal')]

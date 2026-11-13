@@ -14,6 +14,8 @@ def calibration_to_native(evidence, factor, size):
     result['calibration_interval_px_per_mm'] = [v / factor for v in result['calibration_interval_px_per_mm']]
     for reference in result['references']:
         reference['anchor_px'] = [v / factor for v in reference['anchor_px']]
+        if 'endpoints_px' in reference:
+            reference['endpoints_px'] = [[v / factor for v in point] for point in reference['endpoints_px']]
         reference['pixels_per_mm'] /= factor
         reference['interval'] = [v / factor for v in reference['interval']]
     return result

@@ -1,22 +1,34 @@
 """Connect the shared model contracts to the existing display queue."""
 from scrap_composite.workflow import observe, plan_execution
 
-from .review import ACTION_CAUSES, repair
-from .schema import Action, EffectsReview
-from .strict_contact import reconcile_pose_evidence
+from .ai import InvalidStructuredReply
+from .review import ACTION_CAUSES, effect_direction, repair
+from .schema import Action, EFFECT_ACTIONS, EffectsReview, LIGHT_PROFILES, PHOTO_CONTROLS
+from .strict_contact import pose_review_context, reconcile_pose_evidence
 
 
 async def inspect_frame(client, asset, comp, image_hash):
+    width, height = comp['checks']['size']['pixels']
+    left, top, right, bottom = comp['edit_bounds']
+    target_region = [left/width, top/height, right/width, bottom/height]
     report = await observe(
         client, image_hash, [comp['image'], comp['crop'], asset['board']],
-        {'name': asset['name'], 'edit_bounds_px': comp['edit_bounds'],
+        {'name': asset['name'], 'target_region_in_first_image': target_region,
+         'pose_measurement': pose_review_context(comp['checks']),
          'program_checks': {key: value['status'] for key, value in comp['checks'].items()}},
         prompt='Preserve original material and identifying structures. Judge the actual image, including '
                'lying pose, floating, penetration, occlusion, local light, contrast, haze and camera edges. '
+               'The screen angle alone does not establish an upright pose. Call a contact or depth-order '
+               'defect visible only when you can point to an actual gap, intersection or wrong overlap. '
+               'Use occlusion for a wrong front/back overlap, shadow for missing contact shadows, and edge '
+               'for abrupt transitions. A missing or weak shadow by itself is a shadow finding. '
+               'Describe a visible gap separately if present. Locate findings in target_region_in_first_image. '
+               'Mark hidden or ambiguous contact as unassessable. '
                'Use major or fatal for a concrete defect that compromises display. Do not suggest operations.',
     )
     defects = [{'code': f.code, 'severity': f.severity, 'region': f.region or (0., 0., 1., 1.),
-                'scope': f.scope, 'visibility': f.visibility, 'evidence': f.evidence[:160]}
+                'scope': f.scope if f.code=='structure' else 'image',
+                'visibility': f.visibility, 'evidence': f.evidence[:160]}
                for f in report.findings]
     review = EffectsReview(scores=report.scores.model_dump(), trace=report.trace,
                            defects=defects, actions=[], evidence=report.summary)
@@ -55,17 +67,37 @@ def algorithm_versions(params, photo_version):
             'implementation':signature(manifest['sources'], manifest['core_sources'], manifest['dependencies'])}
 
 
-def planner_capabilities(params, allowed):
-    return {kind: {'values': values, 'causes': sorted(ACTION_CAUSES[kind])}
-            for kind, values in allowed.items() if kind in params and kind in ACTION_CAUSES}
+def planner_capabilities(params, allowed, report):
+    """Offer only controls with a visible cause and a permitted direction."""
+    capabilities = {}
+    for kind, values in allowed.items():
+        if kind not in params or kind not in ACTION_CAUSES:
+            continue
+        findings = [f for f in report.findings if f.visibility == 'visible'
+                    and f.code in ACTION_CAUSES[kind] and (kind != 'candidate' or f.scope == 'image')]
+        causes = {f.code for f in findings}
+        current = params[kind]
+        if kind in EFFECT_ACTIONS:
+            values = [v for v in values if effect_direction(kind, v, current, causes)]
+        elif kind == 'sharpness':
+            controls = PHOTO_CONTROLS[kind]
+            values = [v for v in values if
+                      (causes == {'too_sharp'} and controls[v] < controls[current]) or
+                      (causes == {'too_blurry'} and controls[v] > controls[current])]
+        if not (causes and values):
+            continue
+        capability = {'values': values, 'causes': sorted(causes), 'evidence_ids':[f.id for f in findings]}
+        if kind == 'tone':
+            capability['meaning'] = 'darker/brighter change exposure; cooler/warmer change white balance'
+        elif kind == 'light':
+            capability['meaning'] = {v:LIGHT_PROFILES[v] for v in values}
+        capabilities[kind] = capability
+    return capabilities
 
 
 async def plan_frame(client, report, review, comp, params, allowed, ids, seen, *, dust_in_shader, recommendation):
-    capabilities = planner_capabilities(params, allowed)
-    if not capabilities or not any(
-        finding.visibility == 'visible' and any(finding.code in c['causes'] for c in capabilities.values())
-        for finding in report.findings
-    ):
+    capabilities = planner_capabilities(params, allowed, report)
+    if not capabilities:
         return None, [], None
     try:
         plan, updates = await plan_execution(
@@ -74,7 +106,7 @@ async def plan_frame(client, report, review, comp, params, allowed, ids, seen, *
                                                    'blur_sigma', 'haze', 'exposure_ev')},
             recommendation,
         )
-    except ValueError as error:
+    except (ValueError, InvalidStructuredReply) as error:
         return None, [{'disposition': 'invalid_execution_plan', 'reason': str(error)}], None
     selected = [Action(kind=kind, value=value) for kind, value in updates.items()]
     updated, decisions = repair(params, review, allowed, ids, seen, dust_in_shader=dust_in_shader, suggestions=selected)

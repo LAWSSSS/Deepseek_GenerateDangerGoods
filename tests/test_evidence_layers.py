@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 from PIL import Image
 
-from scrap_composite.contracts import ExecutionPlan, VisualReport
+from scrap_composite.contracts import PlanProposal, VisualObservation
 from scrap_composite.layers import save_bundle
 from scrap_composite.photoshop import file_hash
 from scrap_composite.photoshop_workflow import REQUIRED_CHECKS, refine_photoshop
@@ -59,16 +59,14 @@ class LayerWorkflowTests(unittest.IsolatedAsyncioTestCase):
         class Client:
             async def ask(self, role, schema, prompt, payload, images=(), **kwargs):
                 if role=='execution-plan':
-                    return ExecutionPlan(version='execution-plan-v1',status='ready',note='test',
-                        image_sha256=payload['observation']['image_sha256'],
-                        operations=[{'capability':'brightness','target':'object','value':8,
-                                     'evidence_ids':['a'],'expected_effect':'改善亮度'}])
+                    return PlanProposal(status='ready',note='test',
+                        operations=[{'capability':'brightness','value':8,
+                                     'evidence_ids':['f1'],'expected_effect':'改善亮度'}])
                 adjusted=bool(payload['photoshop_parameters']['brightness'])
                 scores=dict.fromkeys(('support','occlusion','lighting','edge','texture','material','structure'),3)
                 scores.update(lighting=4 if adjusted else 2, structure=2 if adjusted else 3)
-                return VisualReport(version='visual-evidence-v1',image_sha256=payload['image_sha256'],
-                    trace='visible',scores=scores,summary='test',
-                    findings=[{'id':'a','target':'object','code':'lighting','severity':'minor',
+                return VisualObservation(trace='visible',scores=scores,summary='test',
+                    findings=[{'code':'lighting','severity':'minor',
                                'visibility':'visible','scope':'image','region':(.3,.3,.7,.7),
                                'confidence':.9,'direction':'increase','evidence':'物品过暗'}])
 
