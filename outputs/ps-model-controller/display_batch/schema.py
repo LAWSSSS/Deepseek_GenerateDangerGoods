@@ -29,6 +29,8 @@ class EffectSettings(Strict):
     # Fine surface rendering is opt-in; it never changes the source mesh or pose.
     render_detail: Literal['standard', 'fine'] = 'standard'
     rust_spots: float = Field(default=0., ge=0, le=1., strict=True)
+    rust_pattern: Literal['procedural', 'photo'] = 'procedural'
+    contrast_matching: Literal['legacy', 'local'] = 'legacy'
 
     @model_validator(mode='after')
     def preserve_limits(self):

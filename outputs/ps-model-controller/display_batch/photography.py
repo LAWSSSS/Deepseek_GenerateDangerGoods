@@ -164,6 +164,10 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
             base_contrast=float(np.clip(1+.45*(base_contrast-1),.86,1.04))
         else:
             base_contrast=1.
+    if params.get('contrast_matching')=='local':
+        context=environment.get('local_context',{})
+        if context.get('sample_pixels',0)>=64:
+            base_contrast=float(np.clip(scene_iqr/max(luma_iqr,1),.65,1.15))
     contrast=1+(base_contrast-1)*control(params,'contrast')
     if fixed_tone is not None:
         contrast=fixed_tone['contrast_gain']
@@ -249,6 +253,8 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         'exposure_ev':ev,'calibration_ev':float(base_ev) if calibration else None,
         'photographic_adjustment_ev':float(ev-base_ev),'integration_mode':params.get('integration_mode','legacy'),
         'white_balance':cast.tolist(),'chroma_gain':gain,'contrast_gain':contrast,
+        'contrast_reference':{'mode':params.get('contrast_matching','legacy'),
+                              'object_low_frequency_iqr':luma_iqr,'nearby_iqr':scene_iqr},
         'exposure_limited':exposure_limited,'exposure_error':exposure_error,'effective_controls':effective,
         'dust_mean':dust_mean,'haze':haze,'noise_sigma':noise,'added_noise_sigma':added,
         'blur_sigma':blur_sigma,'before_luma':before*255,'target_luma':target*255,

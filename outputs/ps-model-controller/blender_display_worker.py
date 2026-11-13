@@ -316,7 +316,7 @@ def surface_detail(material,node,environment,dust_gain):
     tree.links.new(dust.outputs[0],node.inputs['Base Color'])
 
 
-def rust_spot_detail(material,node,strength,material_classes=(),environment=None,dust_scale=0.):
+def rust_spot_detail(material,node,strength,material_classes=(),environment=None,dust_scale=0.,rust_scan=None):
     """Add sparse oxide freckles to metal and chromatic paint, excluding rubber and labels."""
     strength=float(np.clip(strength,0.,1.))
     if not strength or not material_detail_allowed(material.name,node.inputs['Metallic'].is_linked):return
@@ -366,10 +366,23 @@ def rust_spot_detail(material,node,strength,material_classes=(),environment=None
     links.new(scars.outputs['Fac'],scars_map.inputs['Value'])
     rust_shape=nodes.new('ShaderNodeMath');rust_shape.name='batch_rust_spots_and_scars';rust_shape.operation='MAXIMUM'
     links.new(clustered_spots.outputs[0],rust_shape.inputs[0]);links.new(scars_map.outputs[0],rust_shape.inputs[1])
+    shape_output=rust_shape.outputs[0];scan_image=None
+    if rust_scan:
+        mapping=nodes.new('ShaderNodeVectorMath');mapping.operation='SCALE';mapping.inputs['Scale'].default_value=1.4
+        links.new(coordinates.outputs['Generated'],mapping.inputs[0])
+        scan_image=nodes.new('ShaderNodeTexImage');scan_image.name='batch_photo_rust'
+        scan_image.image=bpy.data.images.load(rust_scan['path'],check_existing=True)
+        scan_image.projection='BOX';scan_image.projection_blend=.25
+        links.new(mapping.outputs['Vector'],scan_image.inputs['Vector'])
+        value=nodes.new('ShaderNodeRGBToBW');links.new(scan_image.outputs['Color'],value.inputs['Color'])
+        scan_mask=nodes.new('ShaderNodeMapRange');scan_mask.name='batch_photo_rust_mask';scan_mask.clamp=True
+        scan_mask.inputs['From Min'].default_value=.035;scan_mask.inputs['From Max'].default_value=.28
+        scan_mask.inputs['To Min'].default_value=1.;scan_mask.inputs['To Max'].default_value=0.
+        links.new(value.outputs['Val'],scan_mask.inputs['Value']);shape_output=scan_mask.outputs['Result']
     metal_mask=nodes.new('ShaderNodeMath');metal_mask.name='batch_rust_metal_mask';metal_mask.operation='MULTIPLY';metal_mask.use_clamp=True
     if metallic_source is not None:links.new(metallic_source,metal_mask.inputs[0])
     else:metal_mask.inputs[0].default_value=metallic_value
-    links.new(rust_shape.outputs[0],metal_mask.inputs[1])
+    links.new(shape_output,metal_mask.inputs[1])
 
     # Painted steel has metallic=0 by design. Use actual albedo chroma to include
     # paint while leaving achromatic rubber, chrome labels and pale markings alone.
@@ -396,7 +409,7 @@ def rust_spot_detail(material,node,strength,material_classes=(),environment=None
     paint_ramp.inputs['To Min'].default_value=0.;paint_ramp.inputs['To Max'].default_value=1.
     links.new(chroma.outputs[0],paint_ramp.inputs['Value'])
     painted_spots=nodes.new('ShaderNodeMath');painted_spots.name='batch_rust_spots_on_paint';painted_spots.operation='MULTIPLY';painted_spots.use_clamp=True
-    links.new(rust_shape.outputs[0],painted_spots.inputs[0]);links.new(paint_ramp.outputs[0],painted_spots.inputs[1])
+    links.new(shape_output,painted_spots.inputs[0]);links.new(paint_ramp.outputs[0],painted_spots.inputs[1])
     include_surface=nodes.new('ShaderNodeMath');include_surface.name='batch_rust_metal_or_paint';include_surface.operation='MAXIMUM';include_surface.use_clamp=True
     links.new(metal_mask.outputs[0],include_surface.inputs[0]);links.new(painted_spots.outputs[0],include_surface.inputs[1])
     strength_node=nodes.new('ShaderNodeMath');strength_node.name='batch_rust_strength';strength_node.operation='MULTIPLY';strength_node.use_clamp=True
@@ -409,11 +422,18 @@ def rust_spot_detail(material,node,strength,material_classes=(),environment=None
     tones.inputs[1].default_value=(.07,.022,.007,1.)
     tones.inputs[2].default_value=(.19,.058,.012,1.)
     links.new(palette.outputs['Fac'],tones.inputs[0])
+    rust_color=tones.outputs['Color']
+    if scan_image:
+        local_tint=nodes.new('ShaderNodeMixRGB');local_tint.name='batch_photo_rust_local_color';local_tint.blend_type='MIX'
+        local_tint.inputs[0].default_value=.45
+        links.new(scan_image.outputs['Color'],local_tint.inputs[1])
+        local_tint.inputs[2].default_value=(*((environment or {}).get('dust_color',[.16,.145,.12])),1.)
+        rust_color=local_tint.outputs['Color']
 
     color=nodes.new('ShaderNodeMixRGB');color.name='batch_rust_spot_color';color.blend_type='MIX'
     if base_source is not None:links.new(base_source,color.inputs[1])
     else:color.inputs[1].default_value=base_value
-    links.new(tones.outputs['Color'],color.inputs[2]);links.new(strength_node.outputs[0],color.inputs[0])
+    links.new(rust_color,color.inputs[2]);links.new(strength_node.outputs[0],color.inputs[0])
     # Uneven deposit is a separate layer. Its patchiness and upward-facing bias
     # preserve clean edges and darker recessed areas rather than tinting all RGB.
     eligible=nodes.new('ShaderNodeMath');eligible.name='batch_deposit_eligible';eligible.operation='MAXIMUM';eligible.use_clamp=True
@@ -539,17 +559,17 @@ def configure_materials(obj,request,reference=True):
                 if scans is not None:
                     if obj.data.uv_layers.active and scanned_surface(material,node,scans,request['environment']['dust_color']):
                         adapted.add(material.name)
-                    rust_spot_detail(material,node,request.get('rust_spots',0.),request.get('material_classes',()),request['environment'],request.get('surface_dust',0.))
+                    rust_spot_detail(material,node,request.get('rust_spots',0.),request.get('material_classes',()),request['environment'],request.get('surface_dust',0.),request.get('rust_scan'))
                     continue
                 if matte is not None and request.get('matte_profile'):
                     if obj.data.uv_layers.active and matte_dust_surface(material,node,matte,
                             request['environment'],request['material_classes'],request['matte_profile']):
                         adapted.add(material.name)
-                    rust_spot_detail(material,node,request.get('rust_spots',0.),request.get('material_classes',()),request['environment'],request.get('surface_dust',0.))
+                    rust_spot_detail(material,node,request.get('rust_spots',0.),request.get('material_classes',()),request['environment'],request.get('surface_dust',0.),request.get('rust_scan'))
                     continue
                 if reference:
                     surface_detail(material,node,request['environment'],request.get('dust_gain',1.))
-                    rust_spot_detail(material,node,request.get('rust_spots',0.),request.get('material_classes',()),request['environment'],request.get('surface_dust',0.))
+                    rust_spot_detail(material,node,request.get('rust_spots',0.),request.get('material_classes',()),request['environment'],request.get('surface_dust',0.),request.get('rust_scan'))
                 else:
                     scene_surface(material,node,request)
                     continue
@@ -942,7 +962,8 @@ def render_parts(request):
     mesh_key=(request['mesh'],request['mesh_hash'],matte['signature'] if matte is not None else None,
               request.get('matte_profile'),integration_mode,request.get('render_detail','standard'),
               request.get('rust_spots',0.),request.get('surface_dust',0.),
-              tuple(request['environment'].get('dust_color',())) if request.get('rust_spots',0.) else ())
+              tuple(request['environment'].get('dust_color',())) if request.get('rust_spots',0.) else (),
+              request.get('rust_scan',{}).get('sha256'))
     if state.get('mesh_key')!=mesh_key:
         begin=time.monotonic()
         if 'asset' in state:
@@ -1040,7 +1061,9 @@ def render_parts(request):
                 'base_faces':base_faces,'render_faces':base_faces*(4 if request.get('render_detail')=='fine' else 1),
                 'subdivision':'simple_level_1' if request.get('render_detail')=='fine' else 'none',
                 'cycles_samples':{'object':128,'shadow':32} if request.get('render_detail')=='fine' else {'object':32,'shadow':16},
-                'rust_spots':float(request.get('rust_spots',0.))},
+                'rust_spots':float(request.get('rust_spots',0.)),
+                'rust_source':request.get('rust_scan',{}).get('source','procedural'),
+                'rust_source_sha256':request.get('rust_scan',{}).get('sha256')},
             'lighting_basis':request['environment'].get('lighting_basis'),
             'shadow_basis':shadow_basis,'shadow_catcher_fallback':catcher_fallback,
             'imports':int(imported),'timings':timings}

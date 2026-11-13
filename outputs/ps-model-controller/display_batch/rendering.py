@@ -10,7 +10,7 @@ import time
 
 from PIL import Image
 
-from .common import HERE, atomic_json, file_hash, signature
+from .common import HERE, ROOT, atomic_json, file_hash, signature
 from .framing import render_windows
 from .schema import LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS
 
@@ -41,6 +41,10 @@ def render_request(asset,candidate,params,environment):
     request['render_detail']=params.get('render_detail','standard')
     request['rust_spots']=float(params.get('rust_spots',0.))
     request['surface_dust']=float(params.get('surface_dust',0.))
+    if params.get('rust_pattern','procedural')=='photo' and request['rust_spots']:
+        path=ROOT/'work/render-materials/polyhaven/rusty_metal_03/rusty_metal_03_diff_2k.jpg'
+        if not path.is_file():raise FileNotFoundError('photo rust texture missing: '+str(path))
+        request['rust_scan']={'path':str(path),'sha256':file_hash(path),'source':'Poly Haven rusty_metal_03 CC0'}
     if candidate.get('camera'):request['camera']=candidate['camera']
     if candidate.get('contact_band'):request['contact_band']=candidate['contact_band']
     if candidate.get('receiver',{}).get('patches'):request['receiver']=candidate['receiver']
@@ -70,7 +74,7 @@ def part_keys(request, device, dependencies):
     light['calibrated']=bool(environment.get('calibration'))
     shared=(RENDER_VERSION,dependencies,device,request['appearance'],request['camera'],
             request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'],request.get('integration_mode','legacy'))
-    shared=(*shared,request.get('render_detail','standard'),request.get('rust_spots',0.))
+    shared=(*shared,request.get('render_detail','standard'),request.get('rust_spots',0.),request.get('rust_scan'))
     if request.get('contact_band'):shared=(*shared,request['contact_band'])
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
              request['dust_gain'],request['dust_control'],request.get('surface_dust',0.),request['material_classes'],
