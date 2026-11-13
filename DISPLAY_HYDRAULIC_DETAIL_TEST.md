@@ -18,3 +18,11 @@
 细分只提高渲染网格密度，没有补出源模型中不存在的几何特征。完整照片中模型观感仍受 376 px 投影尺寸及相机模糊限制；本结果用于判断锈点的密度与显著程度。
 
 完整照片保存在本机 `D:\测试1\液压杆-细网格锈斑测试-20261113-v7.png`。该生成图不纳入 Git。
+
+## 2026-11-13 实拍锈层质感试验
+
+在原实拍颜色和锈蚀遮罩之外，可设置 `effects.rust_pattern = "photo"`、`effects.rust_relief = true`，使用同一套材质的粗糙度和高度图。粗糙度只作用于锈蚀覆盖区域；高度图通过受限的着色器凹凸表达，原网格和接触几何不发生变化。该选项默认关闭，只有 `rust_pattern = "photo"` 时可启用。
+
+素材为 Poly Haven 的 [Rusty Metal 03](https://polyhaven.com/a/rusty_metal_03)，[CC0 许可](https://polyhaven.com/license)。底色、粗糙度及高度图均从 `work/render-materials/polyhaven/rusty_metal_03` 加载，参与缓存签名；缺少贴图时返回明确错误。高度图来源 `https://dl.polyhaven.org/file/ph-assets/Textures/exr/2k/rusty_metal_03/rusty_metal_03_disp_2k.exr`，供应方 MD5 `5c45f969a809d1c8b5417480d9be5006`，本地 SHA-256 `f657adc76d08d348c4f7ad616b46ef9834b5932d38126071ac58e79a0181917d`。素材和生成图不提交到 Git。
+
+最终完整画面为 `D:\测试1\液压杆-实拍锈层质感优化-20261113.png`。相同摆位下与上一张的差异局限于物体及其附近，锈层微细变化在全景中不明显。现场尺度与真实接触仍为未知，图片保持 `review`。

@@ -30,12 +30,15 @@ class EffectSettings(Strict):
     render_detail: Literal['standard', 'fine'] = 'standard'
     rust_spots: float = Field(default=0., ge=0, le=1., strict=True)
     rust_pattern: Literal['procedural', 'photo'] = 'procedural'
+    rust_relief: bool = False
     contrast_matching: Literal['legacy', 'local'] = 'legacy'
 
     @model_validator(mode='after')
     def preserve_limits(self):
         if self.weathering == 'preserve_source' and self.surface_dust > .5:
             raise ValueError('preserve_source surface_dust must not exceed 0.5')
+        if self.rust_relief and self.rust_pattern != 'photo':
+            raise ValueError('rust_relief requires rust_pattern=photo')
         return self
 
 

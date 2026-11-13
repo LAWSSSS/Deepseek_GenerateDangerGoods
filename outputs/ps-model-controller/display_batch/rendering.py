@@ -45,6 +45,13 @@ def render_request(asset,candidate,params,environment):
         path=ROOT/'work/render-materials/polyhaven/rusty_metal_03/rusty_metal_03_diff_2k.jpg'
         if not path.is_file():raise FileNotFoundError('photo rust texture missing: '+str(path))
         request['rust_scan']={'path':str(path),'sha256':file_hash(path),'source':'Poly Haven rusty_metal_03 CC0'}
+        if params.get('rust_relief',False):
+            rough=path.with_name('rusty_metal_03_rough_2k.exr')
+            if not rough.is_file():raise FileNotFoundError('photo rust roughness missing: '+str(rough))
+            height=path.with_name('rusty_metal_03_disp_2k.exr')
+            if not height.is_file():raise FileNotFoundError('photo rust height missing: '+str(height))
+            request['rust_scan'].update(roughness_path=str(rough),roughness_sha256=file_hash(rough),
+                                        height_path=str(height),height_sha256=file_hash(height))
     if candidate.get('camera'):request['camera']=candidate['camera']
     if candidate.get('contact_band'):request['contact_band']=candidate['contact_band']
     if candidate.get('receiver',{}).get('patches'):request['receiver']=candidate['receiver']
@@ -74,10 +81,11 @@ def part_keys(request, device, dependencies):
     light['calibrated']=bool(environment.get('calibration'))
     shared=(RENDER_VERSION,dependencies,device,request['appearance'],request['camera'],
             request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'],request.get('integration_mode','legacy'))
-    shared=(*shared,request.get('render_detail','standard'),request.get('rust_spots',0.),request.get('rust_scan'))
+    shared=(*shared,request.get('render_detail','standard'))
     if request.get('contact_band'):shared=(*shared,request['contact_band'])
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
              request['dust_gain'],request['dust_control'],request.get('surface_dust',0.),request['material_classes'],
+             request.get('rust_spots',0.),request.get('rust_scan'),
              environment.get('dust_color'),environment.get('haze') if request['appearance']!='native' else None,
              environment.get('local_context',{}).get('surface_texture_rms'))
     if request.get('scanned_hdri'):

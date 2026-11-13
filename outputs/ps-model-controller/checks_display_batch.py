@@ -12,7 +12,7 @@ from PIL import Image
 import httpx
 import sys
 
-from display_batch.schema import (BatchConfig, Review, Scores, Action, Defect, Probe,
+from display_batch.schema import (BatchConfig, EffectSettings, Review, Scores, Action, Defect, Probe,
                                   apply_actions, version_rank)
 from display_batch.store import Store
 from display_batch.geometry import (camera_for, project, contact_geometry, contact_support,
@@ -94,6 +94,20 @@ class GeometryTests(unittest.TestCase):
         self.assertEqual(original['without_shadow'],material['without_shadow'])
         relit=part_keys({**request,'light_gain':.8},'OPTIX','test')
         self.assertTrue(all(relit[k]!=original[k] for k in original))
+        scan=part_keys({**request,'rust_spots':.8,'rust_scan':{'sha256':'albedo','roughness_sha256':'r1'}},'OPTIX','test')
+        altered=part_keys({**request,'rust_spots':.8,'rust_scan':{'sha256':'albedo','roughness_sha256':'r2'}},'OPTIX','test')
+        self.assertNotEqual(scan['object'],altered['object'])
+        self.assertNotEqual(scan['with_shadow'],altered['with_shadow'])
+        self.assertEqual(scan['without_shadow'],altered['without_shadow'])
+        height=part_keys({**request,'rust_spots':.8,'rust_scan':{'sha256':'albedo','roughness_sha256':'r1','height_sha256':'h1'}},'OPTIX','test')
+        changed_height=part_keys({**request,'rust_spots':.8,'rust_scan':{'sha256':'albedo','roughness_sha256':'r1','height_sha256':'h2'}},'OPTIX','test')
+        self.assertNotEqual(height['object'],changed_height['object'])
+        self.assertEqual(height['without_shadow'],changed_height['without_shadow'])
+
+    def test_photo_relief_is_explicit_and_requires_photo(self):
+        self.assertFalse(EffectSettings().rust_relief)
+        self.assertTrue(EffectSettings(rust_pattern='photo',rust_relief=True).rust_relief)
+        with self.assertRaises(ValueError):EffectSettings(rust_relief=True)
 
     def test_separated_feet_do_not_create_support_in_gap(self):
         foot=np.zeros((80,100),np.uint8);foot[30:40,10:20]=255;foot[30:40,70:80]=255
