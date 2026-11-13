@@ -9,10 +9,101 @@ from .photography import linear, LUMA
 from .atmosphere import masked_smooth, field_crop, regions_mask
 
 VERSION='bounded-atmosphere-v1'
-COHERENT_VERSION='bounded-atmosphere-v2-dark-tail'
+COHERENT_VERSION='bounded-atmosphere-v4-scoped-veil'
 
 
-def constrain_dark_floor(amount,radiance,valid,air,coarse):
+def local_veil_evidence(radiance,valid,coarse,haze_mask=None):
+    """Distinguish a raised dark floor with structure from a flat light surface.
+
+    Low contrast is an expected consequence of veil, so it cannot by itself veto
+    the estimate. Require dark/bright structure in several separate local tiles
+    and cached visual evidence instead. These are camera-veil *estimates*, not a
+    material identification or an absolute atmospheric-density measurement.
+    """
+    dark=radiance.min(axis=2)
+    scoped=np.zeros_like(valid) if haze_mask is None else np.asarray(haze_mask,bool)&valid
+    if scoped.shape!=valid.shape:raise ValueError('haze_mask_must_match_local_valid_shape')
+    overlap=float(scoped.sum()/max(1,valid.sum()))
+    tiles=[]
+    for ys in np.array_split(np.arange(valid.shape[0]),4):
+        for xs in np.array_split(np.arange(valid.shape[1]),4):
+            mask=scoped[np.ix_(ys,xs)]
+            total=valid[np.ix_(ys,xs)].sum()
+            if mask.sum()<30 or mask.sum()<total*.5:continue
+            values=dark[np.ix_(ys,xs)][mask]
+            lo,hi=np.percentile(values,[10,70])
+            tiles.append((float(lo),float(hi-lo),float((hi-lo)/max(hi,.03))))
+    structured=[row for row in tiles if row[1]>.009 and row[2]>.06]
+    fraction=len(structured)/max(1,len(tiles))
+    visual=(coarse.get('kind') in ('haze','veil','mixed') and
+            float(coarse.get('confidence',0))>=.5 and overlap>=.5)
+    supported=bool(visual and len(structured)>=3 and fraction>=.6 and
+                   np.median([row[0] for row in structured])>.035)
+    return {'supports_veil':supported,'visual_veil_evidence':bool(visual),
+            'local_haze_overlap':overlap,'local_haze_pixels':int(scoped.sum()),
+            'minimum_local_haze_overlap':.5,'visual_scope_basis':'normalized_regions_projected_into_local_valid_pixels',
+            'sample_tiles':len(tiles),'structured_tiles':len(structured),
+            'structured_fraction':float(fraction),
+            'tile_dark_floor_linear':float(np.median([row[0] for row in structured])) if structured else None,
+            'basis':'bounded_same_layer_distributed_dark_structure_inside_visual_haze_regions'}
+
+
+def local_airlight(scene,bounds,site,coarse,fallback):
+    """Estimate scatter colour from several neutral bright surfaces near the site.
+
+    A small contact patch can be entirely dark steel. Its mean is a surface
+    reflectance measurement, not an airlight measurement. Search a bounded 2x
+    envelope, retaining same-layer and protection exclusions, and require three
+    independent tiles before replacing the contact-neighbourhood fallback.
+    """
+    l,t,r,b=bounds;w,h=scene['frame'].size
+    half_w=min(r-l,w*.22);half_h=min(b-t,h*.22)
+    cx,cy=(l+r)*.5,(t+b)*.5
+    area=[max(0,int(cx-half_w)),max(0,int(cy-half_h)),min(w,int(cx+half_w)),min(h,int(cy+half_h))]
+    x,y,rr,bb=area
+    rgb=np.float32(np.asarray(scene['frame'])[y:bb,x:rr])/255
+    factor=min(1.,320/max(rgb.shape[:2]));size=(max(8,round(rgb.shape[1]*factor)),max(8,round(rgb.shape[0]*factor)))
+    rgb=cv2.resize(rgb,size,interpolation=cv2.INTER_AREA)
+    depth=cv2.resize(scene['depth_native'][y:bb,x:rr],size)
+    valid=(scene['allowed']&~scene['protected'])[y:bb,x:rr]
+    if coarse.get('exclude_regions'):
+        valid=valid&~regions_mask(coarse['exclude_regions'],scene['allowed'].shape)[y:bb,x:rr]
+    valid=cv2.resize(valid.astype(np.uint8),size,interpolation=cv2.INTER_NEAREST)>0
+    gray=rgb@LUMA
+    gradient=cv2.magnitude(cv2.Sobel(gray,cv2.CV_32F,1,0),cv2.Sobel(gray,cv2.CV_32F,0,1))
+    spread=(rgb.max(axis=2)-rgb.min(axis=2))/np.maximum(gray,.1)
+    valid&=(abs(depth-site['depth'])<=.085)&(rgb.max(axis=2)<.90)&(gray>.08)&(spread<.16)
+    valid&=~((gray>.68)&(gradient<.02))
+    radiance=linear(rgb);tiles=[]
+    for ys in np.array_split(np.arange(valid.shape[0]),4):
+        for xs in np.array_split(np.arange(valid.shape[1]),4):
+            mask=valid[np.ix_(ys,xs)]
+            if mask.sum()<50:continue
+            colors=radiance[np.ix_(ys,xs)][mask];lum=colors@LUMA
+            lo,hi=np.percentile(lum,[65,90])
+            select=colors[(lum>=lo)&(lum<=hi)]
+            if len(select)>=10:tiles.append(np.mean(select,axis=0))
+    info={'bounds':area,'sample_pixels':int(valid.sum()),'independent_tiles':len(tiles),
+          'basis':'bounded_same_layer_neutral_bright_tiles','confidence':'unknown',
+          'fallback_airlight_camera_linear':np.asarray(fallback).tolist()}
+    if len(tiles)<3:return fallback,info
+    colors=np.float32(tiles);levels=colors@LUMA
+    # Upper-middle tiles permit illuminated steel, while an isolated bright
+    # reflection cannot set airlight. Keep a bound when true airlight is unseen.
+    threshold=min(float(np.percentile(levels,65)),float(np.sort(levels)[-3]))
+    old_level=max(float(np.asarray(fallback)@LUMA),.06)
+    level=float(np.clip(threshold,old_level,min(.85,old_level*1.8)))
+    # The wider envelope establishes brightness only. Keep the immediate
+    # same-layer neutral colour, so a nearby cool metal face cannot turn the
+    # object's veil blue when the contact neighbourhood is warm grey.
+    tint=np.asarray(fallback)/old_level
+    result=np.float32(np.clip(level*tint,.06,.85))
+    info.update(confidence='estimated',level_ratio=level/old_level,
+                airlight_camera_linear=result.tolist(),metric_airlight_known=False)
+    return result,info
+
+
+def constrain_dark_floor(amount,radiance,valid,air,coarse,haze_mask=None):
     """A reflective patch's minimum is not evidence of atmospheric extinction.
 
     Bound the field by the neighbourhood's dark tail, and require an observable
@@ -24,15 +115,30 @@ def constrain_dark_floor(amount,radiance,valid,air,coarse):
     dark,bright=np.percentile(values,[5,80])
     contrast=float((bright-dark)/max(bright,.03))
     informative=contrast>.28 and dark<max(float(air.min())*.55,.04)
-    upper=float(np.clip((dark-.008)/max(float(air.min())-.008,.05)*.78,0,.35))
-    if not informative:upper=min(upper,.10)
+    evidence=local_veil_evidence(radiance,valid,coarse,haze_mask)
+    # I_dark = t*J_dark + (1-t)*A. A small nonzero dark reflectance
+    # prevents black material from being mistaken for completely opaque haze.
+    # Do not veto a structured veiled neighbourhood because its dark floor is
+    # above 55% of the estimated airlight: that was capping every hazy site at 10%.
+    supported=informative or evidence['supports_veil']
+    upper=float(np.clip((dark-.012)/max(float(air.min())-.012,.05)*.92,0,.50))
+    unscoped_upper=min(upper,.35 if informative else .10)
+    if not evidence['supports_veil']:upper=unscoped_upper
     if coarse.get('kind')=='clear' and coarse.get('confidence',0)>=.65:upper=0.
     elif coarse.get('kind') in ('uncertain',None):upper=min(upper,.18)
     # The bound is computed from all same-layer valid pixels, not a selected bright
     # surface. It cannot increase the original estimate or create a spatial edge.
-    return np.minimum(amount,upper),{'confidence':'estimated' if informative else 'unknown',
+    bound=upper
+    if evidence['supports_veil']:
+        # The visual polygon is evidence, not a hard compositing mask. Smooth
+        # its confidence, and do not propagate stronger veil to another part of
+        # the local neighbourhood simply because it shares the same crop.
+        weight=cv2.GaussianBlur(np.float32(haze_mask),(0,0),8.,borderType=cv2.BORDER_REPLICATE)
+        bound=np.minimum(upper,unscoped_upper+(upper-unscoped_upper)*weight)
+    return np.minimum(amount,bound),{'confidence':'estimated' if supported else 'unknown',
         'fog_upper_bound':upper,'dark_tail_linear':float(dark),'relative_local_contrast':contrast,
-        'basis':'same_layer_dark_tail_bound','bright_surface_ambiguous':not informative}
+        'basis':'same_layer_dark_tail_bound_with_distributed_veil_evidence',
+        'bright_surface_ambiguous':not supported,'local_veil_evidence':evidence}
 
 
 def estimate(scene,candidate,environment):
@@ -70,6 +176,9 @@ def estimate(scene,candidate,environment):
     air=np.mean(bright,axis=0);level=max(float(air@LUMA),.06)
     tint=np.clip(air/level,.94,1.06) if neutral.sum()>=20 else np.ones(3)
     air=np.float32(np.clip(level*tint,.06,.85))
+    air_evidence={}
+    if coherent:
+        air,air_evidence=local_airlight(scene,[l,t,r,b],site,coarse,air)
     a_field=np.broadcast_to(air,(*gray.shape,3)).copy()
     dark=np.where(valid,radiance.min(axis=2),1.).astype(np.float32)
     small=cv2.erode(dark,np.ones((5,5),np.uint8));large=cv2.erode(dark,np.ones((13,13),np.uint8))
@@ -85,7 +194,9 @@ def estimate(scene,candidate,environment):
     if confidence=='unknown':amount=np.minimum(amount,.15)
     constraint={}
     if coherent:
-        amount,constraint=constrain_dark_floor(amount,radiance,valid,air,coarse)
+        scoped=regions_mask(coarse.get('haze_regions') or [],scene['allowed'].shape)[t:b,l:r]
+        scoped=cv2.resize(scoped.astype(np.uint8),size,interpolation=cv2.INTER_NEAREST)>0
+        amount,constraint=constrain_dark_floor(amount,radiance,valid,air,coarse,scoped)
         if constraint['confidence']=='unknown':confidence='unknown'
     amount=np.float32(np.clip(amount,0,.50));tau=-np.log(np.maximum(1-amount,.5))
     near,far=np.percentile(depth[valid],[95,5]);distance=np.clip((near-depth)/max(near-far,.01),0,1)
@@ -102,15 +213,19 @@ def estimate(scene,candidate,environment):
              'depth_coefficient':beta,'depth_near':float(near),'depth_far':float(far),'depth_correlation':correlation,
              'scale_disagreement':agreement,'airlight_camera_linear':air.tolist(),
              'transmission_range':np.percentile(fields['transmission'],[5,50,95]).tolist(),
-             'surface_reflection_excluded':True,'metric_air_density_known':False,'dark_floor_constraint':constraint}
+             'surface_reflection_excluded':True,'metric_air_density_known':False,
+             'airlight_evidence':air_evidence,'dark_floor_constraint':constraint}
     return fields,summary
 
 
 def prepare(scene,candidate,environment,cache):
     context=environment['local_context']
     version=COHERENT_VERSION if environment.get('integration_mode')=='coherent' else VERSION
-    key=signature(version,scene['key'],context['bounds'],candidate['site_id'],
-                  scene.get('atmosphere',{}).get('signature'))
+    dependencies=[version,scene['key'],context['bounds'],candidate['site_id'],
+                  scene.get('atmosphere',{}).get('signature')]
+    if version==COHERENT_VERSION:
+        dependencies.append(scene.get('atmosphere',{}).get('summary',{}).get('visual_evidence',{}))
+    key=signature(*dependencies)
     folder=Path(cache)/'local-atmosphere'/key;path=folder/'summary.json'
     if path.exists() and (folder/'fields.npz').exists():summary=json.loads(path.read_text(encoding='utf8'))
     else:

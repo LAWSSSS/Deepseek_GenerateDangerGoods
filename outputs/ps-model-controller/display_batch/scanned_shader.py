@@ -184,11 +184,26 @@ def source_weathering(material, shader, partitions, environment, profile):
     deposit=math_node(tree,'ADD',.12,math_node(tree,'MULTIPLY',up,.40))
     deposit=math_node(tree,'ADD',deposit,math_node(tree,'MULTIPLY',cavity,.30))
     deposit=math_node(tree,'ADD',deposit,math_node(tree,'MULTIPLY',noise.outputs['Fac'],.18),clamp=True)
+    coherent=environment.get('integration_mode')=='coherent'
+    fine=None
+    if coherent:
+        # Coverage follows the surface. Broad patches replace the nearly
+        # uniform veil; fine relief belongs only to the deposited layer.
+        noise.name='Source weathering patches'
+        patch=math_node(tree,'MULTIPLY',math_node(tree,'SUBTRACT',noise.outputs['Fac'],.20),1.8,clamp=True)
+        deposit=math_node(tree,'MULTIPLY',deposit,
+            math_node(tree,'ADD',.15,math_node(tree,'MULTIPLY',patch,.85)),clamp=True)
+        fine=tree.nodes.new('ShaderNodeTexNoise');fine.name='Source weathering fine relief'
+        fine.inputs['Scale'].default_value=110.
+        fine.inputs['Detail'].default_value=2.
+        fine.inputs['Roughness'].default_value=.6
+        tree.links.new(coords.outputs['Object'],fine.inputs['Vector'])
     edge=math_node(tree,'MULTIPLY',math_node(tree,'SUBTRACT',geometry.outputs['Pointiness'],.5),8.,clamp=True)
     deposit=math_node(tree,'MULTIPLY',deposit,math_node(tree,'SUBTRACT',1.,math_node(tree,'MULTIPLY',edge,.65)))
     coverage=math_node(tree,'MULTIPLY',metal,strength,clamp=True)
     coverage.node.name='Source weathering strength'
     amount=math_node(tree,'MULTIPLY',coverage,deposit,clamp=True)
+    amount.node.name='Source weathering actual coverage'
     base=original(shader.inputs['Base Color'])
     color=tree.nodes.new('ShaderNodeRGB');color.name='Source weathering color';color.outputs[0].default_value=(*tint,1.)
     dust=tree.nodes.new('ShaderNodeBsdfPrincipled');dust.name='Source preserving dust';dust['display_deposit']=True
@@ -197,14 +212,59 @@ def source_weathering(material, shader, partitions, environment, profile):
     dust.inputs['Roughness'].default_value=.88
     dust.inputs['Specular IOR Level'].default_value=.18
     if shader.inputs['Normal'].is_linked:assign(tree,original(shader.inputs['Normal']),dust.inputs['Normal'])
-    # A dielectric deposit already broadens the covered reflection. Keep the
-    # original PBR lobe intact in the coherent path; roughening the underlying
-    # shader as well made even the remaining bare surface lose its finish.
-    if environment.get('integration_mode') != 'coherent':
+    substrate=shader.outputs[0]
+    if coherent:
+        bump=tree.nodes.new('ShaderNodeBump');bump.name='Source weathering shallow relief'
+        bump.inputs['Strength'].default_value=.12
+        bump.inputs['Distance'].default_value=.0008
+        assign(tree,fine.outputs['Fac'],bump.inputs['Height'])
+        if shader.inputs['Normal'].is_linked:assign(tree,original(shader.inputs['Normal']),bump.inputs['Normal'])
+        tree.links.new(bump.outputs['Normal'],dust.inputs['Normal'])
+        # Fine handling abrasion is independent of deposited dust coverage.
+        # Keep clear patches without leaving a large pristine mirror beneath
+        # them. Preserve roughness-map variation; already rough regions change
+        # less. The increment is bounded by 0.27*(1-source_roughness).
+        if entry['coverage'][0]>0:
+            rough=original(shader.inputs['Roughness'])
+            wear=math_node(tree,'MULTIPLY',coverage,weights[0])
+            wear=math_node(tree,'MULTIPLY',wear,
+                math_node(tree,'ADD',.20,math_node(tree,'MULTIPLY',patch,.34)))
+            softening=math_node(tree,'MULTIPLY',wear,
+                math_node(tree,'SUBTRACT',1.,rough,clamp=True))
+            softening.node.name='Source weathering roughness increment'
+            assign(tree,math_node(tree,'ADD',rough,softening,clamp=True),shader.inputs['Roughness'])
+        assign(tree,math_node(tree,'ADD',.79,math_node(tree,'MULTIPLY',fine.outputs['Fac'],.13)),dust.inputs['Roughness'])
+        if entry['coverage'][1]>0:
+            # Source paint is often only a nearly uniform atlas swatch. A few
+            # object-space handling chips distinguish its finish from exposed
+            # steel after camera blur; protected/unknown UV regions stay intact.
+            chips=tree.nodes.new('ShaderNodeTexNoise');chips.name='Source paint wear patches'
+            chips.inputs['Scale'].default_value=28.
+            chips.inputs['Detail'].default_value=3.
+            chips.inputs['Roughness'].default_value=.65
+            tree.links.new(coords.outputs['Object'],chips.inputs['Vector'])
+            patches=math_node(tree,'MULTIPLY',math_node(tree,'SUBTRACT',chips.outputs['Fac'],.46),5.,clamp=True)
+            wear=math_node(tree,'MULTIPLY',coverage,weights[1])
+            wear=math_node(tree,'MULTIPLY',wear,patches)
+            # Paint already has half coverage. Face maximum is 17.5%, convex
+            # edges 35%; no part becomes a fully metallic sheet.
+            wear=math_node(tree,'MULTIPLY',wear,
+                math_node(tree,'ADD',.70,math_node(tree,'MULTIPLY',edge,.70)),clamp=True)
+            wear.node.name='Source paint exposed fraction'
+            exposed=tree.nodes.new('ShaderNodeBsdfPrincipled')
+            exposed.name='Source paint worn metal';exposed['display_deposit']=True
+            exposed.inputs['Base Color'].default_value=(.16,.16,.16,1.)
+            exposed.inputs['Metallic'].default_value=.80
+            assign(tree,math_node(tree,'ADD',.52,math_node(tree,'MULTIPLY',chips.outputs['Fac'],.20)),exposed.inputs['Roughness'])
+            if shader.inputs['Normal'].is_linked:assign(tree,original(shader.inputs['Normal']),exposed.inputs['Normal'])
+            worn=tree.nodes.new('ShaderNodeMixShader');worn.name='Source paint wear mix'
+            assign(tree,wear,worn.inputs[0]);tree.links.new(substrate,worn.inputs[1])
+            tree.links.new(exposed.outputs[0],worn.inputs[2]);substrate=worn.outputs[0]
+    else:
         rough=original(shader.inputs['Roughness'])
         assign(tree,math_node(tree,'ADD',rough,math_node(tree,'MULTIPLY',amount,.18),clamp=True),shader.inputs['Roughness'])
     layer=tree.nodes.new('ShaderNodeMixShader');assign(tree,amount,layer.inputs[0])
-    tree.links.new(shader.outputs[0],layer.inputs[1]);tree.links.new(dust.outputs[0],layer.inputs[2])
+    tree.links.new(substrate,layer.inputs[1]);tree.links.new(dust.outputs[0],layer.inputs[2])
     tree.links.new(layer.outputs[0],output.inputs['Surface'])
     return True
 
