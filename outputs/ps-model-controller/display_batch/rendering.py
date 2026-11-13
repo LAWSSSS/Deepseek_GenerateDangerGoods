@@ -40,6 +40,7 @@ def render_request(asset,candidate,params,environment):
     request['integration_mode']=params.get('integration_mode','legacy')
     request['render_detail']=params.get('render_detail','standard')
     request['rust_spots']=float(params.get('rust_spots',0.))
+    request['surface_dust']=float(params.get('surface_dust',0.))
     if candidate.get('camera'):request['camera']=candidate['camera']
     if candidate.get('contact_band'):request['contact_band']=candidate['contact_band']
     if candidate.get('receiver',{}).get('patches'):request['receiver']=candidate['receiver']
@@ -72,7 +73,7 @@ def part_keys(request, device, dependencies):
     shared=(*shared,request.get('render_detail','standard'),request.get('rust_spots',0.))
     if request.get('contact_band'):shared=(*shared,request['contact_band'])
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
-             request['dust_gain'],request['dust_control'],request['material_classes'],
+             request['dust_gain'],request['dust_control'],request.get('surface_dust',0.),request['material_classes'],
              environment.get('dust_color'),environment.get('haze') if request['appearance']!='native' else None,
              environment.get('local_context',{}).get('surface_texture_rms'))
     if request.get('scanned_hdri'):
