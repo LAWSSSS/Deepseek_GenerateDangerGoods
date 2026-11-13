@@ -38,6 +38,8 @@ def render_request(asset,candidate,params,environment):
              'dust_gain':1.6 if params['material']=='weathered' else 1.,
              'light_gain':LIGHT_PROFILES[params['light']]}
     request['integration_mode']=params.get('integration_mode','legacy')
+    request['render_detail']=params.get('render_detail','standard')
+    request['rust_spots']=float(params.get('rust_spots',0.))
     if candidate.get('camera'):request['camera']=candidate['camera']
     if candidate.get('contact_band'):request['contact_band']=candidate['contact_band']
     if candidate.get('receiver',{}).get('patches'):request['receiver']=candidate['receiver']
@@ -67,6 +69,7 @@ def part_keys(request, device, dependencies):
     light['calibrated']=bool(environment.get('calibration'))
     shared=(RENDER_VERSION,dependencies,device,request['appearance'],request['camera'],
             request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'],request.get('integration_mode','legacy'))
+    shared=(*shared,request.get('render_detail','standard'),request.get('rust_spots',0.))
     if request.get('contact_band'):shared=(*shared,request['contact_band'])
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
              request['dust_gain'],request['dust_control'],request['material_classes'],
@@ -135,7 +138,7 @@ class RenderCache:
 
     async def _get(self,request,keys,timings,full_frame):
         windows=request['windows']
-        entries={};cache={};missing={};folders={};imports=0
+        entries={};cache={};missing={};folders={};imports=0;worker_detail={}
         for part,key in keys.items():
             folder=self.root/part/key
             folders[part]=folder
@@ -150,6 +153,7 @@ class RenderCache:
                 missing[part]=tempfile.mkdtemp(prefix='run-',dir=folder)
         if missing:
             response=await self.worker.ask('render_parts',{**request,'parts':missing},timeout=240)
+            worker_detail=response.get('render_mesh_detail',{})
             timings.update(response['timings'])
             imports=response['imports']
             self.totals['asset_imports']+=imports
@@ -199,7 +203,9 @@ class RenderCache:
                     shadow_resolution=max(shadow[2]-shadow[0],shadow[3]-shadow[1]),
                     object_window=windows['object'],shadow_window=windows['shadow'],
                     legacy_grid=full_frame,part_paths={k:v['path'] for k,v in entries.items()},
-                    render_cache=cache,render_timings=timings,asset_imports=imports)
+                    render_cache=cache,render_timings=timings,asset_imports=imports,
+                    render_mesh_detail=worker_detail or {'profile':request.get('render_detail','standard'),
+                        'rust_spots':float(request.get('rust_spots',0.))})
         if shadow_pair:meta['shadow_pair_validation']=shadow_pair
         if request.get('surface_scans'):
             meta['scanned_materials']=obj.get('scanned_materials',[])

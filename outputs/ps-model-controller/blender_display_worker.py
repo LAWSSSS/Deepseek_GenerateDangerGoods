@@ -316,6 +316,135 @@ def surface_detail(material,node,environment,dust_gain):
     tree.links.new(dust.outputs[0],node.inputs['Base Color'])
 
 
+def rust_spot_detail(material,node,strength,material_classes=()):
+    """Add sparse oxide freckles to metal and chromatic paint, excluding rubber and labels."""
+    strength=float(np.clip(strength,0.,1.))
+    if not strength or not material_detail_allowed(material.name,node.inputs['Metallic'].is_linked):return
+    classes=set(material_classes)
+    if classes and not classes.intersection({'steel','chrome','paint','rust'}):return
+    tree=material.node_tree;nodes=tree.nodes;links=tree.links
+    if nodes.get('batch_rust_spot_color'):return
+    metallic=node.inputs['Metallic']
+    metallic_source=metallic.links[0].from_socket if metallic.is_linked else None
+    metallic_value=float(metallic.default_value)
+    # Painted metal commonly has a constant Metallic=0 shader input. Do not
+    # reject it here: the chroma mask below is what limits oxide to painted steel.
+
+    coordinates=nodes.new('ShaderNodeTexCoord');coordinates.name='batch_rust_coordinates'
+    cells=nodes.new('ShaderNodeTexVoronoi');cells.name='batch_rust_cells';cells.feature='F1'
+    # Keep individual flecks visible after the object is reduced to camera size.
+    cells.distance='EUCLIDEAN';cells.inputs['Scale'].default_value=22
+    breakup=nodes.new('ShaderNodeTexNoise');breakup.name='batch_rust_edge_breakup'
+    breakup.inputs['Scale'].default_value=190;breakup.inputs['Detail'].default_value=2
+    breakup.inputs['Roughness'].default_value=.78
+    links.new(coordinates.outputs['Generated'],cells.inputs['Vector'])
+    links.new(coordinates.outputs['Generated'],breakup.inputs['Vector'])
+    radius=nodes.new('ShaderNodeMath');radius.name='batch_rust_radius';radius.operation='MULTIPLY_ADD'
+    radius.inputs[1].default_value=.095;radius.inputs[2].default_value=.11
+    links.new(breakup.outputs['Fac'],radius.inputs[0])
+    inside=nodes.new('ShaderNodeMath');inside.name='batch_rust_distance';inside.operation='SUBTRACT'
+    links.new(radius.outputs[0],inside.inputs[0]);links.new(cells.outputs['Distance'],inside.inputs[1])
+    edge=nodes.new('ShaderNodeMapRange');edge.name='batch_rust_soft_edge';edge.clamp=True
+    edge.inputs['From Min'].default_value=.008;edge.inputs['From Max'].default_value=.044
+    edge.inputs['To Min'].default_value=0.;edge.inputs['To Max'].default_value=1.
+    links.new(inside.outputs[0],edge.inputs['Value'])
+    density=nodes.new('ShaderNodeTexNoise');density.name='batch_rust_density';density.inputs['Scale'].default_value=18
+    density.inputs['Detail'].default_value=2;density.inputs['Roughness'].default_value=.72
+    links.new(coordinates.outputs['Generated'],density.inputs['Vector'])
+    density_map=nodes.new('ShaderNodeMapRange');density_map.name='batch_rust_cluster_density';density_map.clamp=True
+    density_map.inputs['From Min'].default_value=.34;density_map.inputs['From Max'].default_value=.7
+    density_map.inputs['To Min'].default_value=.08;density_map.inputs['To Max'].default_value=1.
+    links.new(density.outputs['Fac'],density_map.inputs['Value'])
+    clustered_spots=nodes.new('ShaderNodeMath');clustered_spots.name='batch_rust_clustered_spots';clustered_spots.operation='MULTIPLY';clustered_spots.use_clamp=True
+    links.new(edge.outputs[0],clustered_spots.inputs[0]);links.new(density_map.outputs[0],clustered_spots.inputs[1])
+    metal_mask=nodes.new('ShaderNodeMath');metal_mask.name='batch_rust_metal_mask';metal_mask.operation='MULTIPLY';metal_mask.use_clamp=True
+    if metallic_source is not None:links.new(metallic_source,metal_mask.inputs[0])
+    else:metal_mask.inputs[0].default_value=metallic_value
+    links.new(clustered_spots.outputs[0],metal_mask.inputs[1])
+
+    # Painted steel has metallic=0 by design. Use actual albedo chroma to include
+    # paint while leaving achromatic rubber, chrome labels and pale markings alone.
+    base=node.inputs['Base Color'];base_source=base.links[0].from_socket if base.is_linked else None
+    base_value=tuple(base.default_value)
+    if base_source is not None:
+        separate=nodes.new('ShaderNodeSeparateColor');separate.name='batch_rust_albedo_channels';separate.mode='RGB'
+        links.new(base_source,separate.inputs['Color'])
+        max_rg=nodes.new('ShaderNodeMath');max_rg.operation='MAXIMUM'
+        links.new(separate.outputs['Red'],max_rg.inputs[0]);links.new(separate.outputs['Green'],max_rg.inputs[1])
+        max_rgb=nodes.new('ShaderNodeMath');max_rgb.operation='MAXIMUM'
+        links.new(max_rg.outputs[0],max_rgb.inputs[0]);links.new(separate.outputs['Blue'],max_rgb.inputs[1])
+        min_rg=nodes.new('ShaderNodeMath');min_rg.operation='MINIMUM'
+        links.new(separate.outputs['Red'],min_rg.inputs[0]);links.new(separate.outputs['Green'],min_rg.inputs[1])
+        min_rgb=nodes.new('ShaderNodeMath');min_rgb.operation='MINIMUM'
+        links.new(min_rg.outputs[0],min_rgb.inputs[0]);links.new(separate.outputs['Blue'],min_rgb.inputs[1])
+        chroma=nodes.new('ShaderNodeMath');chroma.operation='SUBTRACT'
+        links.new(max_rgb.outputs[0],chroma.inputs[0]);links.new(min_rgb.outputs[0],chroma.inputs[1])
+    else:
+        chroma=nodes.new('ShaderNodeMath');chroma.operation='SUBTRACT'
+        chroma.inputs[0].default_value=max(base_value[:3]);chroma.inputs[1].default_value=min(base_value[:3])
+    paint_ramp=nodes.new('ShaderNodeMapRange');paint_ramp.name='batch_rust_painted_metal_mask';paint_ramp.clamp=True
+    paint_ramp.inputs['From Min'].default_value=.10;paint_ramp.inputs['From Max'].default_value=.28
+    paint_ramp.inputs['To Min'].default_value=0.;paint_ramp.inputs['To Max'].default_value=1.
+    links.new(chroma.outputs[0],paint_ramp.inputs['Value'])
+    painted_spots=nodes.new('ShaderNodeMath');painted_spots.name='batch_rust_spots_on_paint';painted_spots.operation='MULTIPLY';painted_spots.use_clamp=True
+    links.new(clustered_spots.outputs[0],painted_spots.inputs[0]);links.new(paint_ramp.outputs[0],painted_spots.inputs[1])
+    include_surface=nodes.new('ShaderNodeMath');include_surface.name='batch_rust_metal_or_paint';include_surface.operation='MAXIMUM';include_surface.use_clamp=True
+    links.new(metal_mask.outputs[0],include_surface.inputs[0]);links.new(painted_spots.outputs[0],include_surface.inputs[1])
+    strength_node=nodes.new('ShaderNodeMath');strength_node.name='batch_rust_strength';strength_node.operation='MULTIPLY';strength_node.use_clamp=True
+    strength_node.inputs[1].default_value=strength;links.new(include_surface.outputs[0],strength_node.inputs[0])
+
+    palette=nodes.new('ShaderNodeTexNoise');palette.name='batch_rust_palette'
+    palette.inputs['Scale'].default_value=37;palette.inputs['Detail'].default_value=2
+    links.new(coordinates.outputs['Generated'],palette.inputs['Vector'])
+    tones=nodes.new('ShaderNodeMixRGB');tones.name='batch_rust_tones';tones.blend_type='MIX'
+    tones.inputs[1].default_value=(.12,.038,.009,1.)
+    tones.inputs[2].default_value=(.26,.086,.018,1.)
+    links.new(palette.outputs['Fac'],tones.inputs[0])
+
+    color=nodes.new('ShaderNodeMixRGB');color.name='batch_rust_spot_color';color.blend_type='MIX'
+    if base_source is not None:links.new(base_source,color.inputs[1])
+    else:color.inputs[1].default_value=base_value
+    links.new(tones.outputs['Color'],color.inputs[2]);links.new(strength_node.outputs[0],color.inputs[0])
+    for old in list(base.links):links.remove(old)
+    links.new(color.outputs['Color'],base)
+
+    def mix_scalar(socket_name,target,label):
+        socket=node.inputs[socket_name]
+        source=socket.links[0].from_socket if socket.is_linked else None
+        value=float(socket.default_value)
+        inv=nodes.new('ShaderNodeMath');inv.name='batch_rust_'+label+'_inverse';inv.operation='SUBTRACT'
+        inv.inputs[0].default_value=1.;links.new(strength_node.outputs[0],inv.inputs[1])
+        base_part=nodes.new('ShaderNodeMath');base_part.name='batch_rust_'+label+'_base';base_part.operation='MULTIPLY'
+        if source is not None:links.new(source,base_part.inputs[0])
+        else:base_part.inputs[0].default_value=value
+        links.new(inv.outputs[0],base_part.inputs[1])
+        spot_part=nodes.new('ShaderNodeMath');spot_part.name='batch_rust_'+label+'_spot';spot_part.operation='MULTIPLY'
+        spot_part.inputs[1].default_value=target;links.new(strength_node.outputs[0],spot_part.inputs[0])
+        combined=nodes.new('ShaderNodeMath');combined.name='batch_rust_'+label+'_mix';combined.operation='ADD'
+        links.new(base_part.outputs[0],combined.inputs[0]);links.new(spot_part.outputs[0],combined.inputs[1])
+        for old in list(socket.links):links.remove(old)
+        links.new(combined.outputs[0],socket)
+
+    mix_scalar('Metallic',.06,'metallic')
+    mix_scalar('Roughness',.86,'roughness')
+    normal=node.inputs['Normal'];normal_source=normal.links[0].from_socket if normal.is_linked else None
+    bump=nodes.new('ShaderNodeBump');bump.name='batch_rust_bump'
+    bump.inputs['Strength'].default_value=.18*strength;bump.inputs['Distance'].default_value=.0007
+    links.new(strength_node.outputs[0],bump.inputs['Height'])
+    if normal_source is not None:links.new(normal_source,bump.inputs['Normal'])
+    for old in list(normal.links):links.remove(old)
+    links.new(bump.outputs['Normal'],normal)
+
+
+def fine_render_mesh(obj,request):
+    if request.get('render_detail')!='fine':return
+    if obj.modifiers.get('batch_fine_tessellation'):return
+    modifier=obj.modifiers.new('batch_fine_tessellation','SUBSURF')
+    modifier.subdivision_type='SIMPLE'
+    modifier.levels=1;modifier.render_levels=1
+    modifier.show_render=True
+
+
 def pass_outputs(scene, folder):
     layer=scene.view_layers[0]
     layer.use_pass_diffuse_direct=True;layer.use_pass_diffuse_indirect=True;layer.use_pass_diffuse_color=True
@@ -373,14 +502,17 @@ def configure_materials(obj,request,reference=True):
                 if scans is not None:
                     if obj.data.uv_layers.active and scanned_surface(material,node,scans,request['environment']['dust_color']):
                         adapted.add(material.name)
+                    rust_spot_detail(material,node,request.get('rust_spots',0.),request.get('material_classes',()))
                     continue
                 if matte is not None and request.get('matte_profile'):
                     if obj.data.uv_layers.active and matte_dust_surface(material,node,matte,
                             request['environment'],request['material_classes'],request['matte_profile']):
                         adapted.add(material.name)
+                    rust_spot_detail(material,node,request.get('rust_spots',0.),request.get('material_classes',()))
                     continue
                 if reference:
                     surface_detail(material,node,request['environment'],request.get('dust_gain',1.))
+                    rust_spot_detail(material,node,request.get('rust_spots',0.),request.get('material_classes',()))
                 else:
                     scene_surface(material,node,request)
                     continue
@@ -771,7 +903,8 @@ def render_parts(request):
     scene.render.use_persistent_data=request.get('persistent_data',True)
     imported=0.;import_seconds=0.
     mesh_key=(request['mesh'],request['mesh_hash'],matte['signature'] if matte is not None else None,
-              request.get('matte_profile'),integration_mode)
+              request.get('matte_profile'),integration_mode,request.get('render_detail','standard'),
+              request.get('rust_spots',0.))
     if state.get('mesh_key')!=mesh_key:
         begin=time.monotonic()
         if 'asset' in state:
@@ -796,6 +929,8 @@ def render_parts(request):
     hdri=request.get('scanned_hdri')
     scene_lighting(state,camera,request['environment'],request.get('light_gain',1.),reference and not hdri,hdri)
     adapted=configure_materials(obj,request,reference)
+    base_faces=len(obj.data.polygons)
+    fine_render_mesh(obj,request)
     normal=np.asarray(request.get('plane_normal',[0,0,1]),dtype=float)
     receiver_key=(request.get('receiver',{}).get('patches',[]),normal.tolist())
     if state.get('receiver_key')!=receiver_key:
@@ -831,7 +966,8 @@ def render_parts(request):
         obj.visible_camera=is_object
         ground.visible_camera=not is_object
         set_window(scene,request['windows']['object' if is_object else 'shadow'])
-        scene.cycles.samples=32 if is_object else 16
+        if request.get('render_detail')=='fine':scene.cycles.samples=128 if is_object else 32
+        else:scene.cycles.samples=32 if is_object else 16
         if is_object:
             scene.render.image_settings.file_format='PNG'
             scene.render.image_settings.color_depth='8'
@@ -862,6 +998,11 @@ def render_parts(request):
             'scanned_materials':adapted if matte is None else [],
             'matte_materials':adapted if matte is not None else [],
             'integration_mode':integration_mode,
+            'render_mesh_detail':{'profile':request.get('render_detail','standard'),
+                'base_faces':base_faces,'render_faces':base_faces*(4 if request.get('render_detail')=='fine' else 1),
+                'subdivision':'simple_level_1' if request.get('render_detail')=='fine' else 'none',
+                'cycles_samples':{'object':128,'shadow':32} if request.get('render_detail')=='fine' else {'object':32,'shadow':16},
+                'rust_spots':float(request.get('rust_spots',0.))},
             'lighting_basis':request['environment'].get('lighting_basis'),
             'shadow_basis':shadow_basis,'shadow_catcher_fallback':catcher_fallback,
             'imports':int(imported),'timings':timings}

@@ -302,6 +302,8 @@ class Pipeline:
             receiver=await asyncio.to_thread(receiver_mesh,scene,candidate,bounds=edit_bounds(candidate,scene['size']))
             render_candidate={**candidate,'receiver':receiver}
         render_environment={**environment,'haze':0.} if self.config.appearance=='local' else environment
+        if params.get('render_detail')=='fine':
+            resolution=min(2048,64*math.ceil(2*resolution/64))
         folder,meta,hit=await self.renders.get(asset,render_candidate,params,render_environment,scene['size'],resolution,
                                              appearance=style,**extras)
         if params.get('effects_enabled'):

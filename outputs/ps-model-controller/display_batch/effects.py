@@ -15,7 +15,8 @@ def parameters(settings):
             'pool_weight': settings.pool_weight, 'effects_lighting': settings.lighting,
             'effects_ai_adjust': settings.ai_adjust, 'fog_mode':settings.fog_mode,
             'fog_gain':format(settings.fog_gain,'g'), 'weathering':settings.weathering,
-            'shadow_mode':settings.shadow_mode}
+            'shadow_mode':settings.shadow_mode, 'render_detail':settings.render_detail,
+            'rust_spots':format(settings.rust_spots,'g')}
 
 
 def dust_profile(scale, mode='legacy_matte'):
@@ -96,4 +97,5 @@ def render_identity(params, style):
     if params.get('effects_enabled'):
         fields.extend(('effects_version', 'surface_dust', 'effects_lighting'))
         fields.extend(('weathering','shadow_mode'))
+    fields.extend(('render_detail','rust_spots'))
     return tuple(params.get(k) for k in fields)

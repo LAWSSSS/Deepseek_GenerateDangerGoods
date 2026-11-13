@@ -26,6 +26,9 @@ class EffectSettings(Strict):
     weathering: Literal['legacy_matte', 'preserve_source'] = 'legacy_matte'
     shadow_mode: Literal['legacy', 'matched_receiver'] = 'legacy'
     fog_gain: float = Field(default=1., ge=0, le=1.5, strict=True)
+    # Fine surface rendering is opt-in; it never changes the source mesh or pose.
+    render_detail: Literal['standard', 'fine'] = 'standard'
+    rust_spots: float = Field(default=0., ge=0, le=1., strict=True)
 
     @model_validator(mode='after')
     def preserve_limits(self):
