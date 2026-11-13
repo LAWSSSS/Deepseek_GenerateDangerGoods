@@ -50,13 +50,13 @@ def implementation_manifest():
     files += [HERE/name for name in ('blender_worker.py','scene_v2.py','run.py','placement-web/review_viewer.py')]
     core = sorted(SOURCE.glob('scrap_composite/*'))
     versions={}
-    for name in ('numpy','trimesh','coacd','rtree','scipy','Pillow','opencv-python','pydantic','httpx','torch','transformers','opencolorio','numba'):
+    for name in ('numpy','trimesh','coacd','rtree','scipy','Pillow','opencv-python','pydantic','httpx','torch','transformers','opencolorio','numba','pydantic-graph'):
         try:versions[name]=importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:versions[name]='unavailable'
     weights={str(p.relative_to(WEIGHTS)):file_hash(p) for p in
              (WEIGHTS/'mobile_sam.pt',WEIGHTS/'depth/model.safetensors',WEIGHTS/'matte/birefnet-general-lite.onnx') if p.is_file()}
     return {'sources':{str(p.relative_to(HERE)):file_hash(p) for p in files},
-            'core_sources':{p.name:file_hash(p) for p in core if p.suffix in ('.py','.jsx') and p.is_file()},
+            'core_sources':{p.name:file_hash(p) for p in core if p.suffix in ('.py','.jsx','.txt') and p.is_file()},
             'weight_hashes':weights,
             'ocio_config_hash':file_hash(BLENDER.parent/'4.5/datafiles/colormanagement/config.ocio'),
             'dependencies':versions,'blender':'4.5.3','python':sys.version.split()[0]}

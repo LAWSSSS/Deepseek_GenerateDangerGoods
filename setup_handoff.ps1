@@ -53,6 +53,8 @@ if (!$SkipInstall) {
     Set-Content -LiteralPath (Join-Path $mesh 'Lib/site-packages/handoff-shared.pth') -Value $shared -Encoding ascii
     & $meshPython -m pip install 'einops==0.8.1' 'omegaconf==2.3.0' 'trimesh==4.6.4' 'psutil==7.1.3' 'fast-simplification==0.1.12' 'pymeshlab==2023.12.post3' 'hf_xet==1.8.0'
     if ($LASTEXITCODE -ne 0) { throw '三维依赖安装失败。' }
+    & $meshPython -m pip install 'pydantic-graph==2.68.0'
+    if ($LASTEXITCODE -ne 0) { throw '摄影复核依赖安装失败。' }
     $mcpSource = Join-Path $project 'vendor/photoshop-python-api-mcp-server'
     & $mcpPython -m pip install $mcpSource 'photoshop-python-api==0.24.2' 'mcp==1.30.0'
     if ($LASTEXITCODE -ne 0) { throw 'Photoshop MCP 安装失败。' }

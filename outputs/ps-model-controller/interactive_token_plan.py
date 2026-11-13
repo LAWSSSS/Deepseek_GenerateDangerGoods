@@ -17,6 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from run import Endpoint, ModelClient, token_summary
 from display_batch.common import atomic_json, configure_credential, file_hash, signature
 from scrap_composite.contracts import VisualReport
+from scrap_composite.photography_agent import role_prompt
+from scrap_composite.photography_protocol import PhotoBrief, PhotoContext, PhotoReport, VISION_TOKENS
 
 URL = 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions'
 MODEL = 'qwen3.7-plus'
@@ -135,8 +137,9 @@ def write_report(out, manifest, result):
         body.append('<h2>完整画面 '+str(i)+'</h2><a href="'+link+'"><img src="'+link+'" alt="原尺寸完整画面"></a>')
         for finding in diagnosis.get('findings',[]):
             if finding.get('image',1)==i:
-                body.append('<p>'+html.escape(finding.get('category',finding.get('code',''))+
-                    ' / '+finding['severity']+'：'+finding['evidence'])+'</p>')
+                factor = finding.get('factor', finding.get('category', finding.get('code', '')))
+                evidence = finding.get('cue', finding.get('evidence', ''))
+                body.append('<p>'+html.escape(factor+' / '+finding['severity']+'：'+evidence)+'</p>')
     body.append('<h2>建议</h2><ul>'+''.join('<li>'+html.escape(s)+'</li>' for s in diagnosis.get('next_steps',[]))+'</ul>')
     (out/'index.html').write_text('\n'.join(body),encoding='utf8')
 
@@ -152,10 +155,15 @@ async def diagnose(images, question, out, *, model=MODEL, http=None, report_form
         token_field='max_completion_tokens', max_output_tokens=3072, timeout_seconds=120)
     frozen = {'version':VERSION,'model':model,'endpoint':URL,'question':question,
               'images':[{'path':str(p),'sha256':file_hash(p)} for p in images]}
-    if report_format not in ('diagnosis','visual_evidence'):
+    if report_format not in ('diagnosis','visual_evidence','photographer'):
         raise ValueError('unsupported report format')
-    schema=Diagnosis if report_format=='diagnosis' else VisualReport
+    schema={'diagnosis': Diagnosis, 'visual_evidence': VisualReport, 'photographer': PhotoBrief}[report_format]
     prompt=PROMPT
+    if schema is PhotoBrief:
+        context = PhotoContext(images=['frame', *(['context'] * (len(images)-1))], question=question.strip())
+        endpoint = endpoint.model_copy(update={'max_output_tokens': VISION_TOKENS})
+        frozen['report_format'] = report_format
+        prompt = role_prompt('observer')
     if schema is VisualReport:
         frozen['report_format']=report_format
         prompt = ('Inspect the first full image as the current composite; later images are context. '
@@ -184,7 +192,7 @@ async def diagnose(images, question, out, *, model=MODEL, http=None, report_form
     for i,p in enumerate(images):
         with Image.open(p) as im:
             thumb=ImageOps.exif_transpose(im).convert('RGB')
-            thumb.thumbnail((1600,1200))
+            thumb.thumbnail((1024,768) if schema is PhotoBrief else (1600,1200))
             dest=out/f'input-{i+1}.jpg'
             for quality in (88,80,72,60):
                 data=io.BytesIO();thumb.save(data,format='JPEG',quality=quality)
@@ -204,11 +212,15 @@ async def diagnose(images, question, out, *, model=MODEL, http=None, report_form
                 payload={'question':question,'image_count':len(images)}
                 if schema is VisualReport:
                     payload.update(image_sha256=frozen['images'][0]['sha256'],target='object')
+                elif schema is PhotoBrief:
+                    payload = {'protocol': 'photo-brief-v1', **context.model_dump(mode='json', exclude_none=True)}
                 if attempt:payload['format_correction']='Previous reply invalid; return exactly the JSON schema.'
                 answer=await ModelClient(client,report).ask(endpoint,'interactive-vision',schema,
-                    prompt,payload,previews,qwen_json=True,plain_json=True)
+                    prompt,payload,previews,qwen_json=True,plain_json=True,compact_json=schema is PhotoBrief)
                 if schema is VisualReport:
                     answer.bind(payload['image_sha256'],payload['target'])
+                elif schema is PhotoBrief:
+                    answer = PhotoReport.bind(answer, frozen['images'][0]['sha256'], 'object', context)
                 elif any(f.image>len(images) for f in answer.findings):
                     raise ValueError('Finding refers to an image that was not supplied')
                 break
@@ -245,7 +257,7 @@ def main():
     cli.add_argument('--question-file',type=Path,required=True)
     cli.add_argument('--out',type=Path,required=True)
     cli.add_argument('--model',default=MODEL)
-    cli.add_argument('--format',choices=('diagnosis','visual_evidence'),default='diagnosis',dest='report_format')
+    cli.add_argument('--format',choices=('diagnosis','visual_evidence','photographer'),default='diagnosis',dest='report_format')
     args=cli.parse_args()
     try:
         result=asyncio.run(diagnose(args.image,args.question_file.read_text(encoding='utf8'),args.out,

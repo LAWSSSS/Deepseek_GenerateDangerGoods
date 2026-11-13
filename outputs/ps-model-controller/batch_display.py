@@ -32,6 +32,8 @@ def main():
         command.add_argument('--integration-mode',choices=('legacy','coherent'),default=None,
             help='覆盖配置中的融合路径：legacy 复现原流程；coherent 使用局部受光与反射协同小样策略')
         command.add_argument('--workflow',choices=('legacy','evidence_v1'),default=None)
+        command.add_argument('--review-profile', choices=('legacy','photographer'), default=None,
+                             help='选择摄影师诊断与执行计划，或保留原复核协议')
     bench=sub.add_parser('evaluation-manifests');bench.add_argument('--backgrounds',required=True);bench.add_argument('--out',required=True)
     args=parser.parse_args()
     if args.command=='evaluation-manifests':
@@ -39,6 +41,7 @@ def main():
     raw=json.loads(args.config.read_text(encoding='utf8'))
     if args.integration_mode is not None:raw['integration_mode']=args.integration_mode
     if args.workflow is not None:raw['workflow']=args.workflow
+    if args.review_profile is not None:raw['review_profile']=args.review_profile
     config=BatchConfig.model_validate(raw)
     if args.command=='diagnose':
         from display_batch.diagnostics import diagnose

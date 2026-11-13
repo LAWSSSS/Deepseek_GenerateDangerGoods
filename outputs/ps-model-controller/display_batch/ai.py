@@ -13,6 +13,7 @@ from PIL import Image, ImageOps
 from run import Endpoint, ModelClient, token_summary
 from .common import HERE, atomic_json, configure_credential, file_hash, signature
 from .costs import tariff, estimate
+from scrap_composite.photography_protocol import PHOTO_JOB_ID
 
 
 class VisionEndpoint(Endpoint):
@@ -84,16 +85,19 @@ class Vision:
         return result
 
     async def ask(self, role, schema, prompt, payload, images=(), *, cache=True,
-                  image_limits=None,max_output_tokens=None,plain_json=False,planning=False,validate=None):
+                  image_limits=None,max_output_tokens=None,plain_json=False,planning=False,validate=None,compact=False):
         previews=[]
+        source_hashes=[]
         service=self.planner if planning else self.endpoint
         endpoint=service if max_output_tokens is None else service.model_copy(
             update={'max_output_tokens':max_output_tokens})
         for i,image in enumerate(images):
             image=Path(image)
             limit=image_limits[i] if image_limits is not None else (1280,1024)
-            encoded_key=signature('jpeg-v1',file_hash(image)) if limit==(1280,1024) else signature(
-                'jpeg-v2',limit,file_hash(image))
+            source_hash=file_hash(image)
+            source_hashes.append(source_hash)
+            encoded_key=signature('jpeg-v1',source_hash) if limit==(1280,1024) else signature(
+                'jpeg-v2',limit,source_hash)
             dest=self.cache/('preview-'+encoded_key+'.jpg')
             if not dest.is_file():
                 with Image.open(image) as im:
@@ -109,8 +113,12 @@ class Vision:
         qwen=endpoint.response_protocol=='qwen-json'
         use_json=qwen or plain_json
         endpoint_key=endpoint.model_dump(exclude={'response_protocol'} if not qwen else None)
-        key = signature("vision-json-v1" if use_json else "vision-v1", endpoint_key, schema.model_json_schema(),
-                        role, prompt, semantic_payload(payload), [file_hash(p) for p in images])
+        protocol = 'compact-json-v1' if compact else 'vision-json-v1' if use_json else 'vision-v1'
+        inputs = [protocol, endpoint_key, schema.model_json_schema(), role, prompt,
+                  semantic_payload(payload), [file_hash(p) for p in images]]
+        if compact:
+            inputs.append(source_hashes)
+        key = signature(*inputs)
         path = self.cache/f"{key}.json"
         if cache and path.is_file():
             try:
@@ -132,12 +140,13 @@ class Vision:
                 report = {"calls": []}
                 start = time.monotonic()
                 try:
-                    mode = " Return one JSON object matching the supplied schema." if use_json else " Return only the requested JSON tool arguments."
+                    guidance = '' if compact else (
+                        (" Return one JSON object matching the supplied schema." if use_json else " Return only the requested JSON tool arguments.")
+                        + " Coordinates are normalized [0,1]. Write evidence in concise Chinese, at most 60 Chinese characters. Respect all schema string limits.")
                     answer = await ModelClient(self.http, report).ask(endpoint, role, schema,
-                        prompt + mode + " Coordinates are normalized [0,1]."
-                        " Write evidence in concise Chinese, at most 60 Chinese characters. Respect all schema string limits.",
+                        prompt + guidance,
                         retry_payload, images, tool=None if use_json else "inspect_display",
-                        detail=None if qwen else "high",qwen_json=qwen,plain_json=use_json)
+                        detail=None if qwen else "high",qwen_json=qwen,plain_json=use_json,compact_json=compact)
                     if validate is not None:
                         try:
                             validate(answer)
@@ -160,7 +169,7 @@ class Vision:
                 finally:
                     for call in report["calls"]:
                         call.update(request_signature=key, attempt=attempt,
-                                    job_id=asyncio.current_task().get_name(),
+                                    job_id=PHOTO_JOB_ID.get() or asyncio.current_task().get_name(),
                                     seconds=round(time.monotonic()-start, 3))
                         if planning:
                             call['request_tariff'] = tariff(self.config, endpoint)

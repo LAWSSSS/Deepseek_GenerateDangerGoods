@@ -539,6 +539,14 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
                                   'measurement_px':unoccluded_major,'expected_px':expected,'tolerance_px':tolerance}
         checks['scale']['status']=candidate['scale']['status']
         checks['scale']['basis']='scene_scale_evidence_separate_from_projected_pixel_agreement'
+    if params.get('review_profile') == 'photographer':
+        from scrap_composite.photography_measurements import measurements
+        photo['review_measurements'] = measurements(
+            photo, object_pixels=exported[y:b,x:r][visible_alpha>.95], reference_pixels=reference_pixels,
+            visible_shadow_pixels=int(((loss>.025)&(visible_alpha<.1)).sum()),
+            lighting=environment.get('local_irradiance', {}).get('direction'),
+            specular_share=highlight[visible_alpha>.95],
+        ).model_dump(mode='json', exclude_none=True)
     crop_image=Image.fromarray(base_rgb).crop((x,y,r,b));crop_image.thumbnail((1000,800));crop_image.save(Path(out).with_suffix('.crop.jpg'),quality=92)
     thumb=Image.fromarray(base_rgb);thumb.thumbnail((1536,1024));thumb.save(Path(out).with_suffix('.full.jpg'),quality=88)
     if candidate.get('placement'):

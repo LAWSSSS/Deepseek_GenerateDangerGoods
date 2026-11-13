@@ -86,6 +86,7 @@ class BatchConfig(Strict):
     camera_pipeline: Literal['legacy_residual', 'premultiplied'] = 'legacy_residual'
     support_geometry: Literal['legacy', 'structured'] = 'legacy'
     workflow: Literal['legacy', 'evidence_v1'] = 'legacy'
+    review_profile: Literal['legacy', 'photographer'] = 'legacy'
     knowledge_db: str | None = None
     prepare_photoshop: bool = False
     _requested: dict = PrivateAttr(default_factory=dict)
@@ -97,11 +98,22 @@ class BatchConfig(Strict):
         from scrap_composite.configuration import evidence_settings
 
         self._requested = self.model_dump(exclude_unset=True)
+        photographer_workflow = self.review_profile == 'photographer' and 'workflow' not in self._requested
+        if photographer_workflow:
+            self.workflow = 'evidence_v1'
+        if self.review_profile == 'photographer':
+            from importlib.util import find_spec
+            if self.workflow != 'evidence_v1':
+                raise ValueError('摄影师复核使用 workflow=evidence_v1')
+            if find_spec('pydantic_graph') is None:
+                raise ValueError('摄影师复核需要安装 pydantic-graph==2.68.0')
         if self.scale_evidence_policy=='estimate_preview' and (
                 self.workflow!='evidence_v1' or self.geometry_preset!='rebuild' or self.uncertain_policy!='render_review'):
             raise ValueError('estimate_preview requires evidence_v1, geometry rebuild and render_review')
         if self.workflow == 'evidence_v1':
             resolved, self._resolution_notes = evidence_settings(self.model_dump(), self.model_fields_set)
+            if photographer_workflow:
+                self._resolution_notes['workflow'] = 'photographer review uses the structured workflow'
             for field in ('integration_mode', 'camera_pipeline', 'support_geometry'):
                 setattr(self, field, resolved[field])
             self.effects = EffectSettings.model_validate(resolved['effects'])

@@ -1,13 +1,40 @@
 """Connect the shared model contracts to the existing display queue."""
+from scrap_composite.photography_agent import run_photography
+from scrap_composite.photography_controls import composite_changes
+from scrap_composite.photography_measurements import measurements
+from scrap_composite.photography_protocol import PhotoContext, PhotoReport
 from scrap_composite.workflow import observe, plan_execution
 
 from .ai import InvalidStructuredReply
 from .review import ACTION_CAUSES, effect_direction, repair
-from .schema import Action, EFFECT_ACTIONS, EffectsReview, LIGHT_PROFILES, PHOTO_CONTROLS
+from .schema import Action, EFFECT_ACTIONS, EffectsReview, LIGHT_PROFILES, PHOTO_CONTROLS, TONE_PROFILES, apply_actions
 from .strict_contact import pose_review_context, reconcile_pose_evidence
 
 
-async def inspect_frame(client, asset, comp, image_hash):
+def frame_inputs(asset, comp):
+    width, height = comp['checks']['size']['pixels']
+    left, top, right, bottom = comp['edit_bounds']
+    semantic = asset.get('semantic', {})
+    pose = pose_review_context(comp['checks'])
+    paths = [(kind, comp[key]) for kind, key in (('frame', 'image'), ('local', 'crop')) if comp.get(key)]
+    if asset.get('board'):
+        paths.append(('asset', asset['board']))
+    context = PhotoContext(
+        name=asset['name'][:80], target_region=(left/width, top/height, right/width, bottom/height),
+        images=[kind for kind, _ in paths], material=[s[:24] for s in semantic.get('material_classes', [])[:6]],
+        features=[s[:42] for s in semantic.get('key_features', [])[:4] if s.strip()],
+        intended_pose='lying_on_side', axis_deg=pose['measured_axis_angle_deg'],
+        checks={key: value['status'] for key, value in comp['checks'].items()},
+        measurements=measurements(comp.get('photo', {})),
+    )
+    return context, [path for _, path in paths]
+
+
+async def inspect_frame(client, asset, comp, image_hash, *, profile='legacy'):
+    if profile == 'photographer':
+        context, images = frame_inputs(asset, comp)
+        decision = await run_photography(client, context, image_hash, images=images)
+        return decision.report, _review(decision.report.legacy(), comp['checks'])
     width, height = comp['checks']['size']['pixels']
     left, top, right, bottom = comp['edit_bounds']
     target_region = [left/width, top/height, right/width, bottom/height]
@@ -26,13 +53,17 @@ async def inspect_frame(client, asset, comp, image_hash):
                'Mark hidden or ambiguous contact as unassessable. '
                'Use major or fatal for a concrete defect that compromises display. Do not suggest operations.',
     )
+    return report, _review(report, comp['checks'])
+
+
+def _review(report, checks):
     defects = [{'code': f.code, 'severity': f.severity, 'region': f.region or (0., 0., 1., 1.),
                 'scope': f.scope if f.code=='structure' else 'image',
                 'visibility': f.visibility, 'evidence': f.evidence[:160]}
                for f in report.findings]
     review = EffectsReview(scores=report.scores.model_dump(), trace=report.trace,
                            defects=defects, actions=[], evidence=report.summary)
-    return report, reconcile_pose_evidence(review, comp['checks'])
+    return reconcile_pose_evidence(review, checks)
 
 
 def initial_recipe(db_path, asset, candidate, environment, params):
@@ -96,6 +127,26 @@ def planner_capabilities(params, allowed, report):
 
 
 async def plan_frame(client, report, review, comp, params, allowed, ids, seen, *, dust_in_shader, recommendation):
+    if isinstance(report, PhotoReport):
+        from .common import file_hash
+        try:
+            changes = composite_changes(params, allowed, comp['photo'], tone_profiles=TONE_PROFILES)
+            changes = [change for change in changes if not seen({**params, change.control: change.value})]
+            decision = await run_photography(client, report.context, file_hash(comp['image']),
+                target=report.target, changes=changes, plan=True, report=report, parameters=params)
+            if decision.updates and file_hash(comp['image']) != report.image_sha256:
+                raise ValueError('photography plan image changed before execution')
+        except (OSError, ValueError, InvalidStructuredReply) as error:
+            return None, [{'disposition': 'invalid_execution_plan', 'reason': str(error)}], None
+        plan = decision.plan.model_dump(mode='json')
+        if not decision.updates:
+            return None, [{'disposition': decision.plan.reason}], plan
+        operation = decision.plan.operation
+        selected = Action(kind=operation.control, value=operation.value)
+        updated = apply_actions(params, [selected], ids)
+        return updated, [{'action': selected.model_dump(), 'from': operation.current,
+                          'stage': operation.stage, 'evidence_id': operation.evidence_id,
+                          'disposition': 'scheduled'}], plan
     capabilities = planner_capabilities(params, allowed, report)
     if not capabilities:
         return None, [], None

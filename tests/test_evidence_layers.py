@@ -9,6 +9,7 @@ from PIL import Image
 
 from scrap_composite.contracts import PlanProposal, VisualObservation
 from scrap_composite.layers import save_bundle
+from scrap_composite.photography_protocol import PhotoBrief, PhotoChoice
 from scrap_composite.photoshop import file_hash
 from scrap_composite.photoshop_workflow import REQUIRED_CHECKS, refine_photoshop
 
@@ -78,3 +79,51 @@ class LayerWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['status'],'review')
             self.assertEqual(result['reason'],'no_improvement')
             self.assertTrue(json.loads((root/'result/workflow.json').read_text(encoding='utf8'))['outputs']['png'])
+
+    async def test_photographer_executes_own_layer_and_reviews_the_new_png(self):
+        class Exporter:
+            def __init__(self):
+                self.values = []
+
+            async def export(self, request, folder):
+                folder.mkdir()
+                value = request.actions['brightness']
+                self.values.append(value)
+                with Image.open(request.expected_png) as source:
+                    image = source.copy()
+                image.putpixel((3,3), (120 + int(value),120,120))
+                image.save(folder/'final.png')
+                (folder/'final.psd').write_bytes(b'fake-adapter-fixture')
+                return {'outputs':{ext:{'path':str(folder/f'final.{ext}'),'sha256':file_hash(folder/f'final.{ext}')}
+                                   for ext in ('png','psd')},'validation':{'status':'pass'}}
+
+        class Client:
+            def __init__(self):
+                self.roles = []
+
+            async def ask(self, role, schema, prompt, payload, images=(), **kwargs):
+                self.roles.append(role)
+                if schema is PhotoChoice:
+                    self.assert_choice_payload(payload)
+                    return PhotoChoice(option='a1', reason='match')
+                improved = len(self.roles) == 3
+                scores = dict.fromkeys(('support','occlusion','lighting','edge','texture','material','structure'),4)
+                scores['lighting'] = 4 if improved else 2
+                return PhotoBrief(trace='none' if improved else 'visible', scores=scores, findings=[] if improved else [
+                    {'factor':'exposure','region':(.375,.375,.625,.625),'severity':'major','visibility':'visible',
+                     'confidence':.9,'direction':'increase','cue':'漫反射面偏暗','reference':'附近同类材质'}])
+
+            @staticmethod
+            def assert_choice_payload(payload):
+                assert len(payload['options']) == 1 and payload['options'][0]['control'] == 'brightness'
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            adapter, client = Exporter(), Client()
+            result = await refine_photoshop(self.fixture(root), root/'result', adapter, client, review_profile='photographer')
+            self.assertEqual(adapter.values, [0.,6.])
+            self.assertEqual(client.roles, ['photo-vision','photo-execution','photo-vision'])
+            self.assertEqual(result['best_iteration'], 1)
+            self.assertEqual(result['status'], 'review')
+            first, second = [trial['photography_diagnosis']['image_sha256'] for trial in result['trials']]
+            self.assertNotEqual(first, second)

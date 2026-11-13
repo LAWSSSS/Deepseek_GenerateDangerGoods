@@ -20,6 +20,9 @@ work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/inter
 Use `--format visual_evidence` for the versioned seven-score protocol. In that
 mode the first image is the current frame and any remaining images are context.
 The report binds findings and normalized regions to the first image's hash.
+For industrial documentary photography, use `--format photographer` with a short
+question of up to 240 characters. It returns the same `photo-brief-v1` factors as
+the local photography workflow. See [scrap-photography](../../.agents/skills/scrap-photography/SKILL.md).
 
 The default is `qwen3.7-plus` on the official Beijing Token Plan endpoint. Credentials
 come from `BAILIAN_TOKEN_PLAN_API_KEY` or the application's current-user DPAPI store;

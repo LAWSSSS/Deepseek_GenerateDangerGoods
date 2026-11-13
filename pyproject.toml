@@ -11,9 +11,10 @@ dependencies = ["pydantic>=2,<3", "numpy>=1.26,<3", "opencv-python>=4.8,<5", "Pi
 
 [project.optional-dependencies]
 photoshop = ["mcp>=1,<2", "httpx>=0.27,<1"]
+photography = ["pydantic-graph==2.68.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-scrap_composite = ["*.jsx"]
+scrap_composite = ["*.jsx", "photo_*.txt"]

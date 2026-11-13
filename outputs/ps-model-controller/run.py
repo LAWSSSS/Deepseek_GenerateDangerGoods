@@ -206,14 +206,20 @@ class ModelClient:
         self.http, self.report = http, report
 
     async def ask(self, endpoint, role, schema, system, payload, previews=(), *, tool=None, detail=None,
-                  qwen_json=False,plain_json=False):
+                  qwen_json=False,plain_json=False,compact_json=False):
         key = os.environ.get(endpoint.key_env) if endpoint.key_env else None
         if endpoint.key_env and not key:
             raise ValueError(f"missing environment variable {endpoint.key_env}")
         headers = {"Authorization": "Bearer " + key} if key else {}
         if plain_json or qwen_json:
-            payload={**payload,'response_JSON_schema':schema.model_json_schema()}
+            if compact_json:
+                from scrap_composite.photography_protocol import compact_schema
+                response_schema = compact_schema(schema)
+            else:
+                response_schema = schema.model_json_schema()
+            payload={**payload,'response_JSON_schema':response_schema}
         content = compact(payload)
+        text_chars = len(content) + len(system)
         if previews:
             content = [{"type": "text", "text": content}, *(image_part(path,detail) for path in previews)]
         request = {"model": endpoint.model, endpoint.token_field: endpoint.max_output_tokens,
@@ -223,7 +229,10 @@ class ModelClient:
             request["reasoning_effort"] = endpoint.reasoning_effort
         if qwen_json:
             request['response_format']={'type':'json_object'}
-            request['thinking_budget']=768
+            if compact_json:
+                request['enable_thinking'] = False
+            else:
+                request['thinking_budget']=768
         elif tool:
             name={"name":tool}
             request["thinking"]={"type":"disabled"}
@@ -232,6 +241,8 @@ class ModelClient:
         elif endpoint.json_mode or plain_json:
             request["response_format"] = {"type": "json_object"}
         log = {"role": role, "model": endpoint.model, "output_token_limit": endpoint.max_output_tokens}
+        if compact_json:
+            log.update(text_input_chars=text_chars, input_images=len(previews))
         if tool:
             log["tool"]=tool
         self.report["calls"].append(log)
@@ -268,8 +279,12 @@ class ModelClient:
                 raise ValueError("invalid response size")
             return schema.model_validate_json(raw)
         except ValidationError as error:
-            log["schema_errors"] = [{"path":list(e["loc"]),"type":e["type"]}
-                                    for e in error.errors(include_input=False)][:10]
+            errors = error.errors(include_input=False, include_context=False, include_url=False)
+            log["schema_errors"] = [
+                {"path": list(item["loc"]), "type": item["type"],
+                 **({"rule": item["msg"][:120]} if compact_json and item["type"] == "value_error" else {})}
+                for item in errors[:10]
+            ]
             raise ValueError(f"{role} did not return valid {schema.__name__} JSON") from None
         except (KeyError, IndexError, AttributeError, TypeError, ValueError):
             raise ValueError(f"{role} did not return valid {schema.__name__} JSON") from None

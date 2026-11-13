@@ -543,6 +543,7 @@ class Pipeline:
                 'integration_mode':self.config.integration_mode,
                 'camera_pipeline':self.config.camera_pipeline,
                 **({'workflow':self.config.workflow} if self.config.workflow!='legacy' else {}),
+                **({'review_profile':'photographer'} if getattr(self.config,'review_profile','legacy')=='photographer' else {}),
                 **{k:'auto' for k in PHOTO_CONTROLS},**effect_parameters(self.config.effects)}
 
     @staticmethod
@@ -744,7 +745,9 @@ class Pipeline:
                 observation=None
                 if structured:
                     from .structured import inspect_frame
-                    observation,review=await inspect_frame(self.vision,asset,comp,draft['image_hash'])
+                    profile=getattr(self.config,'review_profile','legacy')
+                    observation,review=await inspect_frame(self.vision,asset,comp,draft['image_hash'],
+                                                           profile=profile)
                 else:
                     review=await inspect(self.vision,REVIEW_PROMPT,asset,comp,params,allowed,folder_render,
                         compact=self.config.review_format=='compact',geometry_board=geometry_board,
@@ -752,8 +755,13 @@ class Pipeline:
                                              'uncertainties':c.get('uncertainties',[])} for c in choices])
                 previous_candidate=cid
                 entry={**draft,'review':review.model_dump()}
-                if observation is not None:entry['visual_evidence']=observation.model_dump(mode='json')
-                if self.config.contact_mode=='strict':
+                if observation is not None:
+                    if profile=='photographer':
+                        entry['photography_diagnosis']=observation.model_dump(mode='json')
+                        entry['visual_evidence']=observation.legacy().model_dump(mode='json')
+                    else:
+                        entry['visual_evidence']=observation.model_dump(mode='json')
+                if self.config.contact_mode=='strict' or (structured and profile=='photographer'):
                     from .strict_contact import visual_veto
                     veto=visual_veto(review);entry['deliverable']=not veto
                     entry['physical_visual_veto']=veto
@@ -775,6 +783,13 @@ class Pipeline:
                     reason='no_deliverable_candidate_after_physical_veto'
                     if best is None:result.update(status='failed',evidence_status='fail')
                     break
+                if (structured and profile=='photographer' and any(d.visibility=='visible' and d.code in
+                        ('floating','penetration','occlusion','upright','scale','camera') for d in review.defects)):
+                    alternative=next((c['id'] for c in choices if c['id']!=cid and c['id'] not in ready),None)
+                    if alternative and iteration<self.config.max_iterations:
+                        result['actions'].append({'iteration':iteration,'decisions':[{
+                            'disposition':'geometry_recheck','stage':'placement','candidate':alternative}]})
+                        params=self.default_params(alternative);iteration+=1;continue
                 rank=version_rank(comp['checks'],review)
                 if isinstance(review,(FusionReview,EffectsReview)):
                     trace_rank={'none':2,'uncertain':1,'visible':0}[review.trace]
@@ -822,7 +837,10 @@ class Pipeline:
                                            dust_in_shader=self.render_style in ('scene','native'),suggestions=suggestions)
                     result['actions'].append({'iteration':iteration,'decisions':actions})
                 if updated is None:
-                    reason='repeated_parameters' if actions and all(a['disposition']=='repeated_parameters' for a in actions) else 'no_effective_action'
+                    if structured and profile=='photographer' and plan:
+                        reason=plan['reason']
+                    else:
+                        reason='repeated_parameters' if actions and all(a['disposition']=='repeated_parameters' for a in actions) else 'no_effective_action'
                     break
                 params=updated;iteration+=1
             if best:

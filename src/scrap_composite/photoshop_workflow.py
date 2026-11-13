@@ -5,7 +5,14 @@ from pathlib import Path
 import shutil
 import time
 
+import numpy as np
+from PIL import Image
+
 from .photoshop import LIMITS, file_hash, load_request
+from .photography_agent import run_photography
+from .photography_controls import photoshop_changes
+from .photography_measurements import measurements
+from .photography_protocol import PhotoContext
 from .workflow import observe, plan_execution
 
 CAPABILITIES = {
@@ -61,10 +68,39 @@ def visual_pass(report):
             and min(scores.material, scores.structure) >= 3 and not severe(report))
 
 
-async def refine_photoshop(composition, output, adapter, client, *, max_iterations=2, recommendation=None):
+def photo_context(source, image, checks):
+    if file_hash(source.object_rgba) != source.source_hashes['object_rgba']:
+        raise ValueError('composition object layer changed')
+    if file_hash(image['path']) != image['sha256']:
+        raise ValueError('review image changed')
+    evidence = source.object_rgba.with_name('alpha-evidence.npz')
+    if file_hash(evidence) != source.geometry_signature:
+        raise ValueError('composition alpha evidence changed')
+    with np.load(evidence, allow_pickle=False) as alpha_evidence:
+        optical = alpha_evidence['optical']
+        left, top, right, bottom = map(int, alpha_evidence['bounds'])
+    with Image.open(image['path']) as exported:
+        width, height = exported.size
+        if not (0 <= left < right <= width and 0 <= top < bottom <= height):
+            raise ValueError('review alpha bounds are outside the canvas')
+        frame = np.asarray(exported.convert('RGB').crop((left, top, right, bottom)))
+    y, x = np.nonzero(optical > .01)
+    if frame.shape[:2] != optical.shape or not len(x):
+        raise ValueError('review image and object layer do not share a valid canvas')
+    region = (float((x.min()+left)/width), float((y.min()+top)/height),
+              float((x.max()+left+1)/width), float((y.max()+top+1)/height))
+    return PhotoContext(target_region=region, images=['frame'],
+                        checks={key: item['status'] for key, item in checks.items()},
+                        measurements=measurements({}, object_pixels=frame[optical > .95]))
+
+
+async def refine_photoshop(composition, output, adapter, client, *, max_iterations=2, recommendation=None,
+                           review_profile='legacy'):
     """Review actual outputs and retain the best geometrically eligible PSD/PNG pair."""
     if type(max_iterations) is not int or not 0 <= max_iterations <= 10:
         raise ValueError('max_iterations_outside_0_to_10')
+    if review_profile not in ('legacy', 'photographer'):
+        raise ValueError('unknown photography review profile')
     source, checks = load_composition(composition)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
@@ -72,7 +108,7 @@ async def refine_photoshop(composition, output, adapter, client, *, max_iteratio
     if ledger.exists():
         raise ValueError('photoshop_workflow_output_already_used')
     result = {'version': 'photoshop-review-v1', 'status': 'running', 'trials': [],
-              'composition': str(composition), 'program_checks': checks}
+              'composition': str(composition), 'program_checks': checks, 'review_profile': review_profile}
 
     def persist():
         staging = ledger.with_suffix('.tmp')
@@ -102,10 +138,17 @@ async def refine_photoshop(composition, output, adapter, client, *, max_iteratio
                     result['reason'] = 'repeated_image'
                     break
                 visited_images.add(image['sha256'])
-                report = await observe(client, image['sha256'], [image['path']], {
-                    'program_checks': {key: item['status'] for key, item in checks.items()},
-                    'photoshop_parameters': current,
-                }, target=source.object_id, prompt='Assess lighting, color, contrast, support and recognizable structure.')
+                if review_profile == 'photographer':
+                    context = photo_context(source, image, checks)
+                    decision = await run_photography(client, context, image['sha256'], images=[image['path']],
+                                                     target=source.object_id)
+                    record['photography_diagnosis'] = decision.report.model_dump(mode='json')
+                    report = decision.report.legacy()
+                else:
+                    report = await observe(client, image['sha256'], [image['path']], {
+                        'program_checks': {key: item['status'] for key, item in checks.items()},
+                        'photoshop_parameters': current,
+                    }, target=source.object_id, prompt='Assess lighting, color, contrast, support and recognizable structure.')
                 record['visual_evidence'] = report.model_dump(mode='json')
                 if geometry_defects(report):
                     result['reason'] = 'geometry_recheck_required'
@@ -126,17 +169,26 @@ async def refine_photoshop(composition, output, adapter, client, *, max_iteratio
                 if iteration == max_iterations:
                     result['reason'] = 'iterations_exhausted'
                     break
-                if not any(f.visibility == 'visible' and f.direction != 'unknown'
-                           and any(f.code in cap['causes'] for cap in CAPABILITIES.values())
-                           for f in report.findings):
-                    result['reason'] = 'no_supported_action_evidence'
-                    break
-                plan, updates = await plan_execution(client, report, current, CAPABILITIES,
-                    {'photoshop_checks': exported['validation'], 'current_scores': report.scores.model_dump()},
-                    recommendation, target=source.object_id)
+                if review_profile == 'photographer':
+                    changes = [change for change in photoshop_changes(current, LIMITS)
+                               if tuple({**current, change.control: change.value}.items()) not in visited_params]
+                    decision = await run_photography(client, context, file_hash(image['path']), target=source.object_id,
+                        changes=changes, plan=True, report=decision.report, parameters=current)
+                    plan, updates = decision.plan, decision.updates
+                    if updates and file_hash(image['path']) != plan.image_sha256:
+                        raise ValueError('photography plan image changed before execution')
+                else:
+                    if not any(f.visibility == 'visible' and f.direction != 'unknown'
+                               and any(f.code in cap['causes'] for cap in CAPABILITIES.values())
+                               for f in report.findings):
+                        result['reason'] = 'no_supported_action_evidence'
+                        break
+                    plan, updates = await plan_execution(client, report, current, CAPABILITIES,
+                        {'photoshop_checks': exported['validation'], 'current_scores': report.scores.model_dump()},
+                        recommendation, target=source.object_id)
                 record['execution_plan'] = plan.model_dump(mode='json')
                 if not updates:
-                    result['reason'] = plan.status
+                    result['reason'] = plan.reason if review_profile == 'photographer' else plan.status
                     break
                 current = {**current, **updates}
             except (ValueError, OSError, RuntimeError) as error:

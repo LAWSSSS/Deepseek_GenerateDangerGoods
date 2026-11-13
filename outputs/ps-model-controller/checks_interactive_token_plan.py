@@ -95,6 +95,20 @@ class InteractiveTokenPlanTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(DUMMY_KEY, path.read_text(encoding='utf8'))
             self.assertNotIn('private server text', path.read_text(encoding='utf8'))
 
+    async def test_photographer_uses_shared_brief_and_binds_the_actual_frame(self):
+        def handler(request):
+            data = json.loads(request.content)
+            self.assertEqual(data['max_completion_tokens'], 1536)
+            self.assertEqual(data['enable_thinking'], False)
+            return httpx.Response(200, json=response({'trace':'none', 'findings':[], 'scores':dict.fromkeys(
+                ('support','occlusion','lighting','edge','texture','material','structure'), 4)}))
+
+        result = await self.invoke(handler, report_format='photographer')
+        self.assertEqual(result['new_api_requests'], 1)
+        self.assertEqual(result['diagnosis']['image_sha256'], tool.file_hash(self.image))
+        self.assertEqual(result['diagnosis']['version'], 'photo-brief-v1')
+        self.assertEqual(result['diagnosis']['context']['images'], ['frame'])
+
     async def test_503_gets_exactly_one_retry_and_both_attempts_are_accounted(self):
         sent = []
         def handler(request):

@@ -1,5 +1,6 @@
 """Local batch controls; subprocess receives paths, never credentials in argv."""
 import json
+from importlib.util import find_spec
 from pathlib import Path
 import secrets
 import subprocess
@@ -54,7 +55,8 @@ async def create(request):
             raw.setdefault('count',1)
             # Let the coherent preset supply its own defaults. An empty effects
             # object would instantiate legacy manual haze before schema validation.
-            if raw.get('integration_mode','legacy')!='coherent' and raw.get('workflow')!='evidence_v1':
+            if (raw.get('integration_mode','legacy')!='coherent' and raw.get('workflow')!='evidence_v1'
+                    and raw.get('review_profile')!='photographer'):
                 raw.setdefault('effects',{})
             raw.setdefault('max_iterations',2)
             if raw.get('offline') or ('effects' in raw and raw['effects'] is None):
@@ -75,6 +77,7 @@ async def create(request):
             'geometry_preset':config.geometry_preset,'vehicle_reference':config.vehicle_reference,
             'integration_mode':config.integration_mode,
             'workflow':config.workflow,
+            'review_profile':config.review_profile,
             'effective_modes':{'scale':config.scale_mode,'contact':config.contact_mode,'chroma':config.chroma_mode,
                                'integration':config.integration_mode},
             'effects':config.effects.model_dump() if config.effects else None,
@@ -93,6 +96,7 @@ async def status(request):
         result['geometry_preset']=config.geometry_preset
         result['integration_mode']=config.integration_mode
         result['workflow']=config.workflow
+        result['review_profile']=config.review_profile
         result['vehicle_reference']=config.vehicle_reference
         from .collision import VERSION as collision_version
         from .vehicle_scale import VERSION as scale_version
@@ -141,6 +145,7 @@ async def effect_options(request):
             {'value':'coherent','label':'局部受光与反射协同（小样）'}],
             'promoted_default':False,'dependency':'lighting_material_render_shadow_compose_review'},
         'workflows':['legacy','evidence_v1'],
+        'review_profiles':['legacy','photographer'] if find_spec('pydantic_graph') is not None else ['legacy'],
         'recommended':{'scale_mode':'physical_consistent','effects':{
             **EffectSettings().model_dump(),'fog_mode':'local_auto','weathering':'preserve_source',
             'shadow_mode':'matched_receiver','lighting':'local'}},
@@ -162,7 +167,13 @@ async def effect_options(request):
                  'atmosphere=off 同时关闭基础和追加薄雾','未指定 effects 的旧批次保持原行为']})
 
 
+async def photography_options(request):
+    from scrap_composite.photography_agent import interface
+    return JSONResponse({**interface(), 'available':find_spec('pydantic_graph') is not None})
+
+
 routes=[Route('/batch',page),Route('/api/batches',create,methods=['POST']),
+        Route('/api/photography/schema',photography_options),
         Route('/api/batches/effects',effect_options),Route('/api/batches/test',create,methods=['POST']),
         Route('/api/batches/{ident}',status),Route('/api/batches/{ident}/resume',resume,methods=['POST']),
         Route('/api/batches/{ident}/files/{path:path}',artifact)]
