@@ -1,7 +1,7 @@
 """Compare the generated PBR finish on one hydraulic trial and six frozen frames."""
 import argparse
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import html
 import os
 from pathlib import Path
@@ -17,9 +17,9 @@ from pydantic import Field
 
 from display_batch.ai import InvalidStructuredReply, ProviderUnavailable
 from display_batch.common import ROOT, atomic_json, file_hash, implementation_manifest, resolve, signature
-from display_batch.compose import compose, object_window
+from display_batch.compose import compose, object_window, warp
 from display_batch.costs import cumulative, label
-from display_batch.generated_material import finish_regions, load_pack
+from display_batch.generated_material import WEAR_VERSION, finish_regions, load_pack
 from display_batch.pipeline import Pipeline
 from display_batch.rendering import FINISH_PASS, render_dependencies, render_request
 from display_batch.schema import BatchConfig
@@ -64,14 +64,27 @@ class Case:
     shadow_reference: dict
     resolution: int
     seed: int
+    previous_image: str | None = None
+    previous_hash: str | None = None
+
+    @property
+    def comparison_image(self):
+        return self.previous_image or self.baseline
+
+    @property
+    def comparison_hash(self):
+        return self.previous_hash or self.baseline_hash
 
     def binding(self):
-        return {'key': self.key, 'asset_id': self.asset_id, 'group': self.group,
+        result = {'key': self.key, 'asset_id': self.asset_id, 'group': self.group,
                 'scene_key': self.scene_key, 'background': self.background,
                 'background_sha256': file_hash(self.background), 'baseline': self.baseline,
                 'baseline_sha256': self.baseline_hash, 'asset_sha256': file_hash(self.asset_record),
                 'candidate_signature': signature(self.candidate), 'params_signature': signature(self.params),
                 'resolution': self.resolution, 'seed': self.seed, 'shadow_reference': self.shadow_reference}
+        if self.previous_image:
+            result.update(previous_image=self.previous_image, previous_hash=self.previous_hash)
+        return result
 
 
 def frozen_cases(source, cache):
@@ -157,6 +170,28 @@ def material_diagnostic(folder, path):
     return {'path': str(path), 'red': 'oxidation and paint chips', 'green': 'scratches', 'blue': 'powder',
             'mean': values[core].mean(axis=0).tolist(),
             'p95': np.percentile(values[core], 95, axis=0).tolist()}
+
+
+def frame_detail(case, comp, meta, folder, visible_alpha):
+    """Measure the actual projection and exported texture away from the outline."""
+    bounds = comp['edit_bounds']
+    full = case.candidate['full_px']
+    offset = np.asarray(case.candidate['anchor_px']) - np.asarray(meta['anchor_uv']) * full
+    coverage = cv2.erode(np.uint8(visible_alpha > .95), np.ones((11, 11), np.uint8)) > 0
+    if not coverage.any():
+        return {'status': 'unknown', 'reason': 'insufficient_visible_core'}
+    projected = warp(finish_image(folder), full, offset, bounds, window=object_window(meta))
+
+    def measure(path):
+        with Image.open(path) as image:
+            y = np.float32(image.crop(bounds).convert('RGB')) @ np.float32([.2126, .7152, .0722])
+        detail = cv2.GaussianBlur(y, (0, 0), 1.) - cv2.GaussianBlur(y, (0, 0), 5.)
+        return {'median_luma': float(np.median(y[coverage])),
+                'detail_p75': float(np.percentile(np.abs(detail[coverage]), 75))}
+
+    return {'status': 'measured', 'core_pixels': int(coverage.sum()),
+            'projected_fraction_gt_0_03': (projected[coverage] > .03).mean(axis=0).tolist(),
+            'previous': measure(case.comparison_image), 'current': measure(comp['image'])}
 
 
 async def preview(pipe, case, asset, pack, out):
@@ -248,7 +283,7 @@ async def compare(pipe, case, result, asset, out):
     brief = getattr(pair, new_key)
     context, _ = frame_inputs(asset, comp)
     new_report = PhotoReport.bind(brief, result['image_hash'], 'object', context)
-    before_report = PhotoReport.bind(before, case.baseline_hash, 'object', context)
+    before_report = PhotoReport.bind(before, case.comparison_hash, 'object', context)
     checked = _review(new_report.legacy(), comp['checks'])
     direction = 'tie' if pair.preferred == 'tie' else 'new' if pair.preferred == new_key else 'old'
     vetoes = visual_veto(checked)
@@ -273,7 +308,7 @@ def write_report(out, cases, hashes, pack, preview_report):
     for case in cases:
         file = out / 'cases' / case.key / 'result.json'
         rows.append(read(file) if file.exists() else {'key': case.key, 'asset_id': case.asset_id,
-            'group': case.group, 'baseline': case.baseline, 'status': 'not_run', 'image': None})
+            'group': case.group, 'baseline': case.comparison_image, 'status': 'not_run', 'image': None})
     sample = [row for row in rows if row['key'] != PILOT]
     passed = [row for row in sample if row.get('review', {}).get('photography_pass') and row['status'] == 'review']
     unchanged = model_hashes() == hashes
@@ -289,13 +324,14 @@ def write_report(out, cases, hashes, pack, preview_report):
               'source_models_unchanged': unchanged, 'source_model_count': len(hashes),
               'cost_total': usage, 'runs': runs, 'pilot_preview': preview_report,
               'pack': pack['manifest'], 'pack_signature': pack['signature'],
-              'imagegen': {'builtin_calls': len(pack['maps']), 'estimated_cost': None}, 'jobs': rows}
+              'imagegen': {'builtin_calls': 0 if pack['version'] == WEAR_VERSION else len(pack['maps']),
+                           'estimated_cost': None}, 'jobs': rows}
     atomic_json(out / 'validation.json', report)
     cards = []
     for row in rows:
         frames = []
         new_title = '新材质 · 待审' if row['status'] == 'review' else '新材质 · 诊断'
-        for title, path in (('原材质', row['baseline']), (new_title, row.get('image'))):
+        for title, path in (('对照版', row['baseline']), (new_title, row.get('image'))):
             if path:
                 url = html.escape(relative(path, out), quote=True)
                 frames.append(f'<figure><figcaption>{title}</figcaption><a href="{url}">'
@@ -350,7 +386,7 @@ async def run_case(pipe, case, pack, hashes, out):
         if (previous.get('image') and file_hash(previous['image']) == previous['image_hash']
                 and previous.get('invariants', {}).get('status') == 'pass'):
             return previous
-    result = {'key': case.key, 'asset_id': case.asset_id, 'group': case.group, 'baseline': case.baseline,
+    result = {'key': case.key, 'asset_id': case.asset_id, 'group': case.group, 'baseline': case.comparison_image,
               'status': 'failed', 'image': None}
     stage = 'load_frozen_scene'
     try:
@@ -388,6 +424,7 @@ async def run_case(pipe, case, pack, hashes, out):
         invariants['status'] = 'pass' if all(checks.values()) and raw['status'] == 'pass' else 'fail'
         failures = [k for k, v in comp['checks'].items() if v['status'] == 'fail']
         diagnostic = material_diagnostic(folder, out / 'material.png')
+        diagnostic['final_frame'] = frame_detail(case, comp, meta, folder, layers['alpha'])
         checks['surface_diagnostic_nonzero'] = max(diagnostic['p95']) > .01
         if not checks['surface_diagnostic_nonzero']:
             invariants['status'] = 'fail'
@@ -445,6 +482,17 @@ async def run(args):
     sample, hashes = frozen_cases(source, cache)
     pilot = hydraulic_case(cache)
     cases = [pilot, *sample]
+    if args.compare_to:
+        previous = resolve(args.compare_to)
+        previous_cases = []
+        for case in cases:
+            row = read(previous / 'cases' / case.key / 'result.json')
+            if (row['invariants']['fixed_geometry_signature'] != signature(case.candidate)
+                    or row['invariants']['status'] != 'pass' or file_hash(row['image']) != row['image_hash']):
+                raise ValueError(f'comparison image or geometry mismatch: {case.key}')
+            previous_cases.append(replace(case, previous_image=row['image'], previous_hash=row['image_hash']))
+        cases = previous_cases
+        pilot, *sample = cases
     if model_hashes() != hashes:
         raise ValueError('44-model source baseline differs')
     binding = {'version': VERSION, 'pack': pack['signature'], 'models': hashes,
@@ -483,7 +531,7 @@ async def run(args):
                 await run_case(pipe, case, pack, hashes, out / 'cases' / case.key)
         if args.stage == 'review' or (args.stage == 'all' and not args.offline):
             pipe.vision.offline = args.offline
-            for case in sample:
+            for case in cases if args.compare_to else sample:
                 await review_case(pipe, case, out / 'cases' / case.key)
     finally:
         await pipe.vision.close()
@@ -503,6 +551,7 @@ def main():
     parser.add_argument('--source', default=SOURCE)
     parser.add_argument('--out', default=OUTPUT)
     parser.add_argument('--pack', default=PACK)
+    parser.add_argument('--compare-to', help='prior fixed-geometry trial used as the visual baseline')
     parser.add_argument('--offline', action='store_true')
     asyncio.run(run(parser.parse_args()))
 

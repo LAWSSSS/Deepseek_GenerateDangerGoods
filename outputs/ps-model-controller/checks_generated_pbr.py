@@ -4,13 +4,14 @@ import subprocess
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
 
 from display_batch.common import BLENDER, HERE, atomic_json, file_hash
 from display_batch.effects import parameters
-from display_batch.generated_material import CHANNELS, VERSION, derive_maps, finish_regions, load_pack, map_statistics
+from display_batch.generated_material import CHANNELS, VERSION, WEAR_VERSION, derive_maps, finish_regions, load_pack, map_statistics
 from display_batch.rendering import RenderCache, part_keys
 from display_batch.schema import Action, EffectSettings, apply_actions
 
@@ -25,6 +26,19 @@ class GeneratedFinishTests(unittest.TestCase):
             stats = map_statistics(tile)
             self.assertLess(max(stats['seam_mean'].values()), .045)
             self.assertLess(stats['half_tile_correlation'], .48)
+
+    def test_wear_map_retains_chip_mask_and_widens_existing_scratches(self):
+        source = np.full((512, 512, 3), 145, np.uint8)
+        marks = np.zeros(source.shape[:2], np.float32)
+        marks[240:242, 235:277] = .8
+        with patch('display_batch.generated_material.narrow_marks', return_value=marks):
+            old = derive_maps(source, 'paint')
+            new = derive_maps(source, 'paint', WEAR_VERSION)
+        np.testing.assert_array_equal(new[..., 0], old[..., 0])
+        np.testing.assert_array_equal(new[..., 2], old[..., 2])
+        self.assertGreater(np.count_nonzero(new[..., 1] > 10), np.count_nonzero(old[..., 1] > 10))
+        self.assertLess(np.count_nonzero(new[..., 1] > 10) / (512 * 512), .02)
+        self.assertLess(max(map_statistics(new)['seam_mean'].values()), .045)
 
     def test_pack_integrity_and_atlas_regions(self):
         with TemporaryDirectory() as temp:
@@ -99,6 +113,7 @@ env = {{'dust_color': [.16, .14, .13]}}
 maps = {{kind: {{'path': {str(texture)!r}}} for kind in ('oxide', 'paint', 'dust')}}
 for name, weights, strength, expected in (
     ('steel', [1, 0, 0, 0], .5, True), ('paint', [0, 1, 0, 0], .5, True),
+    ('paint weathered', [0, 1, 0, 0], .5, True),
     ('zero', [1, 0, 0, 0], 0., True), ('chrome rod', [1, 0, 0, 0], .5, False),
     ('label', [1, 0, 0, 0], .5, False), ('polymer', [0, 0, 0, 1], .5, False),
     ('translucent', [1, 0, 0, 0], .5, False),
@@ -113,6 +128,8 @@ for name, weights, strength, expected in (
         source.inputs['Alpha'].default_value = .5
     alpha = source.inputs['Alpha'].default_value
     profile = {{'maps': maps, 'regions': {{'materials': {{name: {{'coverage': weights, 'constant': weights}}}}}}}}
+    if name == 'paint weathered':
+        profile['version'] = 'generated-pbr-v2'
     assert finish_surface(material, source, profile, env, strength) == expected
     assert source.inputs['Alpha'].default_value == alpha and not source.inputs['Alpha'].is_linked
     layer = tree.nodes.get('Generated dielectric dust')
@@ -126,6 +143,21 @@ for name, weights, strength, expected in (
         scale = shift.inputs[0].links[0].from_node
         assert scale.operation == 'SCALE' and scale.inputs[0].links[0].from_socket.name == 'Object'
         assert (layer is not None) == (strength > 0)
+        assert ('Generated paint weathering' in tree.nodes) == (name == 'paint weathered')
+        if name == 'paint weathered':
+            def texture_sources(socket):
+                sources = set()
+                if socket.is_linked:
+                    node = socket.links[0].from_node
+                    if node.type == 'TEX_IMAGE':
+                        sources.add(node.name)
+                    else:
+                        for input_socket in node.inputs:
+                            sources.update(texture_sources(input_socket))
+                return sources
+            assert 'Generated paint weathering' in texture_sources(source.inputs['Base Color'])
+            assert 'Generated paint weathering' in texture_sources(source.inputs['Roughness'])
+            assert 'Generated paint weathering' not in texture_sources(source.inputs['Metallic'])
         if layer:
             assert layer.inputs['Metallic'].default_value == 0.
             coverage = tree.nodes['Generated dust coverage']

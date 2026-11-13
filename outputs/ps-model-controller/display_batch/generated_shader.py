@@ -92,25 +92,41 @@ def finish_surface(material, shader, finish, environment, strength):
         metal = math_node(tree, 'ADD', mul(tree, metal, ramp(tree, rough, .17, 7.)), third, clamp=True)
         nonferrous = 0.
     known = math_node(tree, 'ADD', math_node(tree, 'ADD', metal, paint, clamp=True), nonferrous, clamp=True)
+    layered_wear = finish.get('version') == 'generated-pbr-v2'
     coords = coordinates.outputs['Object']  # Canonical mesh is scaled uniformly by longest axis.
     oxidation, pits, fine = tile(tree, coords, finish['maps']['oxide'], 'Generated oxidation', 1.9, (.17, .39, .72))
     chips, lines, chip_grain = tile(tree, coords, finish['maps']['paint'], 'Generated chipped paint', 2.4, (.57, .12, .29))
-    chip_area = mul(tree, paint, ramp(tree, chips, .14, 1.22))
+    chip_area = mul(tree, paint, ramp(tree, chips, .06 if layered_wear else .14, 1.35 if layered_wear else 1.22))
     rust_area = mul(tree, metal, ramp(tree, oxidation, .08, 1.08))
     scratches = mul(tree, known, lines)
     worn = math_node(tree, 'ADD', rust_area, chip_area, clamp=True)
+    paint_wear = 0.
+    if layered_wear:
+        # Patchy faded or stained paint remains dielectric until it chips.
+        # Give it a separate projection and scale from the exposed steel.
+        mottling, _, _ = tile(tree, coords, finish['maps']['oxide'], 'Generated paint weathering',
+                             2.8, (.73, .17, .51))
+        paint_wear = mul(tree, paint, ramp(tree, mottling, .15, 1.55))
+        worn = math_node(tree, 'ADD', worn, paint_wear, clamp=True)
     base = original(shader.inputs['Base Color'])
     base = mix(tree, mul(tree, known, .58), base, add(tree, .89, mul(tree, fine, .21)), blend='MULTIPLY')
     base = mix(tree, mul(tree, nonferrous, oxidation), base, .67, blend='MULTIPLY')
     oxide_tint = mix(tree, fine, (.065, .052, .042, 1.), (.16, .125, .096, 1.))
     chip_tint = mix(tree, oxidation, (.24, .224, .20, 1.), oxide_tint)
     base = mix(tree, mul(tree, rust_area, .78), base, oxide_tint)
+    if layered_wear:
+        base = mix(tree, mul(tree, paint_wear, .58), base, oxide_tint)
     base = mix(tree, mul(tree, chip_area, .79), base, chip_tint)
     base = mix(tree, mul(tree, scratches, .32), base, .55, blend='MULTIPLY')
     assign(tree, base, shader.inputs['Base Color'])
     rough_area = math_node(tree, 'ADD', mul(tree, nonferrous, .64), mul(tree, metal, .31), clamp=True)
     rough = mix(tree, rough_area, rough, math_node(tree, 'MAXIMUM', rough, add(tree, .50, mul(tree, pits, .20))))
     rough = mix(tree, worn, rough, math_node(tree, 'MAXIMUM', rough, add(tree, .61, mul(tree, fine, .25))))
+    if layered_wear:
+        # Break the long highlight over scuffed aluminum without turning it
+        # into iron oxide or changing the untouched areas' metalness.
+        abrasion = mul(tree, nonferrous, ramp(tree, oxidation, .18, 1.35))
+        rough = mix(tree, mul(tree, abrasion, .5), rough, math_node(tree, 'MAXIMUM', rough, .68))
     assign(tree, mix(tree, mul(tree, scratches, .35), rough, .72), shader.inputs['Roughness'])
     metalness = original(shader.inputs['Metallic'])
     metalness = mix(tree, mul(tree, rust_area, .80), metalness, .06)
@@ -138,6 +154,9 @@ def finish_surface(material, shader, finish, environment, strength):
         deposit, grains, powder_detail = tile(tree, coords, finish['maps']['dust'], 'Generated dust deposits',
                                                3.1, (.83, .24, .48))
         deposition = math_node(tree, 'ADD', add(tree, .22, mul(tree, up, .52)), mul(tree, cavity, .50), clamp=True)
+        if layered_wear:
+            deposition = math_node(tree, 'ADD', add(tree, .32, mul(tree, up, .55)), mul(tree, cavity, .43), clamp=True)
+            deposit = ramp(tree, deposit, .10, 1.5)
         distribution = mul(tree, add(tree, .04, mul(tree, deposit, .96)),
                            math_node(tree, 'SUBTRACT', 1., mul(tree, edge, .64)))
         dust_region = math_node(tree, 'ADD', add(tree, metal, nonferrous), mul(tree, paint, .5), clamp=True)

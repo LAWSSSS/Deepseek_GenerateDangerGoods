@@ -13,6 +13,7 @@ from .surface_maps import prepare_uv_masks, save_image
 
 
 VERSION = 'generated-pbr-v1'
+WEAR_VERSION = 'generated-pbr-v2'
 CHANNELS = {
     'oxide': ('oxidation', 'pitting', 'fine_relief'),
     'paint': ('chips', 'scratches', 'fine_relief'),
@@ -56,7 +57,7 @@ def narrow_marks(residual):
     return marks
 
 
-def derive_maps(rgb, kind):
+def derive_maps(rgb, kind, version=VERSION):
     rgb = smooth_tile(np.float32(rgb) / 255.)
     y = rgb @ LUMA
     n = y.shape[0]
@@ -75,6 +76,11 @@ def derive_maps(rgb, kind):
         # has few elongated features.
         peak = max(.12, float(np.quantile(marks, .995)))
         scratch = np.clip((marks - .04) / peak, 0., 1.)
+        if version == WEAR_VERSION:
+            # Widen existing grooves by a few texels so downsampling retains
+            # an abrasion mark without painting in additional scratches.
+            halo = cv2.dilate(scratch, np.ones((5, 5), np.uint8))
+            scratch = np.maximum(scratch, .72 * cv2.GaussianBlur(halo, (0, 0), 1.2))
         channels = (chips, scratch, levels(fine, .035, .965))
     else:
         coverage = levels(medium + .30 * np.maximum(fine, 0.), .26, .98)
@@ -115,7 +121,9 @@ def atlas_layouts(value):
     return value
 
 
-def build_pack(folder, sources, prompts, layouts):
+def build_pack(folder, sources, prompts, layouts, *, version=VERSION):
+    if version not in (VERSION, WEAR_VERSION):
+        raise ValueError('unsupported generated_pbr manifest version')
     folder = Path(folder).resolve()
     manifest = folder / 'pack.json'
     if manifest.exists():
@@ -136,7 +144,7 @@ def build_pack(folder, sources, prompts, layouts):
             rgb = np.asarray(source.convert('RGB'))
         original = folder / f'{kind}-imagegen.png'
         shutil.copy2(path, original)
-        packed = derive_maps(rgb, kind)
+        packed = derive_maps(rgb, kind, version)
         stats = map_statistics(packed)
         if max(stats['seam_mean'].values()) > .045 or stats['half_tile_correlation'] > .48:
             raise ValueError(f'{kind} has a visible seam or repeated large-scale pattern')
@@ -146,14 +154,15 @@ def build_pack(folder, sources, prompts, layouts):
                       'color_space': 'Non-Color', 'channels': list(channels), 'statistics': stats,
                       'source': {'path': original.name, 'sha256': file_hash(original),
                                  'size': list(size), 'generator': 'ImageGen built-in', 'prompt': prompt}}
-    atomic_json(manifest, {'version': VERSION, 'maps': maps, 'atlases': layout})
+    atomic_json(manifest, {'version': version, 'maps': maps, 'atlases': layout})
     return manifest
 
 
 def load_pack(manifest):
     path = Path(manifest).resolve()
     raw = json.loads(path.read_text(encoding='utf8'))
-    if raw.get('version') != VERSION or set(raw.get('maps', {})) != set(CHANNELS):
+    version = raw.get('version')
+    if version not in (VERSION, WEAR_VERSION) or set(raw.get('maps', {})) != set(CHANNELS):
         raise ValueError('unsupported generated_pbr manifest')
     layouts = atlas_layouts(raw.get('atlases', {}))
     maps = {}
@@ -170,8 +179,8 @@ def load_pack(manifest):
             if tile.mode != 'RGB' or list(tile.size) != entry.get('size'):
                 raise ValueError(f'{kind} map dimensions or channels changed')
         maps[kind] = {'path': str(image), 'sha256': digest}
-    return {'version': VERSION, 'manifest': str(path), 'maps': maps, 'atlases': layouts,
-            'signature': signature(VERSION, {kind: row['sha256'] for kind, row in maps.items()}, layouts)}
+    return {'version': version, 'manifest': str(path), 'maps': maps, 'atlases': layouts,
+            'signature': signature(version, {kind: row['sha256'] for kind, row in maps.items()}, layouts)}
 
 
 def finish_regions(asset, pack, cache):
