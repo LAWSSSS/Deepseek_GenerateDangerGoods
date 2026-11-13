@@ -17,6 +17,7 @@ from .schema import LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS
 
 REFERENCE_RENDER_VERSION = 'pbr-linear-patina-v9'
 RENDER_VERSION = 'render-parts-v2-material-layer'
+FINISH_PASS = 'generated-finish0001.exr'
 PART_FILES = {
     'object': ('object.png', 'combined0001.exr', 'diffuse0001.exr', 'specular0001.exr',
                'depth0001.exr', 'metallic0001.exr', 'upward0001.exr'),
@@ -78,7 +79,13 @@ def render_dependencies():
     return signature('blender-4.5.3',{name:file_hash(HERE/name) for name in files})
 
 
-def part_keys(request, device, dependencies):
+@lru_cache(maxsize=1)
+def finish_dependencies():
+    return signature(*(file_hash(HERE / 'display_batch' / name)
+                       for name in ('generated_material.py', 'generated_shader.py', 'surface_maps.py')))
+
+
+def part_keys(request, device, dependencies, *, include_detail=True):
     windows=request['windows']
     fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe','local_irradiance','integration_mode')
     environment=request['environment']
@@ -86,7 +93,8 @@ def part_keys(request, device, dependencies):
     light['calibrated']=bool(environment.get('calibration'))
     shared=(RENDER_VERSION,dependencies,device,request['appearance'],request['camera'],
             request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'],request.get('integration_mode','legacy'))
-    shared=(*shared,request.get('render_detail','standard'))
+    if include_detail:
+        shared=(*shared,request.get('render_detail','standard'))
     if request.get('contact_band'):shared=(*shared,request['contact_band'])
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
              request['dust_gain'],request['dust_control'],request.get('surface_dust',0.),request['material_classes'],
@@ -101,6 +109,8 @@ def part_keys(request, device, dependencies):
         surface=(*surface,request['matte_partitions']['signature'])
     if request.get('matte_profile'):
         surface=(*surface,request['matte_profile'])
+    if finish := request.get('generated_finish'):
+        surface=(*surface, finish['signature'], finish['regions']['signature'], finish_dependencies())
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),
@@ -117,12 +127,13 @@ class RenderCache:
         self.timings=Counter()
 
     @staticmethod
-    def ready(folder, part):
+    def ready(folder, part, *, finish=False):
         marker=folder/'result.json'
         if not marker.is_file():return None,'no_entry'
         try:
             info=json.loads(marker.read_text(encoding='utf8'))
-            if all((Path(info['path'])/name).stat().st_size>0 for name in PART_FILES[part]):
+            files = (*PART_FILES[part], FINISH_PASS) if finish and part == 'object' else PART_FILES[part]
+            if all((Path(info['path'])/name).stat().st_size>0 for name in files):
                 return info,None
         except (OSError,ValueError,KeyError,TypeError):
             pass
@@ -130,7 +141,8 @@ class RenderCache:
 
     async def get(self, asset, candidate, params, environment, size, resolution, *,
                   appearance='scene', full_frame=False, surface_scans=None, scanned_hdri=None,
-                  matte_partitions=None, object_only=False, matte_profile=None):
+                  matte_partitions=None, object_only=False, matte_profile=None, generated_finish=None,
+                  shadow_reference=None):
         if not candidate.get('camera'):
             raise ValueError('cropped_render_requires_fixed_camera')
         request=render_request(asset,candidate,params,environment)
@@ -146,21 +158,43 @@ class RenderCache:
             request['matte_partitions']=matte_partitions
         if matte_profile is not None:
             request['matte_profile']=matte_profile
+        if generated_finish is not None:
+            request['generated_finish'] = generated_finish
         keys=part_keys(request,self.worker.device,render_dependencies())
+        archived_receiver = None if object_only else self.archived_receiver(request, shadow_reference)
         if object_only:
             keys={'object':keys['object']}
         queued=time.monotonic()
         async with self.lock:
             timings={'render_cache_wait_seconds':time.monotonic()-queued}
-            return await self._get(request,keys,timings,full_frame)
+            return await self._get(request,keys,timings,full_frame,archived_receiver)
 
-    async def _get(self,request,keys,timings,full_frame):
+    def archived_receiver(self, request, reference):
+        """Replay only the receiver render already keyed by identical geometry and light."""
+        if reference is None:
+            return None
+        dependencies = reference['dependencies']
+        include_detail = not reference.get('standard_profile_without_detail_key')
+        if not include_detail and request.get('render_detail', 'standard') != 'standard':
+            raise ValueError('frozen_receiver_sample_profile_changed')
+        old_key = part_keys(request, self.worker.device, dependencies, include_detail=include_detail)['without_shadow']
+        if old_key != reference['signature']:
+            raise ValueError('frozen_receiver_geometry_or_light_changed')
+        ready, _ = self.ready(self.root / 'without_shadow' / old_key, 'without_shadow')
+        if not ready:
+            raise ValueError('frozen_receiver_reference_missing')
+        return ready
+
+    async def _get(self,request,keys,timings,full_frame,shadow_reference=None):
         windows=request['windows']
         entries={};cache={};missing={};folders={};imports=0;worker_detail={}
         for part,key in keys.items():
             folder=self.root/part/key
             folders[part]=folder
-            ready,reason=self.ready(folder,part)
+            ready,reason=self.ready(folder,part,finish=bool(request.get('generated_finish')))
+            if part == 'without_shadow' and not ready and shadow_reference is not None:
+                ready,reason=shadow_reference,None
+                atomic_json(folder/'result.json', ready)
             cache[part]={'signature':key,'hit':bool(ready),'miss_reason':reason}
             if ready:
                 entries[part]=ready
@@ -177,7 +211,8 @@ class RenderCache:
             self.totals['asset_imports']+=imports
             for part,path in missing.items():
                 window=windows['object' if part=='object' else 'shadow']['rect']
-                if not all((Path(path)/name).is_file() for name in PART_FILES[part]):
+                files = (*PART_FILES[part], FINISH_PASS) if part == 'object' and request.get('generated_finish') else PART_FILES[part]
+                if not all((Path(path)/name).is_file() for name in files):
                     raise ValueError('render_part_missing_files: '+part)
                 if part=='object':
                     with Image.open(Path(path)/'object.png') as image:
@@ -191,6 +226,8 @@ class RenderCache:
                     info['scanned_materials']=response['scanned_materials']
                 if part=='object' and request.get('matte_partitions'):
                     info['matte_materials']=response['matte_materials']
+                if part == 'object' and request.get('generated_finish'):
+                    info['generated_finish'] = response['generated_finish']
                 if part=='with_shadow' and request.get('scanned_hdri'):
                     info.update(shadow_basis=response['shadow_basis'],
                                 shadow_catcher_fallback=response['shadow_catcher_fallback'])
@@ -231,6 +268,8 @@ class RenderCache:
             meta['matte_materials']=obj.get('matte_materials',[])
         if request.get('matte_profile'):
             meta['matte_profile']=request['matte_profile']
+        if request.get('generated_finish'):
+            meta['generated_finish'] = obj['generated_finish']
         if request.get('scanned_hdri') and 'with_shadow' in entries:
             meta.update({k:entries['with_shadow'].get(k) for k in ('shadow_basis','shadow_catcher_fallback')})
         return Path(obj['path']),meta,not missing

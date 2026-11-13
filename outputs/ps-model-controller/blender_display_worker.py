@@ -17,6 +17,7 @@ from display_batch.geometry import camera_for, contact_geometry, horizontal_angl
 from display_batch.common import atomic_json
 from display_batch.materials import material_kind, SURFACE_DUST
 from display_batch.scanned_shader import matte_dust_surface, overcast_pixels, scanned_surface
+from display_batch.generated_shader import finish_surface
 
 BASE = None
 BASE_PATH = None
@@ -543,7 +544,7 @@ def fine_render_mesh(obj,request):
     modifier.show_render=True
 
 
-def pass_outputs(scene, folder):
+def pass_outputs(scene, folder, generated_finish=False):
     layer=scene.view_layers[0]
     layer.use_pass_diffuse_direct=True;layer.use_pass_diffuse_indirect=True;layer.use_pass_diffuse_color=True
     layer.use_pass_glossy_direct=True;layer.use_pass_glossy_indirect=True;layer.use_pass_glossy_color=True
@@ -551,11 +552,16 @@ def pass_outputs(scene, folder):
     source=tree.nodes.new('CompositorNodeRLayers')
     composite=tree.nodes.new('CompositorNodeComposite');tree.links.new(source.outputs['Image'],composite.inputs[0])
     layer.use_pass_z=True
-    for label,socket in [('combined','Image'),('depth','Depth'),('metallic','metallic'),('upward','upward')]:
-        if label in ('metallic','upward') and not layer.aovs.get(label):
-            aov=layer.aovs.add();aov.name=label;aov.type='VALUE'
+    passes = [('combined','Image'),('depth','Depth'),('metallic','metallic'),('upward','upward')]
+    aovs = {'metallic': 'VALUE', 'upward': 'VALUE'}
+    if generated_finish:
+        passes.append(('generated-finish', 'generated_finish'))
+        aovs['generated_finish'] = 'COLOR'
+    for name, kind in aovs.items():
+        if not layer.aovs.get(name):
+            aov=layer.aovs.add();aov.name=name;aov.type=kind
     bpy.context.view_layer.update()
-    for label,socket in [('combined','Image'),('depth','Depth'),('metallic','metallic'),('upward','upward')]:
+    for label,socket in passes:
         node=tree.nodes.new('CompositorNodeOutputFile');node.base_path=str(folder)
         node.format.file_format='OPEN_EXR';node.format.color_depth='32' if label=='depth' else '16'
         node.file_slots[0].path=label;tree.links.new(source.outputs[socket],node.inputs[0])
@@ -582,6 +588,7 @@ def shadow_output(scene,folder,name):
 def configure_materials(obj,request,reference=True):
     scans=request.get('surface_scans')
     matte=request.get('matte_partitions')
+    finish=request.get('generated_finish')
     adapted=set()
     for material in obj.data.materials:
         if not material or not material.use_nodes:continue
@@ -597,6 +604,11 @@ def configure_materials(obj,request,reference=True):
                     dot=tree.nodes.new('ShaderNodeVectorMath');dot.operation='DOT_PRODUCT';dot.inputs[1].default_value=(0,0,1)
                     tree.links.new(geometry.outputs['Normal'],dot.inputs[0])
                     upward=tree.nodes.new('ShaderNodeOutputAOV');upward.aov_name='upward';tree.links.new(dot.outputs['Value'],upward.inputs['Value'])
+                if finish is not None:
+                    if obj.data.uv_layers.active and finish_surface(material,node,finish,request['environment'],
+                            request.get('surface_dust',0.)):
+                        adapted.add(material.name)
+                    continue
                 if scans is not None:
                     if obj.data.uv_layers.active and scanned_surface(material,node,scans,request['environment']['dust_color']):
                         adapted.add(material.name)
@@ -987,8 +999,9 @@ def render_parts(request):
     started=time.monotonic()
     reference=request['appearance'] in ('reference','local')
     matte=request.get('matte_partitions')
+    finish=request.get('generated_finish')
     integration_mode=request['environment'].get('integration_mode','legacy')
-    mode=(request['appearance'],bool(request.get('surface_scans')),matte is not None,integration_mode)
+    mode=(request['appearance'],bool(request.get('surface_scans')),matte is not None,integration_mode,finish is not None)
     if LIVE_RENDER is None or LIVE_RENDER['mode']!=mode:
         scene=reset(request['device'])
         for obj in list(scene.objects):bpy.data.objects.remove(obj,do_unlink=True)
@@ -1007,6 +1020,8 @@ def render_parts(request):
               request.get('rust_scan',{}).get('sha256'),request.get('rust_scan',{}).get('roughness_sha256'),
               request.get('rust_scan',{}).get('height_sha256'),request.get('rust_scan',{}).get('detail_sha256'),
               request.get('rust_scan',{}).get('relief_strength',1.))
+    if finish is not None:
+        mesh_key=(*mesh_key,finish['signature'],finish['regions']['signature'])
     if state.get('mesh_key')!=mesh_key:
         begin=time.monotonic()
         if 'asset' in state:
@@ -1074,7 +1089,7 @@ def render_parts(request):
             scene.render.image_settings.file_format='PNG'
             scene.render.image_settings.color_depth='8'
             scene.view_settings.view_transform='AgX'
-            pass_outputs(scene,folder)
+            pass_outputs(scene,folder,generated_finish=finish is not None)
             legacy.render(scene,folder/'object.png')
         else:
             scene.use_nodes=False
@@ -1095,10 +1110,19 @@ def render_parts(request):
             if part!='with_shadow' or shadow_basis!='cycles_shadow_catcher_ratio':
                 legacy.render(scene,folder/filename)
         timings[part+'_seconds']=time.monotonic()-begin
+    finish_metadata = None if finish is None else {
+        'version': finish['version'], 'signature': finish['signature'],
+        'region_signature': finish['regions']['signature'], 'materials': adapted,
+        'map_sha256': {name: entry['sha256'] for name, entry in finish['maps'].items()},
+        'dust_strength': request.get('surface_dust', 0.), 'paint_dust_fraction': .5,
+        'diagnostic_channels': ['oxidation_and_chips', 'scratches', 'dust_coverage'],
+        'coordinate_basis': 'uniform_normalized_object_space',
+    }
     return {'anchor_uv':anchor.tolist() if anchor is not None else None,
             'contact_polygons':[q.tolist() for q in polys],'camera':camera,'device':DEVICE,
-            'scanned_materials':adapted if matte is None else [],
+            'scanned_materials':adapted if request.get('surface_scans') else [],
             'matte_materials':adapted if matte is not None else [],
+            'generated_finish':finish_metadata,
             'integration_mode':integration_mode,
             'render_mesh_detail':{'profile':request.get('render_detail','standard'),
                 'base_faces':base_faces,'render_faces':base_faces*(4 if request.get('render_detail')=='fine' else 1),

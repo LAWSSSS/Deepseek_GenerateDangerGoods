@@ -260,7 +260,8 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     reference_pixels=np.asarray(scene['frame'])[samples]
     rgb,photo=match_linear(raw,alpha,reference_pixels,highlight,params,seed,photo_environment,
                            reference=reference,camera_capture=not (native or local),
-                           surface_weathering='scanned_materials' not in render_meta and 'matte_profile' not in render_meta,
+                           surface_weathering=not any(name in render_meta for name in
+                               ('scanned_materials', 'matte_profile', 'generated_finish')),
                            fixed_tone=fixed_tone,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     chroma_limits=chroma_groups=None
@@ -421,8 +422,12 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
             from .effects import optical_delta
             optical_air={**local_air,'transmission_field':object_t} if local_atmospheric else local_air
             object_delta,details=optical_delta(clear_rgb,rgb,visible_alpha,environment,optical_air,candidate['target_px'],params)
-            details.update(surface_dust_applied=bool(render_meta.get('matte_materials')),
-                           matte_profile=render_meta.get('matte_profile'))
+            finish = render_meta.get('generated_finish')
+            details.update(surface_dust_applied=bool(
+                (finish and finish['dust_strength'] > 0 and finish['materials']) or render_meta.get('matte_materials')),
+                matte_profile=render_meta.get('matte_profile'))
+            if finish:
+                details['generated_finish'] = finish
             photo['effects']=details
         elif dust_overlay:
             object_delta,details=foreground_dust(clear_rgb,rgb,visible_alpha,environment,local_air,candidate['target_px'])

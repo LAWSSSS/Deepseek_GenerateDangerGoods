@@ -69,7 +69,7 @@ def _review(report, checks):
 def initial_recipe(db_path, asset, candidate, environment, params):
     from scrap_composite.knowledge import features_from_environment, recommend
     from .photography import VERSION
-    from .schema import EFFECT_ACTIONS, PHOTO_CONTROLS, TONE_PROFILES
+    from .schema import EFFECT_ACTIONS, PHOTO_CONTROLS, TONE_PROFILES, bounded_surface_dust
 
     features = features_from_environment(environment, params,
         material_group=asset['semantic'].get('material_classes'),
@@ -84,7 +84,7 @@ def initial_recipe(db_path, asset, candidate, environment, params):
         return params, {**result, 'status':'no_recommendation','reason':'rule_control_unavailable','overrides':{}}
     if 'fog_gain' in updates and (params.get('fog_mode')!='local_auto' or params.get('atmosphere')=='off'):
         return params, {**result, 'status':'no_recommendation','reason':'local_atmosphere_disabled','overrides':{}}
-    if params.get('weathering')=='preserve_source' and float(updates.get('surface_dust',0))>.5:
+    if bounded_surface_dust(params) and float(updates.get('surface_dust',0))>.5:
         return params, {**result, 'status':'no_recommendation','reason':'surface_dust_limit','overrides':{}}
     return {**params, **updates}, {**result,'features':features,'versions':versions}
 

@@ -188,6 +188,10 @@ class Pipeline:
     def __init__(self,config):
         self.config=config;self.out=resolve(config.output);self.out.mkdir(parents=True,exist_ok=True)
         self.cache=resolve(config.cache);self.cache.mkdir(parents=True,exist_ok=True)
+        self.surface_pack = None
+        if config.effects and config.effects.surface_finish == 'generated_pbr':
+            from .generated_material import load_pack
+            self.surface_pack = load_pack(resolve(config.effects.surface_finish_manifest))
         self.run_id=time.strftime('%Y%m%d-%H%M%S')+f'-{os.getpid()}'
         self.vision=Vision(config,self.cache/'vision',self.out/f'usage-{self.run_id}.json')
         self.blender=Blender(self.cache/('worker-'+str(os.getpid())),config.render_device)
@@ -275,7 +279,7 @@ class Pipeline:
                 self.scene_format_failures[key]=str(failure)[:220]
                 raise
 
-    async def render(self,asset,scene,candidate,params,resolution,*,sampled=None):
+    async def render(self,asset,scene,candidate,params,resolution,*,sampled=None,shadow_reference=None):
         style=self.render_style
         if style=='native' or params.get('fog_mode')=='local_auto':
             scene['atmosphere']=await self.atmospheres.prepare(scene)
@@ -293,8 +297,17 @@ class Pipeline:
             from .surface_maps import prepare_uv_masks
             environment=await asyncio.to_thread(lighting_for,scene,candidate,environment,params['effects_lighting'],
                                                preserve=params.get('weathering')=='preserve_source')
-            partitions,_=await asyncio.to_thread(prepare_uv_masks,asset,self.cache/'scanned-uv')
-            extras={'matte_partitions':partitions,'matte_profile':dust_profile(float(params['surface_dust']),params.get('weathering','legacy_matte'))}
+            if params.get('surface_finish') == 'generated_pbr':
+                from .generated_material import finish_regions, load_pack
+                path = resolve(params['surface_finish_manifest'])
+                pack = self.surface_pack
+                if pack is None or Path(pack['manifest']) != path:
+                    pack = await asyncio.to_thread(load_pack, path)
+                regions = await asyncio.to_thread(finish_regions, asset, pack, self.cache)
+                extras['generated_finish'] = {**pack, 'regions': regions}
+            else:
+                partitions,_=await asyncio.to_thread(prepare_uv_masks,asset,self.cache/'scanned-uv')
+                extras={'matte_partitions':partitions,'matte_profile':dust_profile(float(params['surface_dust']),params.get('weathering','legacy_matte'))}
         render_candidate=candidate
         if style=='native' or params.get('shadow_mode')=='matched_receiver':
             # Cast onto the visible neighboring support as well. Physics retains
@@ -305,7 +318,7 @@ class Pipeline:
         if params.get('render_detail')=='fine':
             resolution=min(2048,64*math.ceil(2*resolution/64))
         folder,meta,hit=await self.renders.get(asset,render_candidate,params,render_environment,scene['size'],resolution,
-                                             appearance=style,**extras)
+                                             appearance=style,shadow_reference=shadow_reference,**extras)
         if params.get('effects_enabled'):
             from .local_light import receiver_calibration
             calibration=await asyncio.to_thread(receiver_calibration,folder,meta,environment)
@@ -916,10 +929,13 @@ class Pipeline:
         started=time.monotonic();state='complete';error=None
         jobs=make_jobs(self.config,self.catalog)
         implementation=implementation_manifest()
-        config_signature=signature(VERSION,self.config.model_dump(exclude={'offline'}),jobs,
+        inputs = (VERSION,self.config.model_dump(exclude={'offline'}),jobs,
                                     RENDER_VERSION,COMPOSE_VERSION,implementation,self.vision.endpoint.model_dump(),
                                     self.vision.planner.model_dump() if self.config.workflow=='evidence_v1' else None,
                                     self.dimension_reference_signature())
+        if self.surface_pack is not None:
+            inputs = (*inputs, self.surface_pack['signature'])
+        config_signature=signature(*inputs)
         with batch_lock(self.out):
             self.store.initialize(config_signature,jobs);self.store.recover()
             atomic_json(self.out/'config.json',self.config.model_dump())

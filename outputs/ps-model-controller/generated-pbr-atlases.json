@@ -1,0 +1,10 @@
+{
+  "3396c3c6ec2f3f3453d1e3391964819891fb49372f566539d29dccd73c025568": {
+    "material": "Observed aluminium, steel, brass and green print PBR atlas",
+    "tiles": ["nonferrous", "nonferrous", null, "nonferrous", null, null, null, "steel", "nonferrous", null, null, null, null, null, null, null]
+  },
+  "c4cb138c29bedf2d2bc24e776622f38e238d176064f2e577236548bfe2b31c0b": {
+    "material": "Observed yellow paint, chrome, steel, bronze and rubber PBR atl",
+    "tiles": ["paint", "paint", null, null, null, "steel", null, "oxide", null, "paint", null, null, null, null, null, null]
+  }
+}

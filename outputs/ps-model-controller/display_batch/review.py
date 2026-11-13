@@ -2,7 +2,8 @@
 import math
 
 from .schema import (Action, LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS, TONE_PROFILES,
-                     EFFECT_ACTIONS, Review, EffectsReview, FusionObservation, apply_actions, effects_review_schema)
+                     EFFECT_ACTIONS, Review, EffectsReview, FusionObservation, apply_actions,
+                     bounded_surface_dust, effects_review_schema)
 from .strict_contact import pose_review_context, reconcile_pose_evidence
 
 
@@ -96,7 +97,7 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
             options.update({k:list(values) for k,values in EFFECT_ACTIONS.items()})
             if params.get('fog_mode')=='local_auto':options.pop('fog_extra',None)
             else:options.pop('fog_gain',None)
-            if params.get('weathering')=='preserve_source':
+            if bounded_surface_dust(params):
                 options['surface_dust']=[v for v in options['surface_dust'] if float(v)<=.5]
             measured=photo.get('effects',{})
             if params.get('atmosphere')=='off' or measured.get('fog_base',0)<=0 or measured.get('sample_pixels',0)<20:
@@ -105,7 +106,8 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
             if (params.get('workflow')=='evidence_v1' and params.get('fog_mode')=='local_auto'
                     or params.get('pool_weight',0)<=0 or measured.get('edge_samples',0)<12 or measured.get('sample_pixels',0)<20):
                 options.pop('pool_kernel',None)
-            if not measured.get('surface_dust_applied'):
+            finish = measured.get('generated_finish')
+            if not (measured.get('surface_dust_applied') or (finish and finish['materials'])):
                 options.pop('surface_dust',None)
             if photo.get('local_context',{}).get('confidence','estimated')!='estimated':
                 options.pop('fog_extra',None);options.pop('pool_kernel',None)

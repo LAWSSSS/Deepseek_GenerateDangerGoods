@@ -33,16 +33,29 @@ class EffectSettings(Strict):
     rust_relief: bool = False
     rust_relief_strength: float = Field(default=1., ge=1., le=3., strict=True)
     contrast_matching: Literal['legacy', 'local'] = 'legacy'
+    surface_finish: Literal['existing', 'generated_pbr'] = 'existing'
+    surface_finish_manifest: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode='after')
     def preserve_limits(self):
-        if self.weathering == 'preserve_source' and self.surface_dust > .5:
-            raise ValueError('preserve_source surface_dust must not exceed 0.5')
+        if bounded_surface_dust(self.model_dump()) and self.surface_dust > .5:
+            raise ValueError('surface_dust must not exceed 0.5 for the selected surface finish')
         if self.rust_relief and self.rust_pattern != 'photo':
             raise ValueError('rust_relief requires rust_pattern=photo')
         if self.rust_relief_strength != 1. and not self.rust_relief:
             raise ValueError('rust_relief_strength requires rust_relief')
+        if self.surface_finish == 'generated_pbr':
+            if not self.surface_finish_manifest:
+                raise ValueError('generated_pbr requires a manifest')
+            if self.rust_spots or self.rust_relief:
+                raise ValueError('generated_pbr owns oxidation and relief; disable the previous rust layer')
+        elif self.surface_finish_manifest is not None:
+            raise ValueError('surface_finish_manifest requires generated_pbr')
         return self
+
+
+def bounded_surface_dust(params):
+    return params.get('weathering') == 'preserve_source' or params.get('surface_finish') == 'generated_pbr'
 
 
 class BatchConfig(Strict):
@@ -123,7 +136,7 @@ class BatchConfig(Strict):
             from .vehicle_scale import validate_reference
             validate_reference(self.vehicle_reference)
             self.scale_mode='reference_projection';self.contact_mode='strict';self.chroma_mode='local_budget'
-            if self.workflow == 'legacy':
+            if self.workflow == 'legacy' and not (self.effects and self.effects.surface_finish == 'generated_pbr'):
                 self.effects=EffectSettings(fog_extra=0.,pool_kernel=3,surface_dust=.5,lighting='local',
                     fog_mode='local_auto',weathering='preserve_source',shadow_mode='matched_receiver')
             else:
@@ -347,6 +360,8 @@ def apply_actions(params, actions, candidate_ids):
                "light": set(LIGHT_PROFILES), "tone": set(TONE_PROFILES)}
     allowed.update({k:set(v) for k,v in PHOTO_CONTROLS.items()})
     allowed.update({k:set(v) for k,v in EFFECT_ACTIONS.items() if params.get('effects_enabled')})
+    if bounded_surface_dust(params) and 'surface_dust' in allowed:
+        allowed['surface_dust'] = {value for value in allowed['surface_dust'] if float(value) <= .5}
     seen = set()
     for action in actions:
         if action.kind in seen or action.value not in allowed.get(action.kind, ()):
