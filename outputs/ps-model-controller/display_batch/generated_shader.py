@@ -1,10 +1,11 @@
 """Blender surface finish. All added layers are bounded and leave geometry intact."""
+import hashlib
 import re
 
 import bpy
 import numpy as np
 from mathutils import Vector
-from mathutils.noise import noise_vector
+from mathutils.noise import noise_vector, seed_set
 
 from .scanned_shader import assign, math_node, mix, opaque_surface_output, original, texture
 
@@ -91,6 +92,9 @@ def shape_weld_beads(mesh, finish):
     # Source coordinates and normals keep the perturbation continuous across
     # coincident UV corners. A sub-millimetric relief leaves the parts intact.
     offsets = np.empty(len(selected), np.float32)
+    # Blender otherwise chooses a noise seed for each process. Replays that
+    # only change appearance must use identical displaced weld vertices.
+    seed_set(527)
     for index, point in enumerate(vertices[selected]):
         position = Vector(point)
         coarse = noise_vector(position * 51.)[0]
@@ -100,6 +104,7 @@ def shape_weld_beads(mesh, finish):
     mesh.vertices.foreach_set('co', vertices.ravel())
     mesh.update()
     return {'vertices': int(len(selected)), 'max_offset': float(np.max(np.abs(offsets))),
+            'vertex_sha256': hashlib.sha256(vertices.tobytes()).hexdigest(),
             'basis': 'authored_weld_uv_tiles_only_in_unit_length_mesh'}
 
 
@@ -166,8 +171,10 @@ def finish_surface(material, shader, finish, environment, strength):
         metal = math_node(tree, 'ADD', mul(tree, metal, ramp(tree, rough, .17, 7.)), third, clamp=True)
         nonferrous = 0.
     known = math_node(tree, 'ADD', math_node(tree, 'ADD', metal, paint, clamp=True), nonferrous, clamp=True)
-    cylindrical = finish.get('version') == 'generated-pbr-v4' and entry.get('cylinder')
-    formed = finish.get('version') in ('generated-pbr-v3', 'generated-pbr-v4')
+    version = finish.get('version')
+    cylindrical = version in ('generated-pbr-v4', 'generated-pbr-v5') and entry.get('cylinder')
+    hydraulic = version == 'generated-pbr-v5' and cylindrical == 'normalized_y'
+    formed = version in ('generated-pbr-v3', 'generated-pbr-v4', 'generated-pbr-v5')
     layered_wear = formed or finish.get('version') == 'generated-pbr-v2'
     coords = coordinates.outputs['Object']  # Canonical mesh is scaled uniformly by longest axis.
     oxidation, pits, fine = tile(tree, coords, finish['maps']['oxide'], 'Generated oxidation', 1.9, (.17, .39, .72))
@@ -188,9 +195,12 @@ def finish_surface(material, shader, finish, environment, strength):
         paint_wear = mul(tree, paint, ramp(tree, mottling, .15, 1.55))
         worn = math_node(tree, 'ADD', worn, paint_wear, clamp=True)
     if cylindrical:
-        scrape, exposed, nuclei, domain = cylinder_channels(tree, coordinates, entry, finish['maps']['cylinder'])
+        scratch_map = finish['maps']['hydraulic' if hydraulic else 'cylinder']
+        scrape, exposed, nuclei, domain = cylinder_channels(tree, coordinates, entry, scratch_map)
         surface = mul(tree, paint, domain)
-        body_rust = mul(tree, surface, ramp(tree, add(tree, oxidation, mul(tree, nuclei, .74)), .18, 1.7))
+        body_rust = mul(tree, surface, ramp(tree, add(tree, oxidation, mul(tree, nuclei, 1.05 if hydraulic else .74)), .18, 1.7))
+        if hydraulic:
+            exposed = ramp(tree, exposed, .12, 1.75)
         clean = math_node(tree, 'SUBTRACT', 1., mul(tree, body_rust, .87))
         scratch_steel = mul(tree, mul(tree, surface, exposed), clean)
         scuffs = mul(tree, surface, scrape)
@@ -208,13 +218,14 @@ def finish_surface(material, shader, finish, environment, strength):
         bead = surface_noise(tree, coords, 102., 2.)
         base = mix(tree, mul(tree, weld, .72), base, add(tree, .62, mul(tree, bead, .34)), blend='MULTIPLY')
     base = mix(tree, mul(tree, chip_area, .79), base, chip_tint)
-    base = mix(tree, mul(tree, scratches, .32), base, .55, blend='MULTIPLY')
+    base = mix(tree, mul(tree, scratches, .42 if hydraulic else .32), base, .55, blend='MULTIPLY')
     if cylindrical:
         # The surrounding rust is dark and rough; only a few deep scrape
         # centers expose the cooler steel response.
         rust_color = mix(tree, fine, (.074, .035, .020, 1.), (.18, .093, .045, 1.))
         base = mix(tree, mul(tree, body_rust, .78), base, rust_color)
-        base = mix(tree, scratch_steel, base, (.30, .287, .265, 1.))
+        if not hydraulic:
+            base = mix(tree, scratch_steel, base, (.30, .287, .265, 1.))
     assign(tree, base, shader.inputs['Base Color'])
     rough_area = math_node(tree, 'ADD', mul(tree, nonferrous, .64), mul(tree, metal, .31), clamp=True)
     rough = mix(tree, rough_area, rough, math_node(tree, 'MAXIMUM', rough, add(tree, .50, mul(tree, pits, .20))))
@@ -234,7 +245,8 @@ def finish_surface(material, shader, finish, environment, strength):
     rough = mix(tree, mul(tree, scratches, .35), rough, .72)
     if cylindrical:
         rough = mix(tree, body_rust, rough, add(tree, .68, mul(tree, pits, .21)))
-        rough = mix(tree, scratch_steel, rough, add(tree, .28, mul(tree, fine, .16)))
+        if not hydraulic:
+            rough = mix(tree, scratch_steel, rough, add(tree, .28, mul(tree, fine, .16)))
         coat = shader.inputs['Coat Weight']
         damage = math_node(tree, 'MAXIMUM', body_rust, scuffs)
         assign(tree, mul(tree, original(coat), math_node(tree, 'SUBTRACT', 1., mul(tree, damage, .85))), coat)
@@ -244,7 +256,8 @@ def finish_surface(material, shader, finish, environment, strength):
     metalness = mix(tree, mul(tree, chip_area, .72), metalness, mix(tree, oxidation, .72, .12))
     if cylindrical:
         metalness = mix(tree, body_rust, metalness, .04)
-        metalness = mix(tree, scratch_steel, metalness, .88)
+        if not hydraulic:
+            metalness = mix(tree, scratch_steel, metalness, .88)
     assign(tree, metalness, shader.inputs['Metallic'])
     source_normal = original(shader.inputs['Normal']) if shader.inputs['Normal'].is_linked else None
     steel_height = mul(tree, metal, add(tree, mul(tree, fine, .32), mul(tree, pits, -.45)))
@@ -254,9 +267,32 @@ def finish_surface(material, shader, finish, environment, strength):
     if formed:
         height = add(tree, height, add(tree, mul(tree, scuff, mul(tree, glancing, .48)), mul(tree, weld, bead)))
     if cylindrical:
-        height = add(tree, height, add(tree, mul(tree, scuffs, -.80), mul(tree, mul(tree, body_rust, pits), -.54)))
+        height = add(tree, height, add(tree, mul(tree, scuffs, -1.12 if hydraulic else -.80),
+                                      mul(tree, mul(tree, body_rust, pits), -.68 if hydraulic else -.54)))
     normal = relief(tree, 'Generated shallow surface relief', height, source_normal, .00048, mul(tree, known, .34))
     assign(tree, normal, shader.inputs['Normal'])
+    substrate = shader.outputs[0]
+    if hydraulic:
+        steel = tree.nodes.new('ShaderNodeBsdfPrincipled')
+        steel.name = 'Hydraulic exposed steel'
+        steel['display_deposit'] = True
+        assign(tree, mix(tree, fine, (.26, .255, .245, 1.), (.43, .421, .406, 1.)), steel.inputs['Base Color'])
+        steel.inputs['Metallic'].default_value = 1.
+        assign(tree, add(tree, .22, mul(tree, fine, .23)), steel.inputs['Roughness'])
+        steel.inputs['Anisotropic'].default_value = .20
+        direction = tree.nodes.new('ShaderNodeVectorTransform')
+        direction.vector_type = 'VECTOR'
+        direction.convert_from, direction.convert_to = 'OBJECT', 'WORLD'
+        direction.inputs['Vector'].default_value = (0., 1., 0.)
+        assign(tree, direction.outputs[0], steel.inputs['Tangent'])
+        assign(tree, normal, steel.inputs['Normal'])
+        layer = tree.nodes.new('ShaderNodeMixShader')
+        assign(tree, scratch_steel, layer.inputs[0])
+        assign(tree, substrate, layer.inputs[1])
+        assign(tree, steel.outputs[0], layer.inputs[2])
+        substrate = layer.outputs[0]
+        assign(tree, substrate, output.inputs['Surface'])
+        write_surface_pass(tree, 'hydraulic_finish', (body_rust, scratch_steel, scuffs))
     powder = 0.
     if strength:
         geometry = tree.nodes.new('ShaderNodeNewGeometry')
@@ -279,6 +315,8 @@ def finish_surface(material, shader, finish, environment, strength):
                            math_node(tree, 'SUBTRACT', 1., mul(tree, edge, .64)))
         dust_region = math_node(tree, 'ADD', add(tree, metal, nonferrous), mul(tree, paint, .5), clamp=True)
         powder = mul(tree, mul(tree, strength, dust_region), mul(tree, deposition, distribution))
+        if hydraulic:
+            powder = mul(tree, powder, math_node(tree, 'SUBTRACT', 1., mul(tree, scratch_steel, .60)))
         powder.node.name = 'Generated dust coverage'
         tint = tree.nodes.new('ShaderNodeRGB')
         tint.name = 'Generated dust tint'
@@ -295,14 +333,18 @@ def finish_surface(material, shader, finish, environment, strength):
                             normal, .00024, .18), dust.inputs['Normal'])
         layer = tree.nodes.new('ShaderNodeMixShader')
         assign(tree, powder, layer.inputs[0])
-        assign(tree, shader.outputs[0], layer.inputs[1])
+        assign(tree, substrate, layer.inputs[1])
         assign(tree, dust.outputs[0], layer.inputs[2])
         assign(tree, layer.outputs[0], output.inputs['Surface'])
-    aov = tree.nodes.new('ShaderNodeOutputAOV')
-    aov.aov_name = 'generated_finish'
-    rgb = tree.nodes.new('ShaderNodeCombineColor')
-    for label, value in zip(('Red', 'Green', 'Blue'), (worn, scratches, powder)):
-        assign(tree, value, rgb.inputs[label])
-    assign(tree, rgb.outputs[0], aov.inputs['Color'])
+    write_surface_pass(tree, 'generated_finish', (worn, scratches, powder))
     shader['generated_finish'] = True
     return True
+
+
+def write_surface_pass(tree, name, values):
+    aov = tree.nodes.new('ShaderNodeOutputAOV')
+    aov.aov_name = name
+    rgb = tree.nodes.new('ShaderNodeCombineColor')
+    for label, value in zip(('Red', 'Green', 'Blue'), values):
+        assign(tree, value, rgb.inputs[label])
+    assign(tree, rgb.outputs[0], aov.inputs['Color'])

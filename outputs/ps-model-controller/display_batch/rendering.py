@@ -18,6 +18,7 @@ from .schema import LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS
 REFERENCE_RENDER_VERSION = 'pbr-linear-patina-v9'
 RENDER_VERSION = 'render-parts-v2-material-layer'
 FINISH_PASS = 'generated-finish0001.exr'
+HYDRAULIC_PASS = 'hydraulic-finish0001.exr'
 PART_FILES = {
     'object': ('object.png', 'combined0001.exr', 'diffuse0001.exr', 'specular0001.exr',
                'depth0001.exr', 'metallic0001.exr', 'upward0001.exr'),
@@ -127,12 +128,14 @@ class RenderCache:
         self.timings=Counter()
 
     @staticmethod
-    def ready(folder, part, *, finish=False):
+    def ready(folder, part, *, finish=False, hydraulic=False):
         marker=folder/'result.json'
         if not marker.is_file():return None,'no_entry'
         try:
             info=json.loads(marker.read_text(encoding='utf8'))
             files = (*PART_FILES[part], FINISH_PASS) if finish and part == 'object' else PART_FILES[part]
+            if hydraulic and part == 'object':
+                files = (*files, HYDRAULIC_PASS)
             if all((Path(info['path'])/name).stat().st_size>0 for name in files):
                 return info,None
         except (OSError,ValueError,KeyError,TypeError):
@@ -187,11 +190,13 @@ class RenderCache:
 
     async def _get(self,request,keys,timings,full_frame,shadow_reference=None):
         windows=request['windows']
+        finish = request.get('generated_finish')
+        hydraulic = bool(finish and finish.get('version') == 'generated-pbr-v5')
         entries={};cache={};missing={};folders={};imports=0;worker_detail={}
         for part,key in keys.items():
             folder=self.root/part/key
             folders[part]=folder
-            ready,reason=self.ready(folder,part,finish=bool(request.get('generated_finish')))
+            ready,reason=self.ready(folder,part,finish=bool(finish),hydraulic=hydraulic)
             if part == 'without_shadow' and not ready and shadow_reference is not None:
                 ready,reason=shadow_reference,None
                 atomic_json(folder/'result.json', ready)
@@ -211,7 +216,9 @@ class RenderCache:
             self.totals['asset_imports']+=imports
             for part,path in missing.items():
                 window=windows['object' if part=='object' else 'shadow']['rect']
-                files = (*PART_FILES[part], FINISH_PASS) if part == 'object' and request.get('generated_finish') else PART_FILES[part]
+                files = (*PART_FILES[part], FINISH_PASS) if part == 'object' and finish else PART_FILES[part]
+                if hydraulic and part == 'object':
+                    files = (*files, HYDRAULIC_PASS)
                 if not all((Path(path)/name).is_file() for name in files):
                     raise ValueError('render_part_missing_files: '+part)
                 if part=='object':

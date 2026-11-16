@@ -111,6 +111,13 @@ class GeneratedFinishTests(unittest.TestCase):
         interior = np.abs(np.diff(values, axis=0)).mean(axis=1)
         self.assertTrue(np.all(seam < np.percentile(interior, 95, axis=0)))
 
+    def test_hydraulic_tile_increases_each_channel_with_steel_inside_scrapes(self):
+        original = cylinder_wear_tile()
+        dense = cylinder_wear_tile(dense=True)
+        np.testing.assert_array_equal(dense, cylinder_wear_tile(dense=True))
+        self.assertTrue(np.all((dense > 38).mean(axis=(0, 1)) > (original > 38).mean(axis=(0, 1))))
+        self.assertTrue(np.all(dense[..., 1] <= dense[..., 0]))
+
     def test_body_wear_excludes_protected_label(self):
         layout = {'material': 'body paint', 'cylinder': 'source_uv', 'protected_uv': [.34, .018, .69, .67]}
         with TemporaryDirectory() as temp:
@@ -224,6 +231,24 @@ for name, weights, strength, expected in (
             assert len(tree.nodes) == count
     else:
         assert layer is None and source.inputs['Normal'].links[0].from_node == norm
+
+material = bpy.data.materials.new('hydraulic paint')
+material.use_nodes = True
+tree = material.node_tree
+source = tree.nodes.get('Principled BSDF')
+profile = {{'version': 'generated-pbr-v5', 'maps': {{**maps, 'hydraulic': maps['paint']}},
+           'regions': {{'materials': {{material.name: {{
+               'coverage': [0, 1, 0], 'constant': [0, 1, 0], 'authored_atlas': True,
+               'cylinder': 'normalized_y', 'barrel': [-.29, .22, 0, -.03, .088]}}}}}}}}
+assert finish_surface(material, source, profile, env, 0.)
+steel = tree.nodes['Hydraulic exposed steel']
+assert steel.inputs['Metallic'].default_value == 1.
+assert steel.inputs['Roughness'].is_linked and steel.inputs['Tangent'].is_linked
+mix = tree.nodes['Material Output'].inputs['Surface'].links[0].from_node
+assert mix.inputs[1].links[0].from_node == source and mix.inputs[2].links[0].from_node == steel
+aov = next(node for node in tree.nodes if node.type == 'OUTPUT_AOV' and node.aov_name == 'hydraulic_finish')
+pack = aov.inputs['Color'].links[0].from_node
+assert pack.inputs['Green'].links[0].from_socket == mix.inputs[0].links[0].from_socket
 
 # Corner 2 belongs to both faces. Only vertices unique to the weld face move.
 mesh = bpy.data.meshes.new('weld guard')

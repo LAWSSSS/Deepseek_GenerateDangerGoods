@@ -16,7 +16,9 @@ VERSION = 'generated-pbr-v1'
 WEAR_VERSION = 'generated-pbr-v2'
 FORM_VERSION = 'generated-pbr-v3'
 CYLINDER_VERSION = 'generated-pbr-v4'
-PACK_VERSIONS = (VERSION, WEAR_VERSION, FORM_VERSION, CYLINDER_VERSION)
+HYDRAULIC_VERSION = 'generated-pbr-v5'
+CYLINDER_VERSIONS = (CYLINDER_VERSION, HYDRAULIC_VERSION)
+PACK_VERSIONS = (VERSION, WEAR_VERSION, FORM_VERSION, *CYLINDER_VERSIONS)
 CHANNELS = {
     'oxide': ('oxidation', 'pitting', 'fine_relief'),
     'paint': ('chips', 'scratches', 'fine_relief'),
@@ -148,7 +150,7 @@ def build_pack(folder, sources, prompts, layouts, *, version=VERSION):
     if manifest.exists():
         raise FileExistsError(manifest)
     layout = atlas_layouts(layouts)
-    if version != CYLINDER_VERSION:
+    if version not in CYLINDER_VERSIONS:
         layout = {digest: {k: v for k, v in entry.items() if k not in ('cylinder', 'barrel')}
                   for digest, entry in layout.items() if 'tiles' in entry}
     if version in (VERSION, WEAR_VERSION):
@@ -179,14 +181,15 @@ def build_pack(folder, sources, prompts, layouts, *, version=VERSION):
                       'color_space': 'Non-Color', 'channels': list(channels), 'statistics': stats,
                       'source': {'path': original.name, 'sha256': file_hash(original),
                                  'size': list(size), 'generator': 'ImageGen built-in', 'prompt': prompt}}
-    if version == CYLINDER_VERSION:
+    if version in CYLINDER_VERSIONS:
         from .cylinder_wear import cylinder_wear_tile
-        packed = cylinder_wear_tile()
-        baked = folder / 'cylinder-channels.png'
-        save_image(Image.fromarray(packed), baked)
-        maps['cylinder'] = {'path': baked.name, 'sha256': file_hash(baked), 'size': list(packed.shape[1::-1]),
-                            'color_space': 'Non-Color', 'channels': list(CYLINDER_CHANNELS),
-                            'statistics': map_statistics(packed), 'source': {'generator': 'deterministic cylinder wear'}}
+        for kind in ('cylinder', 'hydraulic') if version == HYDRAULIC_VERSION else ('cylinder',):
+            packed = cylinder_wear_tile(dense=kind == 'hydraulic')
+            baked = folder / f'{kind}-channels.png'
+            save_image(Image.fromarray(packed), baked)
+            maps[kind] = {'path': baked.name, 'sha256': file_hash(baked), 'size': list(packed.shape[1::-1]),
+                          'color_space': 'Non-Color', 'channels': list(CYLINDER_CHANNELS),
+                          'statistics': map_statistics(packed), 'source': {'generator': 'deterministic cylinder wear'}}
     atomic_json(manifest, {'version': version, 'maps': maps, 'atlases': layout})
     return manifest
 
@@ -195,7 +198,11 @@ def load_pack(manifest):
     path = Path(manifest).resolve()
     raw = json.loads(path.read_text(encoding='utf8'))
     version = raw.get('version')
-    expected = {**CHANNELS, 'cylinder': CYLINDER_CHANNELS} if version == CYLINDER_VERSION else CHANNELS
+    expected = dict(CHANNELS)
+    if version in CYLINDER_VERSIONS:
+        expected['cylinder'] = CYLINDER_CHANNELS
+    if version == HYDRAULIC_VERSION:
+        expected['hydraulic'] = CYLINDER_CHANNELS
     if version not in PACK_VERSIONS or set(raw.get('maps', {})) != set(expected):
         raise ValueError('unsupported generated_pbr manifest')
     layouts = atlas_layouts(raw.get('atlases', {}))

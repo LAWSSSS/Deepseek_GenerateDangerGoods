@@ -30,7 +30,7 @@ def _scratch(rng, center, length, angle, width):
     return np.concatenate((left, right[::-1]))
 
 
-def cylinder_wear_tile(size=1024):
+def cylinder_wear_tile(size=1024, *, dense=False):
     """Return uint8 channels for scrape wear, exposed steel, and rust nuclei.
 
     X follows the axis, and Y wraps once around the circumference. Strokes are
@@ -45,7 +45,7 @@ def cylinder_wear_tile(size=1024):
     pits = np.zeros_like(abrasion)
     corroded = []
 
-    for _ in range(53):
+    for _ in range(76 if dense else 53):
         origin = rng.uniform(0, resolution, 2)
         heading = rng.normal(0, .25) if rng.random() < .77 else rng.uniform(-1.4, 1.4)
         spread = rng.uniform(17, 68, 2)
@@ -53,7 +53,7 @@ def cylinder_wear_tile(size=1024):
             center = origin + rng.normal(0, spread, 2)
             center[1] %= resolution
             length = float(np.clip(rng.lognormal(3.84, .62), 11, 165))
-            deep = rng.random() < .26
+            deep = rng.random() < (.34 if dense else .26)
             width = rng.uniform(2.2, 4.3) if deep else rng.uniform(.85, 2.6)
             shape = _scratch(rng, center, length, heading + rng.normal(0, .115), width)
             _draw_wrapped(abrasion, shape, rng.integers(110, 231))
@@ -63,7 +63,7 @@ def cylinder_wear_tile(size=1024):
                 if rng.random() < .29:
                     corroded.append(center)
 
-    centers = [*corroded, *rng.uniform(0, resolution, (51, 2))]
+    centers = [*corroded, *rng.uniform(0, resolution, (105 if dense else 51, 2))]
     angles = np.linspace(0, 2*np.pi, 10, endpoint=False)
     directions = np.column_stack((np.cos(angles), np.sin(angles)))
     for center in centers:

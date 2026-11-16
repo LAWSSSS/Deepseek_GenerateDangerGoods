@@ -101,3 +101,22 @@ $controller = 'outputs/ps-model-controller'
 正式生成用时 141.8 秒，Blender worker 81.2 秒，复用 5 个无物体阴影基准。首次试样另用 51.7 秒。复用已有 ImageGen 素材。盲评 6 次实际请求（含 1 次重试），22,589 token，API 估算 ¥0.0290–0.0580。 [完整画面新旧对照](outputs/圆柱划痕与锈蚀-20261116/index.html) · [逐项测量与费用](outputs/圆柱划痕与锈蚀-20261116/validation.json) · [DeepSeek 计价](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
 
 用 `prepare_generated_pbr.py --version generated-pbr-v4` 准备贴图包。样片运行 `validate_generated_pbr.py all --cylinders --pack work/render-materials/cylinder-wear-v1/pack.json --compare-to outputs/实物细节复测-20261116` 并指定新的输出目录。液压缸对照为上一轮材质，灭火器使用两张历史固定摆位图。
+
+
+## 液压缸专项 · 加密划痕和锈蚀，露钢反光
+
+第五版贴图包在 31 号液压缸的缸筒外壁使用单独的高密度磨损图。长短擦痕成组沿筒身分布，深划痕中心露出钢材，周围保留哑光锈层。浮灰只在已露钢的细部减少，活塞杆、耳环和其他材质沿用原配方。1024 px 贴图中，划痕、露钢和锈核的覆盖率分别从 14.40%、3.99%、6.97% 增至 20.93%、7.40%、11.57%，按通道值超过 0.15 统计。 [Blender 金属度与粗糙度](https://docs.blender.org/manual/en/4.5/render/shader_nodes/shader/principled.html)
+
+复查发现旧版焊缝微起伏依赖 Blender 进程随机种子。固定种子后，在独立进程中使用同一份焊缝和渲染几何复跑两版，顶点 SHA-256 一致。三组相对已归档版的雾化权重依次为 13.22%、33.58%、10.00%，完整雾场、曝光、白平衡、相机、模糊、摆位及接触锚点逐项一致。复用无物体阴影基准，重新渲染受更新材质影响的有物体阴影。每组原尺寸为 3840×2160，实测长轴分别为 376、753、893 px，锚点偏移 0 px，原始轮廓相对归档版的最小 IoU 为 0.99940。孔洞、前景、保护区和编辑范围外像素检查通过，44 个源模型 SHA-256 一致。
+
+| 场景 | 可见内部划痕 / 锈蚀 / 露钢覆盖 | 露钢与附近完整漆面的镜面分量占比中位数 | 盲评偏好 |
+|---|---:|---:|---|
+| `36_6_6` | 22.47% / 25.04% / 8.64% | 23.65% / 8.54% | 新版 |
+| `36_6_24` | 28.55% / 36.66% / 9.71% | 43.29% / 8.23% | 相近 |
+| `53_7_35` | 27.01% / 35.24% / 9.42% | 42.17% / 8.78% | 新版 |
+
+覆盖按投影后的着色器权重超过 0.03 统计，可重叠。镜面分量为场景线性镜面亮度占漫反射与镜面亮度之和的比例，露钢区域使用较高权重门槛 0.2。三组新版的材质和纹理均为 3/4，较重雾场的 `36_6_24` 在完整画面中差异较小。现场尺度和真实接触仍为待审，专项材质保留试验入口。105 项回归通过。 [完整画面新旧对照](outputs/液压缸强化露钢-最终对照-20261116/index.html) · [验证记录](outputs/液压缸强化露钢-最终对照-20261116/validation.json)
+
+最终固定几何对照两套各 3 张，累计墙钟 221.2 秒，Blender worker 122.1 秒，命中 6 个无物体阴影基准，盲评 3 次、11,096 token。计入前期试跑与复跑，实际共 7 次 API 请求（含 1 次重试）、26,047 token，估算 ¥0.0300–0.0601，记录墙钟约 347.3 秒，Blender worker 185.4 秒。本轮无新增生图，本机用电金额未知。 [DeepSeek 计价](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
+
+使用 `prepare_generated_pbr.py --version generated-pbr-v5` 从原三张 PNG 准备清单。本机小样使用 `work/render-materials/hydraulic-wear-v2/pack.json`。复跑先用 `validate_generated_pbr.py all --offline --hydraulic --pack work/render-materials/cylinder-wear-v1/pack.json --out <基准目录>`，再用 `validate_generated_pbr.py all --hydraulic --pack work/render-materials/hydraulic-wear-v2/pack.json --out <新版目录> --compare-to <基准目录>`。

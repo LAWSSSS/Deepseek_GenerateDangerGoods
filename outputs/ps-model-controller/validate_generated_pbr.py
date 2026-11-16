@@ -21,7 +21,7 @@ from display_batch.compose import compose, object_window, warp
 from display_batch.costs import cumulative, label
 from display_batch.generated_material import VERSION as FIRST_PACK_VERSION, finish_regions, load_pack
 from display_batch.pipeline import Pipeline
-from display_batch.rendering import FINISH_PASS, render_dependencies, render_request
+from display_batch.rendering import FINISH_PASS, HYDRAULIC_PASS, render_dependencies, render_request
 from display_batch.schema import BatchConfig
 from display_batch.strict_contact import visual_veto
 from display_batch.structured import _review, frame_inputs
@@ -150,8 +150,8 @@ def bind_inputs(path, payload):
     atomic_json(path, payload)
 
 
-def finish_image(folder):
-    exr = read_exr(folder / FINISH_PASS)
+def finish_image(folder, filename=FINISH_PASS):
+    exr = read_exr(folder / filename)
     if exr is None or exr.ndim != 3 or exr.shape[2] < 3:
         raise ValueError('missing material diagnostic pass')
     return np.ascontiguousarray(exr[..., :3][..., ::-1])
@@ -181,7 +181,8 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
     coverage = cv2.erode(np.uint8(visible_alpha > .95), np.ones((11, 11), np.uint8)) > 0
     if not coverage.any():
         return {'status': 'unknown', 'reason': 'insufficient_visible_core'}
-    projected = warp(finish_image(folder), full, offset, bounds, window=object_window(meta))
+    window = object_window(meta)
+    projected = warp(finish_image(folder), full, offset, bounds, window=window)
 
     def measure(path):
         with Image.open(path) as image:
@@ -190,9 +191,23 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
         return {'median_luma': float(np.median(y[coverage])),
                 'detail_p75': float(np.percentile(np.abs(detail[coverage]), 75))}
 
-    return {'status': 'measured', 'core_pixels': int(coverage.sum()),
-            'projected_fraction_gt_0_03': (projected[coverage] > .03).mean(axis=0).tolist(),
-            'previous': measure(case.comparison_image), 'current': measure(comp['image'])}
+    result = {'status': 'measured', 'core_pixels': int(coverage.sum()),
+              'projected_fraction_gt_0_03': (projected[coverage] > .03).mean(axis=0).tolist(),
+              'previous': measure(case.comparison_image), 'current': measure(comp['image'])}
+    if (folder / HYDRAULIC_PASS).is_file():
+        wear = warp(finish_image(folder, HYDRAULIC_PASS), full, offset, bounds, window=window)
+        result['hydraulic_channels'] = dict(zip(('rust', 'exposed_steel', 'scrapes'),
+            (wear[coverage] > .03).mean(axis=0).tolist()))
+        steel = coverage & (wear[..., 1] > .20)
+        nearby = cv2.dilate(np.uint8(steel), np.ones((19, 19), np.uint8)) > 0
+        paint = coverage & nearby & (wear.max(axis=2) < .03)
+        if steel.sum() >= 20 and paint.sum() >= 20:
+            gloss, diffuse = (warp(np.maximum(0., read_exr(folder / pass_file)[..., :3].mean(axis=2)),
+                full, offset, bounds, window=window) for pass_file in ('specular0001.exr', 'diffuse0001.exr'))
+            share = gloss / np.maximum(gloss + diffuse, 1e-5)
+            result['specular_fraction_median'] = {'exposed_steel': float(np.median(share[steel])),
+                                                  'nearby_intact_paint': float(np.median(share[paint]))}
+    return result
 
 
 async def preview(pipe, case, asset, pack, out):
@@ -492,9 +507,11 @@ async def run(args):
     cache = resolve(config.cache)
     sample, hashes = frozen_cases(source, cache)
     pilot = hydraulic_case(cache)
+    if args.hydraulic or args.cylinders:
+        sample = [case for case in sample if case.asset_id == '31']
     if args.cylinders:
         from cylinder_wear_cases import extinguisher_cases
-        sample = [case for case in sample if case.asset_id == '31'] + extinguisher_cases(cache)
+        sample += extinguisher_cases(cache)
     cases = [pilot, *sample]
     if args.compare_to:
         previous = resolve(args.compare_to)
@@ -569,7 +586,9 @@ def main():
     parser.add_argument('--out', default=OUTPUT)
     parser.add_argument('--pack', default=PACK)
     parser.add_argument('--compare-to', help='prior fixed-geometry trial used as the visual baseline')
-    parser.add_argument('--cylinders', action='store_true', help='replay the 31 hydraulic cylinder and 33 extinguisher')
+    scope = parser.add_mutually_exclusive_group()
+    scope.add_argument('--cylinders', action='store_true', help='replay the 31 hydraulic cylinder and 33 extinguisher')
+    scope.add_argument('--hydraulic', action='store_true', help='replay only the three fixed-view 31 hydraulic cylinder samples')
     parser.add_argument('--offline', action='store_true')
     asyncio.run(run(parser.parse_args()))
 

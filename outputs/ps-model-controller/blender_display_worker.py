@@ -544,7 +544,7 @@ def fine_render_mesh(obj,request):
     modifier.show_render=True
 
 
-def pass_outputs(scene, folder, generated_finish=False):
+def pass_outputs(scene, folder, generated_finish=False, hydraulic_finish=False):
     layer=scene.view_layers[0]
     layer.use_pass_diffuse_direct=True;layer.use_pass_diffuse_indirect=True;layer.use_pass_diffuse_color=True
     layer.use_pass_glossy_direct=True;layer.use_pass_glossy_indirect=True;layer.use_pass_glossy_color=True
@@ -557,6 +557,9 @@ def pass_outputs(scene, folder, generated_finish=False):
     if generated_finish:
         passes.append(('generated-finish', 'generated_finish'))
         aovs['generated_finish'] = 'COLOR'
+    if hydraulic_finish:
+        passes.append(('hydraulic-finish', 'hydraulic_finish'))
+        aovs['hydraulic_finish'] = 'COLOR'
     for name, kind in aovs.items():
         if not layer.aovs.get(name):
             aov=layer.aovs.add();aov.name=name;aov.type=kind
@@ -1032,7 +1035,7 @@ def render_parts(request):
         asset=normalized_mesh(request['mesh'])
         state.update(asset=asset,arrays=arrays(asset),mesh_key=mesh_key)
         state['weld_detail'] = shape_weld_beads(asset.data, finish) if finish and finish['version'] in (
-            'generated-pbr-v3', 'generated-pbr-v4') else None
+            'generated-pbr-v3', 'generated-pbr-v4', 'generated-pbr-v5') else None
         imported=1;import_seconds=time.monotonic()-begin
     obj=state['asset'];vertices,faces=state['arrays']
     points,rotation=pose_points(vertices,request['matrix'],request['yaw'])
@@ -1091,7 +1094,8 @@ def render_parts(request):
             scene.render.image_settings.file_format='PNG'
             scene.render.image_settings.color_depth='8'
             scene.view_settings.view_transform='AgX'
-            pass_outputs(scene,folder,generated_finish=finish is not None)
+            pass_outputs(scene,folder,generated_finish=finish is not None,
+                         hydraulic_finish=bool(finish and finish['version'] == 'generated-pbr-v5'))
             legacy.render(scene,folder/'object.png')
         else:
             scene.use_nodes=False
