@@ -19,7 +19,7 @@ from display_batch.ai import InvalidStructuredReply, ProviderUnavailable
 from display_batch.common import ROOT, atomic_json, file_hash, implementation_manifest, resolve, signature
 from display_batch.compose import compose, object_window, warp
 from display_batch.costs import cumulative, label
-from display_batch.generated_material import VERSION as FIRST_PACK_VERSION, finish_regions, load_pack
+from display_batch.generated_material import LOCAL_WEATHER_VERSION, VERSION as FIRST_PACK_VERSION, finish_regions, load_pack
 from display_batch.pipeline import Pipeline
 from display_batch.rendering import CORROSION_PASS, FINISH_PASS, HYDRAULIC_PASS, render_dependencies, render_request
 from display_batch.schema import BatchConfig
@@ -51,6 +51,7 @@ METAL_COMPARISONS = {
     '31': 'outputs/液压缸三倍划痕锈迹-20261116',
     '33': 'outputs/圆柱划痕与锈蚀-20261116',
 }
+WEATHER_COMPARISON = 'outputs/扩大锈蚀与露钢-五物品-20261116-v2'
 
 
 @dataclass(frozen=True)
@@ -175,7 +176,7 @@ def read_exr(path):
     return cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
 
 
-def material_diagnostic(folder, path):
+def material_diagnostic(folder, path, *, local_weather=False):
     values = finish_image(folder)
     with Image.open(folder / 'object.png') as image:
         core = np.asarray(image.getchannel('A')) > 245
@@ -189,7 +190,8 @@ def material_diagnostic(folder, path):
         corrosion = finish_image(folder, CORROSION_PASS)
         image = path.with_name('corrosion.png')
         Image.fromarray(np.uint8(np.clip(corrosion * [1.5, 1.5, .35], 0, 1) * 255)).save(image)
-        result['corrosion'] = {'path': str(image), 'channels': ['oxide', 'exposed_steel', 'ferrous_region']}
+        result['corrosion'] = {'path': str(image), 'channels': ['oxide', 'exposed_steel',
+            'nonferrous_patina' if local_weather else 'ferrous_region']}
     return result
 
 
@@ -204,12 +206,19 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
     window = object_window(meta)
     projected = warp(finish_image(folder), full, offset, bounds, window=window)
 
+    context = comp['photo'].get('surface_context', {})
     def measure(path):
         with Image.open(path) as image:
-            y = np.float32(image.crop(bounds).convert('RGB')) @ np.float32([.2126, .7152, .0722])
+            rgb = np.float32(image.crop(bounds).convert('RGB'))
+        y = rgb @ np.float32([.2126, .7152, .0722])
         detail = cv2.GaussianBlur(y, (0, 0), 1.) - cv2.GaussianBlur(y, (0, 0), 5.)
-        return {'median_luma': float(np.median(y[coverage])),
-                'detail_p75': float(np.percentile(np.abs(detail[coverage]), 75))}
+        stats = {'median_luma': float(np.median(y[coverage])),
+                 'detail_p75': float(np.percentile(np.abs(detail[coverage]), 75))}
+        if 'reference_luma_lab' in context:
+            lab = cv2.cvtColor(rgb[coverage][:, None, :] / 255., cv2.COLOR_RGB2LAB)[:, 0]
+            stats['local_luma_gap_lab'] = float(abs(np.median(lab[:, 0]) - context['reference_luma_lab']))
+            stats['local_chroma_gap_lab'] = float(np.median(np.linalg.norm(lab[:, 1:] - context['reference_chroma_ab'], axis=1)))
+        return stats
 
     result = {'status': 'measured', 'core_pixels': int(coverage.sum()),
               'projected_fraction_gt_0_03': (projected[coverage] > .03).mean(axis=0).tolist(),
@@ -223,15 +232,19 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
         return float(np.median(share[first])), float(np.median(share[second]))
 
     if (folder / CORROSION_PASS).is_file():
-        oxide, steel, ferrous = warp(finish_image(folder, CORROSION_PASS), full, offset, bounds,
+        oxide, steel, third = warp(finish_image(folder, CORROSION_PASS), full, offset, bounds,
                                     window=window).transpose(2, 0, 1)
-        affected = coverage & (ferrous > .5)
+        local_weather = meta['generated_finish']['version'] == LOCAL_WEATHER_VERSION
+        affected = coverage if local_weather else coverage & (third > .5)
         result['corrosion'] = {
-            'ferrous_pixels': int(affected.sum()),
             'rust_fraction': float(np.mean(oxide[coverage] > .03)),
             'rust_fraction_gt_0_20': float(np.mean(oxide[coverage] > .20)),
             'exposed_steel_fraction': float(np.mean(steel[coverage] > .03)),
         }
+        if local_weather:
+            result['corrosion']['nonferrous_patina_fraction'] = float(np.mean(third[coverage] > .03))
+        else:
+            result['corrosion']['ferrous_pixels'] = int(affected.sum())
         shares = share_between(affected & (steel > .22) & (oxide < .16), affected & (oxide > .45))
         if shares is not None:
             result['corrosion']['specular_fraction_median'] = dict(zip(('exposed_steel', 'oxide'), shares))
@@ -412,6 +425,8 @@ def write_report(out, cases, hashes, pack, preview_report, *, metal_review=False
         corrosion_stats = material.get('final_frame', {}).get('corrosion')
         coverage = (f'<p>可见物品内部锈蚀覆盖 {corrosion_stats["rust_fraction"]:.1%}，'
                     f'露钢覆盖 {corrosion_stats["exposed_steel_fraction"]:.1%}。</p>') if corrosion_stats else ''
+        if corrosion_stats and corrosion_stats.get('nonferrous_patina_fraction', 0) > 0:
+            coverage += f'<p>有色金属表面氧化覆盖 {corrosion_stats["nonferrous_patina_fraction"]:.1%}。</p>'
         scores = row.get('review', {}).get('new_scores', {})
         rating = f"材质 {scores['material']}/4，纹理 {scores['texture']}/4。 " if scores else ''
         cards.append(f'<section><h2>{key}</h2><div>{"".join(frames)}</div><p>{rating}{review}</p>{coverage}{link}</section>')
@@ -496,7 +511,7 @@ async def run_case(pipe, case, pack, hashes, out):
         checks['material_actually_changed'] = metrics.get('visible_changed_pixels', 0) > 0
         invariants['status'] = 'pass' if all(checks.values()) and raw['status'] == 'pass' else 'fail'
         failures = [k for k, v in comp['checks'].items() if v['status'] == 'fail']
-        diagnostic = material_diagnostic(folder, out / 'material.png')
+        diagnostic = material_diagnostic(folder, out / 'material.png', local_weather=pack['version'] == LOCAL_WEATHER_VERSION)
         diagnostic['final_frame'] = frame_detail(case, comp, meta, folder, layers['alpha'])
         checks['surface_diagnostic_nonzero'] = max(diagnostic['p95']) > .01
         if not checks['surface_diagnostic_nonzero']:
@@ -557,12 +572,15 @@ async def run(args):
     cache = resolve(config.cache)
     sample, hashes = frozen_cases(source, cache)
     pilot = hydraulic_case(cache)
+    metal_review = args.metal_review or args.weathered_review
     if args.hydraulic or args.cylinders:
         sample = [case for case in sample if case.asset_id == '31']
-    if args.cylinders or args.metal_review:
+    if args.weathered_review:
+        sample = [case for case in sample if case.asset_id != '3']
+    if args.cylinders or metal_review:
         from cylinder_wear_cases import extinguisher_cases, jack_cases
         sample += extinguisher_cases(cache)
-        if args.metal_review:
+        if metal_review:
             sample += jack_cases(cache)
     cases = [pilot, *sample]
     previous_cases = []
@@ -570,6 +588,8 @@ async def run(args):
         comparison = args.compare_to
         if args.cylinders and case.asset_id == '33':
             comparison = None
+        elif args.weathered_review and not comparison:
+            comparison = WEATHER_COMPARISON
         elif args.metal_review and not comparison:
             comparison = METAL_COMPARISONS.get(case.asset_id)
         previous_cases.append(bind_comparison(case, resolve(comparison)) if comparison else case)
@@ -590,7 +610,7 @@ async def run(args):
             if path.is_file() and (row := read(path)).get('image') and file_hash(row['image']) != row['image_hash']:
                 raise ValueError(f'archived image changed: {case.key}')
         if args.stage == 'report':
-            write_report(out, cases, hashes, pack, preview_report, metal_review=args.metal_review)
+            write_report(out, cases, hashes, pack, preview_report, metal_review=metal_review)
             return
     else:
         bind_inputs(out / 'frozen.json', {**binding, 'render_dependencies': render_dependencies(),
@@ -611,7 +631,7 @@ async def run(args):
                 raise ValueError('pilot program checks failed')
             for case in sample:
                 await run_case(pipe, case, pack, hashes, out / 'cases' / case.key)
-        if args.stage == 'review' or (args.stage == 'all' and not args.offline and not args.metal_review):
+        if args.stage == 'review' or (args.stage == 'all' and not args.offline and not metal_review):
             pipe.vision.offline = args.offline
             for case in cases if args.compare_to else sample:
                 await review_case(pipe, case, out / 'cases' / case.key)
@@ -623,7 +643,7 @@ async def run(args):
             'seconds': time.monotonic() - start, 'blender_seconds': pipe.blender.seconds,
             'render_counts': dict(pipe.renders.totals), 'render_timings': dict(pipe.renders.timings),
             'api_requests': len(pipe.vision.calls)})
-        report = write_report(out, cases, hashes, pack, preview_report, metal_review=args.metal_review)
+        report = write_report(out, cases, hashes, pack, preview_report, metal_review=metal_review)
         print('report', out / 'index.html', report['generated'], report['reviewed'], report['sample_gate'], flush=True)
 
 
@@ -639,6 +659,8 @@ def main():
     scope.add_argument('--hydraulic', action='store_true', help='replay only the three fixed-view 31 hydraulic cylinder samples')
     scope.add_argument('--metal-review', action='store_true',
                        help='prepare fixed-frame comparisons for five metal objects for manual review')
+    scope.add_argument('--weathered-review', action='store_true',
+                       help='compare the four weathered objects against the previous corrosion trial')
     parser.add_argument('--offline', action='store_true')
     asyncio.run(run(parser.parse_args()))
 

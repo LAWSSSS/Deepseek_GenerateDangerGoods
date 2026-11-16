@@ -19,9 +19,25 @@ from display_batch.generated_material import (
 )
 from display_batch.rendering import RenderCache, part_keys
 from display_batch.schema import Action, EffectSettings, apply_actions
+from display_batch.surface_context import match_surface_context
 
 
 class GeneratedFinishTests(unittest.TestCase):
+    def test_local_surface_match_leaves_holes_background_and_fine_light_variation(self):
+        rgb = np.full((64, 64, 3), .40, np.float32)
+        rgb[12:52, 12:52] = [.79, .64, .55]
+        rgb[12:52:2, 12:52] += .045
+        alpha = np.zeros((64, 64), np.float32)
+        alpha[12:52, 12:52] = 1.
+        alpha[25:29, 25:29] = 0.
+        reference = np.tile([116, 112, 111], (160, 1))
+        result, summary = match_surface_context(rgb, alpha, reference, {'basis': 'nearby_same_support_and_depth'})
+        np.testing.assert_array_equal(result[alpha == 0], rgb[alpha == 0])
+        self.assertEqual(summary['status'], 'applied')
+        self.assertLess(summary['luma_gap_after_lab'], summary['luma_gap_before_lab'])
+        self.assertGreater(np.linalg.norm(result[20, 20] - result[21, 20]), .05)
+        self.assertIs(match_surface_context(rgb, alpha, reference, {'basis': 'bounded_neighbourhood_depth_unknown'})[0], rgb)
+
     def test_maps_are_distinct_and_wrap(self):
         source = np.random.default_rng(12).integers(0, 256, (512, 512, 3), dtype=np.uint8)
         oxide, paint, dust = (derive_maps(source, name) for name in CHANNELS)
@@ -299,6 +315,23 @@ for name, weights, ferrous_source, authored, oxidizes in (
         assert oxide_mix.inputs[2].links[0].from_node == oxide
         aov = next(node for node in tree.nodes if node.type == 'OUTPUT_AOV' and node.aov_name == 'corrosion_finish')
         assert aov.inputs['Color'].links[0].from_node.inputs['Red'].links[0].from_socket == oxide_mix.inputs[0].links[0].from_socket
+
+material = bpy.data.materials.new('Authored aluminum fixture')
+material.use_nodes = True
+tree = material.node_tree
+source = tree.nodes.get('Principled BSDF')
+profile = {{'version': 'generated-pbr-v8', 'corrosion': True, 'maps': {{**maps, 'cylinder': maps['paint']}},
+            'regions': {{'materials': {{material.name: {{
+                'coverage': [0, 0, 1], 'constant': [0, 0, 1], 'authored_atlas': True}}}}}}}}
+assert finish_surface(material, source, profile, env, 0.)
+patina = tree.nodes['Local nonferrous patina']
+before = tuple(patina.outputs[0].default_value)
+count = len(tree.nodes)
+assert finish_surface(material, source, profile, {{'dust_color': [.23, .26, .27]}}, 0.)
+assert tuple(patina.outputs[0].default_value) != before and len(tree.nodes) == count
+aov = next(node for node in tree.nodes if node.type == 'OUTPUT_AOV' and node.aov_name == 'corrosion_finish')
+channels = aov.inputs['Color'].links[0].from_node
+assert channels.inputs['Blue'].is_linked
 
 # Corner 2 belongs to both faces. Only vertices unique to the weld face move.
 mesh = bpy.data.meshes.new('weld guard')

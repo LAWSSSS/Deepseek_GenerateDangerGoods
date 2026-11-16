@@ -443,6 +443,11 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         photo['color_pipeline']='scene_linear_EXR_exposure_WB_AgX_once_local_camera_veil_residual_filter'
         for label,value in PHOTO_CONTROLS['sharpness'].items():
             photo['effective_controls'][label]['sharpness']=math.sqrt(max(environment['camera_psf']['sigma_px']**2-.38**2,0))/value
+    local_weather = (render_meta.get('generated_finish') or {}).get('version') == 'generated-pbr-v8'
+    if local_weather:
+        from .surface_context import match_surface_context
+        result,photo['surface_context']=match_surface_context(result,visible_alpha,reference_pixels,
+                                                              environment.get('local_context',{}))
     if chroma_groups is not None:
         exported_preview=np.rint(np.clip(result,0,1)*255).astype(np.float32)/255
         initial_final=measure(exported_preview,chroma_groups,chroma_limits)
@@ -466,6 +471,10 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         exported=np.asarray(saved.convert('RGB'))
         exported_size=list(saved.size)
     original_full=np.asarray(scene['frame'])
+    if local_weather:
+        core = visible_alpha > .85
+        if core.any():
+            photo['after_luma'] = float(np.median(exported[y:b,x:r][core] @ [.2126, .7152, .0722]))
     changed=np.any(exported!=original_full,axis=2)
     permitted=np.zeros((h,w),bool);permitted[y:b,x:r]=edited
     outside_count=int((changed&~permitted).sum())

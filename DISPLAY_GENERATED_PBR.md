@@ -158,3 +158,23 @@ $controller = 'outputs/ps-model-controller'
 最终运行墙钟 209.8 秒，Blender worker 114.7 秒，11 个无物体阴影基准命中。含预览、首轮和最终复跑共 425.6 秒、Blender worker 236.3 秒。全部离线，API 0 次、0 token、已知 API 成本 ¥0，无新增生图；本机用电金额未知。
 
 用 `prepare_generated_pbr.py --version generated-pbr-v7` 从已有三张 PNG 复建清单。本机版为 `work/render-materials/corrosion-metal-v7/pack.json`。`validate_generated_pbr.py all --metal-review --offline --pack work/render-materials/corrosion-metal-v7/pack.json --out <新目录>` 可重跑，自动按物品关联上一轮归档图。
+
+
+## 四件金属物品 · 加锈与局部亮度融合
+
+第八版扩大哑光锈斑。锈色参考落点附近同深度废钢的综合色偏，露钢使用稍宽的反光。气缸的铁锈由已审计钢区限制，铝制部分主要通过不规则灰色氧化斑和粗糙度变化削弱连续亮带。合成时仅对物品已可见像素调整低频亮度和过量色度。亮度基线偏移最多 ±8 Lab L*。采样沿用同支撑、近深度范围并记录依据。薄雾、相机、摆位、模糊以及浮灰参数沿用对照。
+
+| 物品 | 对照图数 | 可见锈蚀覆盖，上一版 → 新版 |
+|---|---:|---:|
+| 11 千斤顶 | 2 | 56.6%–57.4% → 69.8%–72.8% |
+| 22 气缸 | 2 | 0.28%–0.44% → 0.29%–0.52%，非铁氧化覆盖为 70.5%–71.7% |
+| 31 液压缸 | 3 | 66.7%–73.7% → 74.7%–83.4% |
+| 33 灭火器 | 2 | 23.5%–27.1% → 28.2%–30.8% |
+
+覆盖按投影落到可见物品内部的着色权重超过 0.03 统计，锈层和非铁氧化单独有渲染通道。9 张中 8 张对照与附近废钢的亮度差缩小，中位绝对差从 6.63 降至 4.68 Lab L*。53 号场景的液压缸亮度差从 0.86 增至 1.32，仍需全景点评。其余场景也保留材质和造型显眼的可能性，统计仅描述局部亮度。
+
+9 张均为 3840×2160，和各自对照逐项核对雾场、镜头模糊、相机、接触锚点、物品长轴、透明几何与前景遮罩。孔洞、保护像素与 44 个模型散列通过。最小原始投影 IoU 为 0.99938。两张千斤顶沿用待审的遮挡关系，已确认前景像素变化 0。108 项回归通过。本批留作人工点评。 [九组完整新旧对照](outputs/四件加锈与局部融合-20261116/index.html) · [验证记录](outputs/四件加锈与局部融合-20261116/validation.json)
+
+完整运行 190.7 秒，Blender worker 104.3 秒，命中 9 个无物体阴影基准。缓存复验额外 17.7 秒，三份渲染通道均命中且首张 PNG 的 SHA-256 与正式输出相同。合计 API 0 次、0 token、¥0，无新增生图，本机用电金额未知。
+
+用 `prepare_generated_pbr.py --version generated-pbr-v8` 复建本机贴图清单 `work/render-materials/local-weather-v8/pack.json`，运行 `validate_generated_pbr.py all --weathered-review --offline --pack work/render-materials/local-weather-v8/pack.json --out <新目录>`。

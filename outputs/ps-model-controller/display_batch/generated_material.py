@@ -19,7 +19,9 @@ CYLINDER_VERSION = 'generated-pbr-v4'
 HYDRAULIC_VERSION = 'generated-pbr-v5'
 TRIPLE_WEAR_VERSION = 'generated-pbr-v6'
 CORROSION_VERSION = 'generated-pbr-v7'
-HYDRAULIC_VERSIONS = (HYDRAULIC_VERSION, TRIPLE_WEAR_VERSION, CORROSION_VERSION)
+LOCAL_WEATHER_VERSION = 'generated-pbr-v8'
+CORROSION_VERSIONS = (CORROSION_VERSION, LOCAL_WEATHER_VERSION)
+HYDRAULIC_VERSIONS = (HYDRAULIC_VERSION, TRIPLE_WEAR_VERSION, *CORROSION_VERSIONS)
 CYLINDER_VERSIONS = (CYLINDER_VERSION, *HYDRAULIC_VERSIONS)
 PACK_VERSIONS = (VERSION, WEAR_VERSION, FORM_VERSION, *CYLINDER_VERSIONS)
 CHANNELS = {
@@ -187,7 +189,7 @@ def build_pack(folder, sources, prompts, layouts, *, version=VERSION):
     if version in CYLINDER_VERSIONS:
         from .cylinder_wear import cylinder_wear_tile
         for kind in ('cylinder', 'hydraulic') if version in HYDRAULIC_VERSIONS else ('cylinder',):
-            layers = 3 if version in (TRIPLE_WEAR_VERSION, CORROSION_VERSION) and kind == 'hydraulic' else 1
+            layers = 3 if version in (TRIPLE_WEAR_VERSION, *CORROSION_VERSIONS) and kind == 'hydraulic' else 1
             packed = cylinder_wear_tile(dense=kind == 'hydraulic', layers=layers)
             baked = folder / f'{kind}-channels.png'
             save_image(Image.fromarray(packed), baked)
@@ -226,7 +228,7 @@ def load_pack(manifest):
             if tile.mode != 'RGB' or list(tile.size) != entry.get('size'):
                 raise ValueError(f'{kind} map dimensions or channels changed')
         maps[kind] = {'path': str(image), 'sha256': digest}
-    return {'version': version, 'corrosion': version == CORROSION_VERSION,
+    return {'version': version, 'corrosion': version in CORROSION_VERSIONS,
             'manifest': str(path), 'maps': maps, 'atlases': layouts,
             'signature': signature(version, {kind: row['sha256'] for kind, row in maps.items()}, layouts)}
 
@@ -236,7 +238,7 @@ def finish_regions(asset, pack, cache):
     layout = pack['atlases'].get(asset['mesh_hash'])
     if layout is None:
         regions, _ = prepare_uv_masks(asset, Path(cache) / 'scanned-uv')
-        if pack['version'] == CORROSION_VERSION:
+        if pack['version'] in CORROSION_VERSIONS:
             classes = set(asset['semantic']['material_classes'])
             names = ' '.join(regions['materials']).lower()
             # Asset labels group aluminium and stainless with steel. Require
