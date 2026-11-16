@@ -21,6 +21,7 @@ FINISH_PASS = 'generated-finish0001.exr'
 HYDRAULIC_PASS = 'hydraulic-finish0001.exr'
 CORROSION_PASS = 'corrosion-finish0001.exr'
 HANDLING_PASS = 'handling-finish0001.exr'
+AMBER_PASS = 'amber-film0001.exr'
 PART_FILES = {
     'object': ('object.png', 'combined0001.exr', 'diffuse0001.exr', 'specular0001.exr',
                'depth0001.exr', 'metallic0001.exr', 'upward0001.exr'),
@@ -200,6 +201,8 @@ class RenderCache:
                 object_passes += (CORROSION_PASS,)
             if 'handling' in finish['maps']:
                 object_passes += (HANDLING_PASS,)
+            if finish.get('amber_age'):
+                object_passes += (AMBER_PASS,)
         entries={};cache={};missing={};folders={};imports=0;worker_detail={}
         for part,key in keys.items():
             folder=self.root/part/key

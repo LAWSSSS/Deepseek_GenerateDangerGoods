@@ -236,3 +236,21 @@ $controller = 'outputs/ps-model-controller'
 首轮渲染与合成 82.6 秒，最终复用三类渲染通道合成 51.2 秒，累计 133.8 秒、Blender worker 49.7 秒。API 0 次、0 token、¥0，无新增生图，本机电费未知。
 
 使用 `prepare_generated_pbr.py --version generated-pbr-v11` 从原三张 PNG 重建 `work/render-materials/caked-dirt-v11/pack.json`，再运行 `validate_generated_pbr.py all --surface-review --offline --pack work/render-materials/caked-dirt-v11/pack.json --compare-to outputs/气缸深度做旧与灭火器积污-20261116-v2 --out <新目录>`。
+
+
+## 气缸专项 · 发黄老化油膜
+
+第十二版在已确认的非铁金属区增加独立的黄褐色旧油膜。斑块按物体空间的低频油迹与细粒分布生成，深擦伤处减弱覆盖，保留冷灰金属斑。部分附着泥垢混入低饱和土黄色，原重泥垢权重保持。铁锈、标识和其他分区继续用原材质规则。
+
+| 22 号气缸场景 | 发黄油膜覆盖 | 同一片区域的 Lab b* 中位数，旧 → 新 | 与邻近废钢亮度差，旧 → 新 |
+|---|---:|---:|---:|
+| `36_6_24` | 73.39% | 0.80 → 4.86 | 6.76 → 3.28 Lab L* |
+| `53_7_35` | 60.93% | 4.05 → 6.55 | 3.58 → 3.22 Lab L* |
+
+覆盖按最终投影中可见内部的油膜权重 >0.20 统计。b* 测量取同区域原尺寸 PNG，正向变化表示向黄偏移。53 号场景色差较小，沿用原来的较重雾场。两张图的污渍覆盖与上一版相同。
+
+两组新旧 PNG 均为 3840×2160，相机、雾场、摆位、透明度和前景遮罩逐项一致，原始轮廓 IoU 为 1.0，锚点偏移 0 px。孔洞、保护区域、44 个源模型散列和 109 项回归通过。现场接触和尺度仍待审。 [完整画面对照](outputs/气缸发黄老化-20261116/index.html) · [验证记录](outputs/气缸发黄老化-20261116/validation.json)
+
+本轮 42.8 秒，Blender worker 19.6 秒，无物体阴影基准两次命中。API 0 次、0 token、¥0，无新增生图，本机用电金额未知。
+
+以 `prepare_generated_pbr.py --version generated-pbr-v12` 从三张已有素材复建 `work/render-materials/amber-age-v12/pack.json`。运行 `validate_generated_pbr.py all --pneumatic-review --offline --pack work/render-materials/amber-age-v12/pack.json --out <新目录>`。

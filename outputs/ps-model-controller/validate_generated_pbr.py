@@ -21,7 +21,9 @@ from display_batch.compose import compose, object_window, warp
 from display_batch.costs import cumulative, label
 from display_batch.generated_material import LOCAL_WEATHER_VERSIONS, VERSION as FIRST_PACK_VERSION, finish_regions, load_pack
 from display_batch.pipeline import Pipeline
-from display_batch.rendering import CORROSION_PASS, FINISH_PASS, HANDLING_PASS, HYDRAULIC_PASS, render_dependencies, render_request
+from display_batch.rendering import (
+    AMBER_PASS, CORROSION_PASS, FINISH_PASS, HANDLING_PASS, HYDRAULIC_PASS, render_dependencies, render_request,
+)
 from display_batch.schema import BatchConfig
 from display_batch.strict_contact import visual_veto
 from display_batch.structured import _review, frame_inputs
@@ -53,6 +55,7 @@ METAL_COMPARISONS = {
 }
 WEATHER_COMPARISON = 'outputs/扩大锈蚀与露钢-五物品-20261116-v2'
 HANDLING_COMPARISON = 'outputs/气缸重点划痕锈蚀污渍-四物品-20261116-v2'
+AMBER_COMPARISON = 'outputs/气缸灭火器-重泥垢-20261116-v2'
 
 
 @dataclass(frozen=True)
@@ -198,6 +201,11 @@ def material_diagnostic(folder, path, *, local_weather=False):
         image = path.with_name('handling.png')
         Image.fromarray(np.uint8(np.clip(handling * [1.4, 1.4, 1.], 0, 1) * 255)).save(image)
         result['handling'] = {'path': str(image), 'channels': ['wide_scratch', 'grime', 'nonferrous_oxide']}
+    if (folder / AMBER_PASS).is_file():
+        amber = finish_image(folder, AMBER_PASS)[..., 0]
+        image = path.with_name('amber-film.png')
+        Image.fromarray(np.uint8(np.clip(amber, 0, 1) * 255)).save(image)
+        result['amber_film'] = {'path': str(image)}
     return result
 
 
@@ -268,6 +276,15 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
         marks = warp(finish_image(folder, HANDLING_PASS), full, offset, bounds, window=window)[coverage]
         result['handling'] = dict(zip(('wide_scratch', 'grime', 'nonferrous_oxide'),
                                       (marks > .12).mean(axis=0).tolist()))
+    if (folder / AMBER_PASS).is_file():
+        film = warp(finish_image(folder, AMBER_PASS), full, offset, bounds, window=window)
+        aged = coverage & (film[..., 0] > .20)
+        result['amber_film'] = {'coverage': float(aged.sum() / coverage.sum())}
+        if aged.any():
+            for name, path in (('before_b_lab', case.comparison_image), ('after_b_lab', comp['image'])):
+                with Image.open(path) as image:
+                    rgb = np.float32(image.crop(bounds).convert('RGB'))[aged, None, :] / 255.
+                result['amber_film'][name] = float(np.median(cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)[:, 0, 2]))
     return result
 
 
@@ -435,6 +452,9 @@ def write_report(out, cases, hashes, pack, preview_report, *, metal_review=False
         handling = material.get('handling', {}).get('path')
         if handling:
             link += f' · <a href="{html.escape(relative(handling, out), quote=True)}">划伤与污渍分布</a>'
+        amber = material.get('amber_film', {}).get('path')
+        if amber:
+            link += f' · <a href="{html.escape(relative(amber, out), quote=True)}">发黄油膜分布</a>'
         corrosion_stats = material.get('final_frame', {}).get('corrosion')
         coverage = (f'<p>可见物品内部锈蚀覆盖 {corrosion_stats["rust_fraction"]:.1%}，'
                     f'露钢覆盖 {corrosion_stats["exposed_steel_fraction"]:.1%}。</p>') if corrosion_stats else ''
@@ -443,6 +463,9 @@ def write_report(out, cases, hashes, pack, preview_report, *, metal_review=False
         handling = material.get('final_frame', {}).get('handling')
         if handling:
             coverage += f'<p>新增划痕覆盖 {handling["wide_scratch"]:.1%}，污渍覆盖 {handling["grime"]:.1%}。</p>'
+        amber_stats = material.get('final_frame', {}).get('amber_film')
+        if amber_stats:
+            coverage += f'<p>发黄老化痕迹覆盖 {amber_stats["coverage"]:.1%}。</p>'
         scores = row.get('review', {}).get('new_scores', {})
         rating = f"材质 {scores['material']}/4，纹理 {scores['texture']}/4。 " if scores else ''
         cards.append(f'<section><h2>{key}</h2><div>{"".join(frames)}</div><p>{rating}{review}</p>{coverage}{link}</section>')
@@ -588,10 +611,13 @@ async def run(args):
         'max_iterations': 0, 'review_profile': 'photographer'})
     cache = resolve(config.cache)
     sample, hashes = frozen_cases(source, cache)
-    metal_review = args.metal_review or args.weathered_review or args.surface_review
-    if args.surface_review:
-        from cylinder_wear_cases import extinguisher_cases
-        pilot, *sample = [case for case in sample if case.asset_id == '22'] + extinguisher_cases(cache)
+    metal_review = args.metal_review or args.weathered_review or args.surface_review or args.pneumatic_review
+    if args.surface_review or args.pneumatic_review:
+        selected = [case for case in sample if case.asset_id == '22']
+        if args.surface_review:
+            from cylinder_wear_cases import extinguisher_cases
+            selected += extinguisher_cases(cache)
+        pilot, *sample = selected
     else:
         pilot = hydraulic_case(cache)
     if args.hydraulic or args.cylinders:
@@ -609,6 +635,8 @@ async def run(args):
         comparison = args.compare_to
         if args.cylinders and case.asset_id == '33':
             comparison = None
+        elif args.pneumatic_review and not comparison:
+            comparison = AMBER_COMPARISON
         elif args.surface_review and not comparison:
             comparison = HANDLING_COMPARISON
         elif args.weathered_review and not comparison:
@@ -656,7 +684,7 @@ async def run(args):
                 await run_case(pipe, case, pack, hashes, out / 'cases' / case.key)
         if args.stage == 'review' or (args.stage == 'all' and not args.offline and not metal_review):
             pipe.vision.offline = args.offline
-            for case in cases if args.compare_to or args.surface_review else sample:
+            for case in cases if args.compare_to or args.surface_review or args.pneumatic_review else sample:
                 await review_case(pipe, case, out / 'cases' / case.key)
     finally:
         await pipe.vision.close()
@@ -686,6 +714,8 @@ def main():
                        help='compare the four weathered objects against the previous corrosion trial')
     scope.add_argument('--surface-review', action='store_true',
                        help='compare oxidized cylinders and stained extinguishers in two fixed views each')
+    scope.add_argument('--pneumatic-review', action='store_true',
+                       help='compare aged pneumatic cylinder finishes in two fixed views')
     parser.add_argument('--offline', action='store_true')
     asyncio.run(run(parser.parse_args()))
 

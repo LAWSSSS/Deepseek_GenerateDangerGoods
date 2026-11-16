@@ -23,7 +23,8 @@ LOCAL_WEATHER_VERSION = 'generated-pbr-v8'
 HANDLING_VERSION = 'generated-pbr-v9'
 AGED_SURFACE_VERSION = 'generated-pbr-v10'
 CAKED_DIRT_VERSION = 'generated-pbr-v11'
-HANDLING_VERSIONS = (HANDLING_VERSION, AGED_SURFACE_VERSION, CAKED_DIRT_VERSION)
+AMBER_FORM_VERSION = 'generated-pbr-v12'
+HANDLING_VERSIONS = (HANDLING_VERSION, AGED_SURFACE_VERSION, CAKED_DIRT_VERSION, AMBER_FORM_VERSION)
 LOCAL_WEATHER_VERSIONS = (LOCAL_WEATHER_VERSION, *HANDLING_VERSIONS)
 CORROSION_VERSIONS = (CORROSION_VERSION, *LOCAL_WEATHER_VERSIONS)
 HYDRAULIC_VERSIONS = (HYDRAULIC_VERSION, TRIPLE_WEAR_VERSION, *CORROSION_VERSIONS)
@@ -244,7 +245,7 @@ def load_pack(manifest):
             if tile.mode != 'RGB' or list(tile.size) != entry.get('size'):
                 raise ValueError(f'{kind} map dimensions or channels changed')
         maps[kind] = {'path': str(image), 'sha256': digest}
-    return {'version': version, 'corrosion': version in CORROSION_VERSIONS,
+    return {'version': version, 'corrosion': version in CORROSION_VERSIONS, 'amber_age': version == AMBER_FORM_VERSION,
             'manifest': str(path), 'maps': maps, 'atlases': layouts,
             'signature': signature(version, {kind: row['sha256'] for kind, row in maps.items()}, layouts)}
 

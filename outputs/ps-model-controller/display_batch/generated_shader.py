@@ -86,6 +86,8 @@ def update_surface_palette(tree, environment):
         ('Local dry sediment', (.21, .174, .125)),
         ('Local caked oil dirt', (.024, .020, .016)),
         ('Local caked mineral dirt', (.18, .158, .126)),
+        ('Local aged amber film', (.270, .172, .069)),
+        ('Local ochre in grime', (.206, .144, .074)),
     ):
         node = tree.nodes.get(name)
         if node is not None:
@@ -147,6 +149,29 @@ def caked_dirt(tree, coords, texture_entry, surface, label, native_color):
     pigment = mix(tree, mineral, palette_socket(tree, 'Local caked oil dirt'),
                   palette_socket(tree, 'Local caked mineral dirt'))
     return gain, pigment, mul(tree, grains, packed)
+
+
+def amber_film(tree, coords, substrate, nonferrous, oil, fine, scuffs, normal):
+    blotches = surface_noise(tree, coords, 7.2, 3.)
+    specks = surface_noise(tree, coords, 37., 2.)
+    deposition = add(tree, mul(tree, blotches, .65), add(tree, mul(tree, oil, .32), mul(tree, specks, .25)))
+    coverage = ramp(tree, deposition, .393, 4.5)
+    worn = math_node(tree, 'SUBTRACT', 1., mul(tree, scuffs, .56))
+    residue = mul(tree, nonferrous, mul(tree, coverage, worn))
+    film = tree.nodes.new('ShaderNodeBsdfPrincipled')
+    film.name = 'Old amber oil film'
+    film['display_deposit'] = True
+    film.inputs['Metallic'].default_value = 0.
+    film.inputs['Specular IOR Level'].default_value = .22
+    tint = palette_socket(tree, 'Local aged amber film')
+    assign(tree, mix(tree, mul(tree, fine, .68), tint, .62, blend='MULTIPLY'), film.inputs['Base Color'])
+    assign(tree, add(tree, .53, mul(tree, fine, .23)), film.inputs['Roughness'])
+    assign(tree, normal, film.inputs['Normal'])
+    layer = tree.nodes.new('ShaderNodeMixShader')
+    assign(tree, mul(tree, residue, .82), layer.inputs[0])
+    assign(tree, substrate, layer.inputs[1])
+    assign(tree, film.outputs[0], layer.inputs[2])
+    return layer.outputs[0], residue
 
 
 def shape_weld_beads(mesh, finish):
@@ -270,7 +295,8 @@ def finish_surface(material, shader, finish, environment, strength):
         color = tree.nodes.get('Generated dust tint')
         if color is not None:
             color.outputs[0].default_value = dust_color(environment)
-        if finish.get('version') in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10', 'generated-pbr-v11'):
+        if finish.get('version') in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10',
+                                     'generated-pbr-v11', 'generated-pbr-v12'):
             update_surface_palette(tree, environment)
         return True
     name = re.sub(r'\.\d{3}$', '', material.name)
@@ -305,8 +331,9 @@ def finish_surface(material, shader, finish, environment, strength):
         nonferrous = 0.
     known = math_node(tree, 'ADD', math_node(tree, 'ADD', metal, paint, clamp=True), nonferrous, clamp=True)
     version = finish.get('version')
-    local_weather = version in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10', 'generated-pbr-v11')
-    aged_surface = version in ('generated-pbr-v10', 'generated-pbr-v11')
+    local_weather = version in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10',
+                                'generated-pbr-v11', 'generated-pbr-v12')
+    aged_surface = version in ('generated-pbr-v10', 'generated-pbr-v11', 'generated-pbr-v12')
     handling = 'handling' in finish['maps']
     corrosion = finish.get('corrosion', False)
     ferrous = corrosion and (entry.get('authored_atlas') or (
@@ -314,8 +341,9 @@ def finish_surface(material, shader, finish, environment, strength):
             r'\b(?:alumin\w*|brass|bronze|copper|stainless)\b', name, re.I)))
     cylinder_pack = 'cylinder' in finish['maps']
     cylindrical = cylinder_pack and entry.get('cylinder')
-    caked = version == 'generated-pbr-v11' and entry.get('authored_atlas') and (
+    caked = version in ('generated-pbr-v11', 'generated-pbr-v12') and entry.get('authored_atlas') and (
         cylindrical == 'source_uv' or entry['coverage'][2] > 0)
+    amber = finish.get('amber_age') and entry.get('authored_atlas') and entry['coverage'][2] > 0
     hydraulic = 'hydraulic' in finish['maps'] and cylindrical == 'normalized_y'
     formed = cylinder_pack or version == 'generated-pbr-v3'
     layered_wear = formed or finish.get('version') == 'generated-pbr-v2'
@@ -477,6 +505,10 @@ def finish_surface(material, shader, finish, environment, strength):
         rubbed = math_node(tree, 'SUBTRACT', 1., mul(tree, scuff_lines, .33))
         substrate = dull_nonferrous_layer(tree, substrate, mul(tree, mul(tree, veil, rubbed), .87), fine, normal)
         assign(tree, substrate, output.inputs['Surface'])
+    if amber:
+        substrate, residue = amber_film(tree, coords, substrate, nonferrous, oil, fine, scuff_lines, normal)
+        assign(tree, substrate, output.inputs['Surface'])
+        write_surface_pass(tree, 'amber_film', (residue, nonferrous, 0.))
     if handling:
         stain = tree.nodes.new('ShaderNodeBsdfPrincipled')
         stain.name = 'Ground-in nonmetallic grime'
@@ -496,6 +528,8 @@ def finish_surface(material, shader, finish, environment, strength):
                         palette_socket(tree, 'Local dry sediment'))
         else:
             color = palette_socket(tree, 'Local ground-in grime')
+        if amber:
+            color = mix(tree, mul(tree, residue, .70), color, palette_socket(tree, 'Local ochre in grime'))
         assign(tree, color, stain.inputs['Base Color'])
         assign(tree, add(tree, .69, mul(tree, fine, .19)), stain.inputs['Roughness'])
         assign(tree, stain_normal, stain.inputs['Normal'])
