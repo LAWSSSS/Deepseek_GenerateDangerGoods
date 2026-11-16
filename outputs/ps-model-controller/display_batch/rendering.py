@@ -115,6 +115,9 @@ def part_keys(request, device, dependencies, *, include_detail=True):
         surface=(*surface,request['matte_profile'])
     if finish := request.get('generated_finish'):
         surface=(*surface, finish['signature'], finish['regions']['signature'], finish_dependencies())
+        reference = environment.get('nearby_weathered_steel', {})
+        if reference.get('applied'):
+            surface=(*surface,reference['pigment_linear'])
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),

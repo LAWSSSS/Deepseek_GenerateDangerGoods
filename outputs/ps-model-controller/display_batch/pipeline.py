@@ -298,13 +298,20 @@ class Pipeline:
             environment=await asyncio.to_thread(lighting_for,scene,candidate,environment,params['effects_lighting'],
                                                preserve=params.get('weathering')=='preserve_source')
             if params.get('surface_finish') == 'generated_pbr':
-                from .generated_material import finish_regions, load_pack
+                from .generated_material import WEATHERED_STEEL_VERSION, finish_regions, load_pack
                 path = resolve(params['surface_finish_manifest'])
                 pack = self.surface_pack
                 if pack is None or Path(pack['manifest']) != path:
                     pack = await asyncio.to_thread(load_pack, path)
                 regions = await asyncio.to_thread(finish_regions, asset, pack, self.cache)
                 extras['generated_finish'] = {**pack, 'regions': regions}
+                if pack['version'] == WEATHERED_STEEL_VERSION and any(
+                        item.get('authored_atlas') and item['coverage'][2] > 0
+                        for item in regions['materials'].values()):
+                    from .surface_context import nearby_weathered_steel
+                    reference = await asyncio.to_thread(nearby_weathered_steel, scene, candidate,
+                                                        np.asarray(scene['frame'])[samples])
+                    environment = {**environment, 'nearby_weathered_steel': reference}
             else:
                 partitions,_=await asyncio.to_thread(prepare_uv_masks,asset,self.cache/'scanned-uv')
                 extras={'matte_partitions':partitions,'matte_profile':dust_profile(float(params['surface_dust']),params.get('weathering','legacy_matte'))}

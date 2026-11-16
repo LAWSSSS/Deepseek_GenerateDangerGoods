@@ -286,3 +286,14 @@ $controller = 'outputs/ps-model-controller'
 两组新旧 PNG 均为 3840×2160，原始投影轮廓 IoU 为 1.0。薄雾、相机、摆位、锚点、透明度和前景一致，孔洞、保护像素和 44 个源模型散列通过，109 项回归通过。现场接触和尺度仍待审。本轮 44.1 秒，Blender worker 20.0 秒，无物体阴影基准两次命中。API 0 次、0 token、¥0，无新增生图，本机用电金额未知。
 
 用 `prepare_generated_pbr.py --version generated-pbr-v14` 复建 `work/render-materials/outer-dirt-v14/pack.json`。运行 `validate_generated_pbr.py all --pneumatic-review --offline --pack work/render-materials/outer-dirt-v14/pack.json --compare-to outputs/气缸均匀底泥-20261116 --out <新目录>`。
+
+
+## 气缸专项 · 参照近处锈污废钢校正白亮
+
+上一版在 `36_6_24` 的承托区取样偏亮，样本亮度中位数为 64.51 Lab L*。同层近邻废钢的中位数为 35.28，原摄影匹配给气缸增加了 12.16 Lab L*，与用户看到的发白一致。第十五版用物品周围有界邻域内、相对深度差不超过 0.085 的样本交叉判断。仅在旧参照明显偏亮且近处有足量锈褐色样本时切换。排除足迹内区域、保护区、最深阴影和过亮片。实际的铁锈判断仍按资产材质分区；邻域色彩仅约束物品外层污垢及其局部亮度和色偏。
+
+`36_6_24` 的 171,575 个近邻中间调样本中有 22,620 个锈褐参照。以颜色纹理和近邻亮度为依据，取消原提亮，外层灰泥在油迹和泥块处混入锈褐色。气缸的可见亮部 P90 从 68.21 降至 55.52 Lab L*，物品相对新锈污参照的亮度中位差从 16.65 降至 3.14，色度距离中位数从 7.99 降至 3.08 Lab。油膜及结块污渍的覆盖保持。`53_7_35` 的承托样本与邻域亮度差仅 0.24 Lab L*，校正未触发，输出仅 4 像素出现最大 1 个量化级差异。 [两组完整画面对照](outputs/气缸近处锈钢融合-20261116/index.html) · [验证记录](outputs/气缸近处锈钢融合-20261116/validation.json)
+
+新旧 PNG 均为 3840×2160，薄雾、相机、摆位、锚点、投影尺寸、透明度和前景一致，投影轮廓 IoU 为 1.0。孔洞、保护像素、44 个源模型散列和 110 项回归通过。尺度和现场接触保持待审。运行 43.5 秒，Blender worker 20.1 秒，无物体阴影基准两次命中。API 0 次、0 token、¥0，无新增生图，本机用电金额未知。
+
+使用 `prepare_generated_pbr.py --version generated-pbr-v15` 从已有三张素材复建 `work/render-materials/nearby-worn-steel-v15/pack.json`。运行 `validate_generated_pbr.py all --pneumatic-review --offline --pack work/render-materials/nearby-worn-steel-v15/pack.json --compare-to outputs/气缸均匀厚污-20261116 --out <新目录>`。

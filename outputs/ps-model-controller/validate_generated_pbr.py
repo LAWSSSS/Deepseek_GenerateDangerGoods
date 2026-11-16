@@ -20,7 +20,7 @@ from display_batch.common import ROOT, atomic_json, file_hash, implementation_ma
 from display_batch.compose import compose, object_window, warp
 from display_batch.costs import cumulative, label
 from display_batch.generated_material import (
-    LOCAL_WEATHER_VERSIONS, OUTER_DUST_VERSION, VERSION as FIRST_PACK_VERSION, finish_regions, load_pack,
+    LOCAL_WEATHER_VERSIONS, OUTER_DUST_VERSIONS, VERSION as FIRST_PACK_VERSION, finish_regions, load_pack,
 )
 from display_batch.pipeline import Pipeline
 from display_batch.rendering import (
@@ -240,6 +240,7 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
             lab = cv2.cvtColor(rgb[coverage][:, None, :] / 255., cv2.COLOR_RGB2LAB)[:, 0]
             stats['local_luma_gap_lab'] = float(abs(np.median(lab[:, 0]) - context['reference_luma_lab']))
             stats['local_chroma_gap_lab'] = float(np.median(np.linalg.norm(lab[:, 1:] - context['reference_chroma_ab'], axis=1)))
+            stats['luma_p90_lab'] = float(np.percentile(lab[:, 0], 90))
         return stats
 
     result = {'status': 'measured', 'core_pixels': int(coverage.sum()),
@@ -295,7 +296,7 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
                 result['amber_film'][name] = float(np.median(cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)[:, 0, 2]))
         even = coverage & (film[..., 2] > .20)
         if even.any():
-            name = 'outer_dirt' if meta['generated_finish']['version'] == OUTER_DUST_VERSION else 'base_dirt'
+            name = 'outer_dirt' if meta['generated_finish']['version'] in OUTER_DUST_VERSIONS else 'base_dirt'
             result[name] = {'coverage': float(even.sum() / coverage.sum()),
                             'median_weight': float(np.median(film[..., 2][even]))}
     return result
@@ -328,7 +329,7 @@ async def preview(pipe, case, asset, pack, out):
         metadata = await pipe.blender.ask('render_parts', {**request, 'parts': {'object': str(folder)}})
         timing[tag] = metadata['timings']
         material_diagnostic(folder, folder / 'material.png', local_weather=pack['version'] in LOCAL_WEATHER_VERSIONS,
-                            outer_dirt=pack['version'] == OUTER_DUST_VERSION)
+                            outer_dirt=pack['version'] in OUTER_DUST_VERSIONS)
         renders.append(folder)
     coverage = []
     for folder in renders:
@@ -486,6 +487,12 @@ def write_report(out, cases, hashes, pack, preview_report, *, metal_review=False
         amber_stats = material.get('final_frame', {}).get('amber_film')
         if amber_stats:
             coverage += f'<p>发黄老化痕迹覆盖 {amber_stats["coverage"]:.1%}。</p>'
+        reference = row.get('composition', {}).get('photo', {}).get('surface_context', {}).get('nearby_weathered_steel', {})
+        detail = material.get('final_frame', {})
+        if reference.get('applied') and all('luma_p90_lab' in detail.get(key, {}) for key in ('previous', 'current')):
+            coverage += (f'<p>按 {reference["weathered_pixels"]:,} 个邻近锈褐像素校正，'
+                         f'物品亮部 P90 从 {detail["previous"]["luma_p90_lab"]:.1f} '
+                         f'降至 {detail["current"]["luma_p90_lab"]:.1f} L*。</p>')
         scores = row.get('review', {}).get('new_scores', {})
         rating = f"材质 {scores['material']}/4，纹理 {scores['texture']}/4。 " if scores else ''
         cards.append(f'<section><h2>{key}</h2><div>{"".join(frames)}</div><p>{rating}{review}</p>{coverage}{link}</section>')
@@ -572,7 +579,7 @@ async def run_case(pipe, case, pack, hashes, out):
         failures = [k for k, v in comp['checks'].items() if v['status'] == 'fail']
         diagnostic = material_diagnostic(folder, out / 'material.png',
                                          local_weather=pack['version'] in LOCAL_WEATHER_VERSIONS,
-                                         outer_dirt=pack['version'] == OUTER_DUST_VERSION)
+                                         outer_dirt=pack['version'] in OUTER_DUST_VERSIONS)
         diagnostic['final_frame'] = frame_detail(case, comp, meta, folder, layers['alpha'])
         checks['surface_diagnostic_nonzero'] = max(diagnostic['p95']) > .01
         if not checks['surface_diagnostic_nonzero']:

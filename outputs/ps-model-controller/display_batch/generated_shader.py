@@ -94,6 +94,12 @@ def update_surface_palette(tree, environment):
         node = tree.nodes.get(name)
         if node is not None:
             node.outputs[0].default_value = tuple(pigment * tint * value) + (1.,)
+    gate = tree.nodes.get('Nearby weathered steel weight')
+    if gate is not None:
+        reference = environment.get('nearby_weathered_steel', {})
+        gate.outputs[0].default_value = float(bool(reference.get('applied')))
+        if reference.get('applied'):
+            tree.nodes['Nearby weathered steel pigment'].outputs[0].default_value = tuple(reference['pigment_linear']) + (1.,)
 
 
 def palette_socket(tree, name):
@@ -176,7 +182,7 @@ def amber_film(tree, coords, substrate, nonferrous, oil, fine, scuffs, normal):
     return layer.outputs[0], residue
 
 
-def even_mineral_film(tree, substrate, domain, normal, *, outer=False):
+def even_mineral_film(tree, substrate, domain, normal, *, outer=False, weathered_marks=None):
     """Add even surface dirt with a uniform blend over the audited metal."""
     weight = mul(tree, domain, .42 if outer else .26)
     film = tree.nodes.new('ShaderNodeBsdfPrincipled')
@@ -186,7 +192,13 @@ def even_mineral_film(tree, substrate, domain, normal, *, outer=False):
     film.inputs['Roughness'].default_value = .86
     film.inputs['Specular IOR Level'].default_value = .11
     tint = 'Local outer mineral dirt' if outer else 'Local even mineral film'
-    assign(tree, palette_socket(tree, tint), film.inputs['Base Color'])
+    color = palette_socket(tree, tint)
+    if weathered_marks is not None:
+        gate = tree.nodes.new('ShaderNodeValue')
+        gate.name = 'Nearby weathered steel weight'
+        pigment = palette_socket(tree, 'Nearby weathered steel pigment')
+        color = mix(tree, mul(tree, weathered_marks, gate.outputs[0]), color, pigment)
+    assign(tree, color, film.inputs['Base Color'])
     assign(tree, normal, film.inputs['Normal'])
     layer = tree.nodes.new('ShaderNodeMixShader')
     assign(tree, weight, layer.inputs[0])
@@ -318,7 +330,7 @@ def finish_surface(material, shader, finish, environment, strength):
             color.outputs[0].default_value = dust_color(environment)
         if finish.get('version') in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10',
                                      'generated-pbr-v11', 'generated-pbr-v12', 'generated-pbr-v13',
-                                     'generated-pbr-v14'):
+                                     'generated-pbr-v14', 'generated-pbr-v15'):
             update_surface_palette(tree, environment)
         return True
     name = re.sub(r'\.\d{3}$', '', material.name)
@@ -354,9 +366,10 @@ def finish_surface(material, shader, finish, environment, strength):
     known = math_node(tree, 'ADD', math_node(tree, 'ADD', metal, paint, clamp=True), nonferrous, clamp=True)
     version = finish.get('version')
     local_weather = version in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10',
-                                'generated-pbr-v11', 'generated-pbr-v12', 'generated-pbr-v13', 'generated-pbr-v14')
+                                'generated-pbr-v11', 'generated-pbr-v12', 'generated-pbr-v13',
+                                'generated-pbr-v14', 'generated-pbr-v15')
     aged_surface = version in ('generated-pbr-v10', 'generated-pbr-v11', 'generated-pbr-v12', 'generated-pbr-v13',
-                               'generated-pbr-v14')
+                               'generated-pbr-v14', 'generated-pbr-v15')
     handling = 'handling' in finish['maps']
     corrosion = finish.get('corrosion', False)
     ferrous = corrosion and (entry.get('authored_atlas') or (
@@ -364,7 +377,8 @@ def finish_surface(material, shader, finish, environment, strength):
             r'\b(?:alumin\w*|brass|bronze|copper|stainless)\b', name, re.I)))
     cylinder_pack = 'cylinder' in finish['maps']
     cylindrical = cylinder_pack and entry.get('cylinder')
-    caked = version in ('generated-pbr-v11', 'generated-pbr-v12', 'generated-pbr-v13', 'generated-pbr-v14') and entry.get('authored_atlas') and (
+    caked = version in ('generated-pbr-v11', 'generated-pbr-v12', 'generated-pbr-v13', 'generated-pbr-v14',
+                         'generated-pbr-v15') and entry.get('authored_atlas') and (
         cylindrical == 'source_uv' or entry['coverage'][2] > 0)
     amber = finish.get('amber_age') and entry.get('authored_atlas') and entry['coverage'][2] > 0
     hydraulic = 'hydraulic' in finish['maps'] and cylindrical == 'normalized_y'
@@ -530,7 +544,7 @@ def finish_surface(material, shader, finish, environment, strength):
         assign(tree, substrate, output.inputs['Surface'])
     if amber:
         base_dirt = 0.
-        if version in ('generated-pbr-v13', 'generated-pbr-v14'):
+        if version in ('generated-pbr-v13', 'generated-pbr-v14', 'generated-pbr-v15'):
             metal_domain = math_node(tree, 'ADD', metal, nonferrous, clamp=True)
             substrate, base_dirt = even_mineral_film(tree, substrate, metal_domain, normal)
         substrate, residue = amber_film(tree, coords, substrate, nonferrous, oil, fine, scuff_lines, normal)
@@ -567,8 +581,12 @@ def finish_surface(material, shader, finish, environment, strength):
         assign(tree, substrate, output.inputs['Surface'])
         write_surface_pass(tree, 'handling_finish', (scuff_lines, grime, patina))
     if amber:
-        if version == 'generated-pbr-v14':
-            substrate, base_dirt = even_mineral_film(tree, substrate, metal_domain, normal, outer=True)
+        if version in ('generated-pbr-v14', 'generated-pbr-v15'):
+            weathered_marks = None
+            if version == 'generated-pbr-v15':
+                weathered_marks = ramp(tree, add(tree, mul(tree, grime, .72), mul(tree, residue, .40)), .12, 1.45)
+            substrate, base_dirt = even_mineral_film(tree, substrate, metal_domain, normal, outer=True,
+                                                    weathered_marks=weathered_marks)
             assign(tree, substrate, output.inputs['Surface'])
         write_surface_pass(tree, 'amber_film', (residue, nonferrous, base_dirt))
     powder = 0.

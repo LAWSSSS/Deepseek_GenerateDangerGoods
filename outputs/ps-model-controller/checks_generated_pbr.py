@@ -19,10 +19,26 @@ from display_batch.generated_material import (
 )
 from display_batch.rendering import RenderCache, part_keys
 from display_batch.schema import Action, EffectSettings, apply_actions
-from display_batch.surface_context import match_surface_context
+from display_batch.surface_context import match_surface_context, nearby_weathered_steel
 
 
 class GeneratedFinishTests(unittest.TestCase):
+    def test_dark_weathered_reference_rejects_other_depth_and_requires_bright_bias(self):
+        frame = np.full((96, 96, 3), [82, 82, 81], np.uint8)
+        frame[12:80, 13:30] = [105, 84, 64]
+        scene = {'size': [96, 96], 'frame': Image.fromarray(frame), 'allowed': np.ones((96, 96), bool),
+                 'protected': np.zeros((96, 96), bool), 'depth_native': np.zeros((96, 96)),
+                 'supports': [{'id': 'support', 'depth': 0.}]}
+        item = {'bounds': [32, 32, 64, 64], 'target_px': 64, 'site_id': 'support'}
+        bright = np.tile([170, 170, 170], (120, 1))
+        matched = nearby_weathered_steel(scene, item, bright)
+        self.assertTrue(matched['applied'])
+        self.assertGreater(matched['weathered_pixels'], 250)
+        self.assertLess(matched['target_luma_lab'], matched['support_luma_lab'])
+        self.assertFalse(nearby_weathered_steel(scene, item, np.tile([82, 82, 81], (120, 1)))['applied'])
+        scene['depth_native'][12:80, 13:30] = .2
+        self.assertFalse(nearby_weathered_steel(scene, item, bright)['applied'])
+
     def test_handling_maps_are_deterministic_distinct_and_sparse(self):
         tile = handling_tile()
         np.testing.assert_array_equal(tile, handling_tile())
@@ -361,13 +377,14 @@ for material_name, weights, cylinder, version in (
     ('Bottle excluded from even dirt fixture', [0, 1, 0], 'source_uv', 'generated-pbr-v13'),
     ('Even outer dirt on aluminium fixture', [0, 0, 1], None, 'generated-pbr-v14'),
     ('Bottle excluded from outer dirt fixture', [0, 1, 0], 'source_uv', 'generated-pbr-v14'),
+    ('Locally sampled old steel fixture', [0, 0, 1], None, 'generated-pbr-v15'),
 ):
     material = bpy.data.materials.new(material_name)
     material.use_nodes = True
     tree = material.node_tree
     shader = tree.nodes.get('Principled BSDF')
     region = {{'coverage': weights, 'constant': weights, 'authored_atlas': True, 'cylinder': cylinder}}
-    amber_version = version in ('generated-pbr-v12', 'generated-pbr-v13', 'generated-pbr-v14')
+    amber_version = version in ('generated-pbr-v12', 'generated-pbr-v13', 'generated-pbr-v14', 'generated-pbr-v15')
     profile = {{'version': version, 'corrosion': True, 'amber_age': amber_version,
         'maps': {{**maps, 'cylinder': maps['paint'], 'handling': maps['paint']}},
         'regions': {{'materials': {{material_name: region}}}}}}
@@ -388,17 +405,26 @@ for material_name, weights, cylinder, version in (
         assert amber.inputs['Metallic'].default_value == 0.
         assert any(n.type == 'OUTPUT_AOV' and n.aov_name == 'amber_film' for n in tree.nodes)
     base_film = tree.nodes.get('Even mineral dirt film')
-    assert (base_film is not None) == (version in ('generated-pbr-v13', 'generated-pbr-v14') and cylinder is None)
+    assert (base_film is not None) == (version in ('generated-pbr-v13', 'generated-pbr-v14', 'generated-pbr-v15') and cylinder is None)
     if base_film:
         base_mix = base_film.outputs[0].links[0].to_node
         assert base_mix.inputs[1].links[0].from_node.type == 'MIX_SHADER'
         assert base_mix.outputs[0].links[0].to_node == amber.outputs[0].links[0].to_node
     outer_film = tree.nodes.get('Even outer dirt film')
-    assert (outer_film is not None) == (version == 'generated-pbr-v14' and cylinder is None)
+    assert (outer_film is not None) == (version in ('generated-pbr-v14', 'generated-pbr-v15') and cylinder is None)
     if outer_film:
         outer_mix = outer_film.outputs[0].links[0].to_node
         assert outer_mix.inputs[1].links[0].from_node == grime.outputs[0].links[0].to_node
         assert outer_mix.outputs[0].links[0].to_node.type == 'OUTPUT_MATERIAL'
+    reference = tree.nodes.get('Nearby weathered steel weight')
+    assert (reference is not None) == (version == 'generated-pbr-v15')
+    if reference:
+        assert reference.outputs[0].default_value == 0.
+        assert finish_surface(material, shader, profile, {{**env, 'nearby_weathered_steel':
+                               {{'applied': True, 'pigment_linear': [.12, .08, .06]}}}}, 0.)
+        assert reference.outputs[0].default_value == 1.
+        assert finish_surface(material, shader, profile, env, 0.)
+        assert reference.outputs[0].default_value == 0.
     if oxide:
         assert oxide.inputs['Metallic'].default_value == 0.
         assert oxide.inputs['Roughness'].is_linked
