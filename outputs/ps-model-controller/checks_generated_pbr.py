@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 
 from display_batch.common import BLENDER, HERE, atomic_json, file_hash
-from display_batch.cylinder_wear import cylinder_wear_tile
+from display_batch.cylinder_wear import cylinder_wear_tile, handling_tile
 from display_batch.effects import parameters
 from display_batch.generated_material import (
     CHANNELS, CORROSION_VERSION, FORM_VERSION, VERSION, WEAR_VERSION, derive_maps, finish_regions, load_pack,
@@ -23,6 +23,15 @@ from display_batch.surface_context import match_surface_context
 
 
 class GeneratedFinishTests(unittest.TestCase):
+    def test_handling_maps_are_deterministic_distinct_and_sparse(self):
+        tile = handling_tile()
+        np.testing.assert_array_equal(tile, handling_tile())
+        coverage = (tile > 127).mean(axis=(0, 1))
+        for actual, (low, high) in zip(coverage, ((.08, .21), (.20, .45), (.09, .25))):
+            self.assertTrue(low < actual < high)
+        self.assertLess(max(map_statistics(tile)['seam_mean'].values()), .045)
+        self.assertLess(np.max(np.abs(np.corrcoef(tile.reshape(-1, 3).T) - np.eye(3))), .35)
+
     def test_local_surface_match_leaves_holes_background_and_fine_light_variation(self):
         rgb = np.full((64, 64, 3), .40, np.float32)
         rgb[12:52, 12:52] = [.79, .64, .55]
@@ -37,6 +46,10 @@ class GeneratedFinishTests(unittest.TestCase):
         self.assertLess(summary['luma_gap_after_lab'], summary['luma_gap_before_lab'])
         self.assertGreater(np.linalg.norm(result[20, 20] - result[21, 20]), .05)
         self.assertIs(match_surface_context(rgb, alpha, reference, {'basis': 'bounded_neighbourhood_depth_unknown'})[0], rgb)
+        stronger, details = match_surface_context(
+            rgb, alpha, reference, {'basis': 'nearby_same_support_and_depth'}, deep_grime=True)
+        self.assertLess(details['luma_gap_after_lab'], summary['luma_gap_after_lab'])
+        np.testing.assert_array_equal(stronger[alpha == 0], rgb[alpha == 0])
 
     def test_maps_are_distinct_and_wrap(self):
         source = np.random.default_rng(12).integers(0, 256, (512, 512, 3), dtype=np.uint8)

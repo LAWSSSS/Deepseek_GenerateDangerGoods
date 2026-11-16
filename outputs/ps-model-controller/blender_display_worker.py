@@ -544,7 +544,8 @@ def fine_render_mesh(obj,request):
     modifier.show_render=True
 
 
-def pass_outputs(scene, folder, generated_finish=False, hydraulic_finish=False, corrosion_finish=False):
+def pass_outputs(scene, folder, generated_finish=False, hydraulic_finish=False, corrosion_finish=False,
+                 handling_finish=False):
     layer=scene.view_layers[0]
     layer.use_pass_diffuse_direct=True;layer.use_pass_diffuse_indirect=True;layer.use_pass_diffuse_color=True
     layer.use_pass_glossy_direct=True;layer.use_pass_glossy_indirect=True;layer.use_pass_glossy_color=True
@@ -563,6 +564,9 @@ def pass_outputs(scene, folder, generated_finish=False, hydraulic_finish=False, 
     if corrosion_finish:
         passes.append(('corrosion-finish', 'corrosion_finish'))
         aovs['corrosion_finish'] = 'COLOR'
+    if handling_finish:
+        passes.append(('handling-finish', 'handling_finish'))
+        aovs['handling_finish'] = 'COLOR'
     for name, kind in aovs.items():
         if not layer.aovs.get(name):
             aov=layer.aovs.add();aov.name=name;aov.type=kind
@@ -1099,7 +1103,8 @@ def render_parts(request):
             scene.view_settings.view_transform='AgX'
             pass_outputs(scene,folder,generated_finish=finish is not None,
                          hydraulic_finish=bool(finish and 'hydraulic' in finish['maps']),
-                         corrosion_finish=bool(finish and finish.get('corrosion')))
+                         corrosion_finish=bool(finish and finish.get('corrosion')),
+                         handling_finish=bool(finish and 'handling' in finish['maps']))
             legacy.render(scene,folder/'object.png')
         else:
             scene.use_nodes=False

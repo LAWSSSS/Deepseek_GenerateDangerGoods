@@ -20,7 +20,9 @@ HYDRAULIC_VERSION = 'generated-pbr-v5'
 TRIPLE_WEAR_VERSION = 'generated-pbr-v6'
 CORROSION_VERSION = 'generated-pbr-v7'
 LOCAL_WEATHER_VERSION = 'generated-pbr-v8'
-CORROSION_VERSIONS = (CORROSION_VERSION, LOCAL_WEATHER_VERSION)
+HANDLING_VERSION = 'generated-pbr-v9'
+LOCAL_WEATHER_VERSIONS = (LOCAL_WEATHER_VERSION, HANDLING_VERSION)
+CORROSION_VERSIONS = (CORROSION_VERSION, *LOCAL_WEATHER_VERSIONS)
 HYDRAULIC_VERSIONS = (HYDRAULIC_VERSION, TRIPLE_WEAR_VERSION, *CORROSION_VERSIONS)
 CYLINDER_VERSIONS = (CYLINDER_VERSION, *HYDRAULIC_VERSIONS)
 PACK_VERSIONS = (VERSION, WEAR_VERSION, FORM_VERSION, *CYLINDER_VERSIONS)
@@ -30,6 +32,7 @@ CHANNELS = {
     'dust': ('coverage', 'granules', 'fine_relief'),
 }
 CYLINDER_CHANNELS = ('scuffs', 'exposed_steel', 'rust_nuclei')
+HANDLING_CHANNELS = ('wide_scratches', 'grime', 'oxide_flakes')
 REGIONS = ('steel', 'paint', 'oxide', 'nonferrous', 'weld')
 LUMA = np.float32([.2126, .7152, .0722])
 
@@ -198,6 +201,14 @@ def build_pack(folder, sources, prompts, layouts, *, version=VERSION):
                           'statistics': map_statistics(packed), 'source': {'generator': 'deterministic cylinder wear'}}
             if layers > 1:
                 maps[kind]['source']['layers'] = layers
+    if version == HANDLING_VERSION:
+        from .cylinder_wear import handling_tile
+        packed = handling_tile()
+        baked = folder / 'handling-channels.png'
+        save_image(Image.fromarray(packed), baked)
+        maps['handling'] = {'path': baked.name, 'sha256': file_hash(baked), 'size': list(packed.shape[1::-1]),
+                            'color_space': 'Non-Color', 'channels': list(HANDLING_CHANNELS),
+                            'statistics': map_statistics(packed), 'source': {'generator': 'deterministic handling wear'}}
     atomic_json(manifest, {'version': version, 'maps': maps, 'atlases': layout})
     return manifest
 
@@ -211,6 +222,8 @@ def load_pack(manifest):
         expected['cylinder'] = CYLINDER_CHANNELS
     if version in HYDRAULIC_VERSIONS:
         expected['hydraulic'] = CYLINDER_CHANNELS
+    if version == HANDLING_VERSION:
+        expected['handling'] = HANDLING_CHANNELS
     if version not in PACK_VERSIONS or set(raw.get('maps', {})) != set(expected):
         raise ValueError('unsupported generated_pbr manifest')
     layouts = atlas_layouts(raw.get('atlases', {}))

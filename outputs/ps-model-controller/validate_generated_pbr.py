@@ -19,9 +19,9 @@ from display_batch.ai import InvalidStructuredReply, ProviderUnavailable
 from display_batch.common import ROOT, atomic_json, file_hash, implementation_manifest, resolve, signature
 from display_batch.compose import compose, object_window, warp
 from display_batch.costs import cumulative, label
-from display_batch.generated_material import LOCAL_WEATHER_VERSION, VERSION as FIRST_PACK_VERSION, finish_regions, load_pack
+from display_batch.generated_material import LOCAL_WEATHER_VERSIONS, VERSION as FIRST_PACK_VERSION, finish_regions, load_pack
 from display_batch.pipeline import Pipeline
-from display_batch.rendering import CORROSION_PASS, FINISH_PASS, HYDRAULIC_PASS, render_dependencies, render_request
+from display_batch.rendering import CORROSION_PASS, FINISH_PASS, HANDLING_PASS, HYDRAULIC_PASS, render_dependencies, render_request
 from display_batch.schema import BatchConfig
 from display_batch.strict_contact import visual_veto
 from display_batch.structured import _review, frame_inputs
@@ -192,6 +192,11 @@ def material_diagnostic(folder, path, *, local_weather=False):
         Image.fromarray(np.uint8(np.clip(corrosion * [1.5, 1.5, .35], 0, 1) * 255)).save(image)
         result['corrosion'] = {'path': str(image), 'channels': ['oxide', 'exposed_steel',
             'nonferrous_patina' if local_weather else 'ferrous_region']}
+    if (folder / HANDLING_PASS).is_file():
+        handling = finish_image(folder, HANDLING_PASS)
+        image = path.with_name('handling.png')
+        Image.fromarray(np.uint8(np.clip(handling * [1.4, 1.4, 1.], 0, 1) * 255)).save(image)
+        result['handling'] = {'path': str(image), 'channels': ['wide_scratch', 'grime', 'nonferrous_oxide']}
     return result
 
 
@@ -234,7 +239,7 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
     if (folder / CORROSION_PASS).is_file():
         oxide, steel, third = warp(finish_image(folder, CORROSION_PASS), full, offset, bounds,
                                     window=window).transpose(2, 0, 1)
-        local_weather = meta['generated_finish']['version'] == LOCAL_WEATHER_VERSION
+        local_weather = meta['generated_finish']['version'] in LOCAL_WEATHER_VERSIONS
         affected = coverage if local_weather else coverage & (third > .5)
         result['corrosion'] = {
             'rust_fraction': float(np.mean(oxide[coverage] > .03)),
@@ -258,6 +263,10 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
         shares = share_between(steel, paint)
         if shares is not None:
             result['specular_fraction_median'] = dict(zip(('exposed_steel', 'nearby_intact_paint'), shares))
+    if (folder / HANDLING_PASS).is_file():
+        marks = warp(finish_image(folder, HANDLING_PASS), full, offset, bounds, window=window)[coverage]
+        result['handling'] = dict(zip(('wide_scratch', 'grime', 'nonferrous_oxide'),
+                                      (marks > .12).mean(axis=0).tolist()))
     return result
 
 
@@ -287,7 +296,7 @@ async def preview(pipe, case, asset, pack, out):
         folder.mkdir(exist_ok=True)
         metadata = await pipe.blender.ask('render_parts', {**request, 'parts': {'object': str(folder)}})
         timing[tag] = metadata['timings']
-        material_diagnostic(folder, folder / 'material.png')
+        material_diagnostic(folder, folder / 'material.png', local_weather=pack['version'] in LOCAL_WEATHER_VERSIONS)
         renders.append(folder)
     coverage = []
     for folder in renders:
@@ -422,11 +431,17 @@ def write_report(out, cases, hashes, pack, preview_report, *, metal_review=False
         corrosion = material.get('corrosion', {}).get('path')
         if corrosion:
             link += f' · <a href="{html.escape(relative(corrosion, out), quote=True)}">锈蚀与露钢分布</a>'
+        handling = material.get('handling', {}).get('path')
+        if handling:
+            link += f' · <a href="{html.escape(relative(handling, out), quote=True)}">划伤与污渍分布</a>'
         corrosion_stats = material.get('final_frame', {}).get('corrosion')
         coverage = (f'<p>可见物品内部锈蚀覆盖 {corrosion_stats["rust_fraction"]:.1%}，'
                     f'露钢覆盖 {corrosion_stats["exposed_steel_fraction"]:.1%}。</p>') if corrosion_stats else ''
         if corrosion_stats and corrosion_stats.get('nonferrous_patina_fraction', 0) > 0:
             coverage += f'<p>有色金属表面氧化覆盖 {corrosion_stats["nonferrous_patina_fraction"]:.1%}。</p>'
+        handling = material.get('final_frame', {}).get('handling')
+        if handling:
+            coverage += f'<p>新增划痕覆盖 {handling["wide_scratch"]:.1%}，污渍覆盖 {handling["grime"]:.1%}。</p>'
         scores = row.get('review', {}).get('new_scores', {})
         rating = f"材质 {scores['material']}/4，纹理 {scores['texture']}/4。 " if scores else ''
         cards.append(f'<section><h2>{key}</h2><div>{"".join(frames)}</div><p>{rating}{review}</p>{coverage}{link}</section>')
@@ -511,7 +526,8 @@ async def run_case(pipe, case, pack, hashes, out):
         checks['material_actually_changed'] = metrics.get('visible_changed_pixels', 0) > 0
         invariants['status'] = 'pass' if all(checks.values()) and raw['status'] == 'pass' else 'fail'
         failures = [k for k, v in comp['checks'].items() if v['status'] == 'fail']
-        diagnostic = material_diagnostic(folder, out / 'material.png', local_weather=pack['version'] == LOCAL_WEATHER_VERSION)
+        diagnostic = material_diagnostic(folder, out / 'material.png',
+                                         local_weather=pack['version'] in LOCAL_WEATHER_VERSIONS)
         diagnostic['final_frame'] = frame_detail(case, comp, meta, folder, layers['alpha'])
         checks['surface_diagnostic_nonzero'] = max(diagnostic['p95']) > .01
         if not checks['surface_diagnostic_nonzero']:

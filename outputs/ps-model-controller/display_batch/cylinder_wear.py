@@ -89,3 +89,30 @@ def _wear_layer(seed, dense):
             _draw_wrapped(pits, outline, rng.integers(86, 238))
 
     return np.stack((abrasion, np.minimum(exposed, abrasion), pits), axis=-1)
+
+
+def handling_tile():
+    """Object-space handling marks wide enough for a monitoring-camera projection."""
+    size = 1024
+    rng = np.random.default_rng(702533)
+    scratches = np.zeros((size, size), np.uint8)
+    for _ in range(44):
+        origin = rng.uniform(26, size - 26, 2)
+        angle = rng.uniform(-1.4, 1.4) if rng.random() < .43 else rng.normal(0., .24)
+        for _ in range(int(rng.integers(6, 13))):
+            point = origin + rng.normal(0, (62, 29), 2)
+            point[1] %= size
+            stroke = _scratch(rng, point, rng.uniform(23, 148), angle + rng.normal(0., .16), rng.uniform(3.4, 9.4))
+            _draw_wrapped(scratches, stroke, rng.integers(122, 255))
+
+    def periodic_noise(cells):
+        grid = np.pad(rng.random((cells, cells), dtype=np.float32), 2, mode='wrap')
+        step = size // cells
+        large = cv2.resize(grid, ((cells + 4) * step,) * 2, interpolation=cv2.INTER_CUBIC)
+        return large[2*step:2*step+size, 2*step:2*step+size]
+
+    oil = .62 * periodic_noise(8) + .26 * periodic_noise(32) + .12 * periodic_noise(128)
+    mineral = .45 * periodic_noise(16) + .38 * periodic_noise(64) + .17 * periodic_noise(128)
+    grime = np.clip((oil - .48) * 4.8, 0, 1) ** 1.4
+    flakes = np.clip((mineral - .52) * 4.4, 0, 1)
+    return np.stack((scratches, np.uint8(np.rint(grime * 255)), np.uint8(np.rint(flakes * 255))), axis=-1)
