@@ -172,9 +172,10 @@ def finish_surface(material, shader, finish, environment, strength):
         nonferrous = 0.
     known = math_node(tree, 'ADD', math_node(tree, 'ADD', metal, paint, clamp=True), nonferrous, clamp=True)
     version = finish.get('version')
-    cylindrical = version in ('generated-pbr-v4', 'generated-pbr-v5') and entry.get('cylinder')
-    hydraulic = version == 'generated-pbr-v5' and cylindrical == 'normalized_y'
-    formed = version in ('generated-pbr-v3', 'generated-pbr-v4', 'generated-pbr-v5')
+    cylinder_pack = 'cylinder' in finish['maps']
+    cylindrical = cylinder_pack and entry.get('cylinder')
+    hydraulic = 'hydraulic' in finish['maps'] and cylindrical == 'normalized_y'
+    formed = cylinder_pack or version == 'generated-pbr-v3'
     layered_wear = formed or finish.get('version') == 'generated-pbr-v2'
     coords = coordinates.outputs['Object']  # Canonical mesh is scaled uniformly by longest axis.
     oxidation, pits, fine = tile(tree, coords, finish['maps']['oxide'], 'Generated oxidation', 1.9, (.17, .39, .72))

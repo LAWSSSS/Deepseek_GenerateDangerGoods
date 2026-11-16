@@ -118,6 +118,16 @@ class GeneratedFinishTests(unittest.TestCase):
         self.assertTrue(np.all((dense > 38).mean(axis=(0, 1)) > (original > 38).mean(axis=(0, 1))))
         self.assertTrue(np.all(dense[..., 1] <= dense[..., 0]))
 
+    def test_triple_hydraulic_wear_preserves_old_marks_and_stays_patchy(self):
+        base = cylinder_wear_tile(dense=True)
+        heavy = cylinder_wear_tile(dense=True, layers=3)
+        np.testing.assert_array_equal(heavy, cylinder_wear_tile(dense=True, layers=3))
+        self.assertTrue(np.all(heavy >= base))
+        self.assertTrue(np.all(heavy[..., 1] <= heavy[..., 0]))
+        coverage = (heavy > 38).mean(axis=(0, 1))
+        self.assertTrue(np.all(coverage > 2 * (base > 38).mean(axis=(0, 1))))
+        self.assertLess(coverage[0], .65)
+
     def test_body_wear_excludes_protected_label(self):
         layout = {'material': 'body paint', 'cylinder': 'source_uv', 'protected_uv': [.34, .018, .69, .67]}
         with TemporaryDirectory() as temp:
@@ -236,7 +246,7 @@ material = bpy.data.materials.new('hydraulic paint')
 material.use_nodes = True
 tree = material.node_tree
 source = tree.nodes.get('Principled BSDF')
-profile = {{'version': 'generated-pbr-v5', 'maps': {{**maps, 'hydraulic': maps['paint']}},
+profile = {{'version': 'generated-pbr-v6', 'maps': {{**maps, 'cylinder': maps['paint'], 'hydraulic': maps['paint']}},
            'regions': {{'materials': {{material.name: {{
                'coverage': [0, 1, 0], 'constant': [0, 1, 0], 'authored_atlas': True,
                'cylinder': 'normalized_y', 'barrel': [-.29, .22, 0, -.03, .088]}}}}}}}}

@@ -1034,8 +1034,8 @@ def render_parts(request):
             bpy.data.orphans_purge(do_recursive=True)
         asset=normalized_mesh(request['mesh'])
         state.update(asset=asset,arrays=arrays(asset),mesh_key=mesh_key)
-        state['weld_detail'] = shape_weld_beads(asset.data, finish) if finish and finish['version'] in (
-            'generated-pbr-v3', 'generated-pbr-v4', 'generated-pbr-v5') else None
+        formed = finish and ('cylinder' in finish['maps'] or finish['version'] == 'generated-pbr-v3')
+        state['weld_detail'] = shape_weld_beads(asset.data, finish) if formed else None
         imported=1;import_seconds=time.monotonic()-begin
     obj=state['asset'];vertices,faces=state['arrays']
     points,rotation=pose_points(vertices,request['matrix'],request['yaw'])
@@ -1095,7 +1095,7 @@ def render_parts(request):
             scene.render.image_settings.color_depth='8'
             scene.view_settings.view_transform='AgX'
             pass_outputs(scene,folder,generated_finish=finish is not None,
-                         hydraulic_finish=bool(finish and finish['version'] == 'generated-pbr-v5'))
+                         hydraulic_finish=bool(finish and 'hydraulic' in finish['maps']))
             legacy.render(scene,folder/'object.png')
         else:
             scene.use_nodes=False

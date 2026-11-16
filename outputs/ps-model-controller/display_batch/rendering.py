@@ -191,7 +191,7 @@ class RenderCache:
     async def _get(self,request,keys,timings,full_frame,shadow_reference=None):
         windows=request['windows']
         finish = request.get('generated_finish')
-        hydraulic = bool(finish and finish.get('version') == 'generated-pbr-v5')
+        hydraulic = bool(finish and 'hydraulic' in finish['maps'])
         entries={};cache={};missing={};folders={};imports=0;worker_detail={}
         for part,key in keys.items():
             folder=self.root/part/key

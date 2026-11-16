@@ -120,3 +120,20 @@ $controller = 'outputs/ps-model-controller'
 最终固定几何对照两套各 3 张，累计墙钟 221.2 秒，Blender worker 122.1 秒，命中 6 个无物体阴影基准，盲评 3 次、11,096 token。计入前期试跑与复跑，实际共 7 次 API 请求（含 1 次重试）、26,047 token，估算 ¥0.0300–0.0601，记录墙钟约 347.3 秒，Blender worker 185.4 秒。本轮无新增生图，本机用电金额未知。 [DeepSeek 计价](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
 
 使用 `prepare_generated_pbr.py --version generated-pbr-v5` 从原三张 PNG 准备清单。本机小样使用 `work/render-materials/hydraulic-wear-v2/pack.json`。复跑先用 `validate_generated_pbr.py all --offline --hydraulic --pack work/render-materials/cylinder-wear-v1/pack.json --out <基准目录>`，再用 `validate_generated_pbr.py all --hydraulic --pack work/render-materials/hydraulic-wear-v2/pack.json --out <新版目录> --compare-to <基准目录>`。
+
+
+## 液压缸专项 · 划痕和锈坑密度三倍
+
+`generated-pbr-v6` 为 31 号缸筒在现版贴图上叠加两组独立生成的磨损纹样。划痕簇从 76 组增至 228 组，独立锈坑簇从 105 组增至 315 组。叠加取各处较高的遮罩值，保持深划痕中的露钢、哑光锈蚀以及未磨损漆面。1024 px 贴图中，划痕覆盖从 20.93% 增至 49.34%，独立锈坑从 11.57% 增至 31.06%，露钢从 7.40% 增至 19.67%，按通道值超过 0.15 统计。覆盖率受痕迹重叠影响。其余材质贴图、模型分区及反光配方沿用第五版。
+
+| 场景 | 可见内部划痕覆盖，旧 → 新 | 可见内部锈蚀覆盖，旧 → 新 | 盲评 |
+|---|---:|---:|---|
+| `36_6_6` | 22.47% → 37.37% | 25.04% → 35.65% | 上一版，材质和纹理各 1/4 |
+| `36_6_24` | 28.55% → 55.47% | 36.66% → 51.21% | 三倍版，材质和纹理各 3/4 |
+| `53_7_35` | 27.01% → 53.47% | 35.24% → 49.50% | 上一版，材质和纹理各 2/4 |
+
+覆盖按投影后的着色器权重超过 0.03 统计。三张原尺寸 3840×2160 PNG 沿用第五版完整雾场、曝光、白平衡、模糊和相机。渲染几何顶点散列一致，尺寸与接触锚点一致，三组无物体阴影基准均命中。像素保护、44 个源模型散列和 106 项回归通过。盲评认为 `36_6_24` 的锈斑和受光更真实，另两张分别有高光显硬和纹理显糊的问题。现场尺度和实际接触继续待审，三倍版仅作专项对照。 [完整画面与原尺寸 PNG](outputs/液压缸三倍划痕锈迹-20261116/index.html) · [验证和成本](outputs/液压缸三倍划痕锈迹-20261116/validation.json)
+
+整轮 117.7 秒，Blender worker 61.2 秒；3 次实际评审、0 次重试、10,977 token，API 估算 ¥0.0117–0.0233。新增生图 0 次，本机用电金额未知。 [DeepSeek 计价](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
+
+用 `prepare_generated_pbr.py --version generated-pbr-v6` 和原三张 PNG 复建贴图。本机清单为 `work/render-materials/hydraulic-wear-v6/pack.json`。使用 `validate_generated_pbr.py all --hydraulic --pack work/render-materials/hydraulic-wear-v6/pack.json --compare-to outputs/液压缸强化露钢-最终对照-20261116` 并指定新的输出目录。加 `--offline` 可省略盲评。

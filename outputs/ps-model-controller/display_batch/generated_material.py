@@ -17,7 +17,9 @@ WEAR_VERSION = 'generated-pbr-v2'
 FORM_VERSION = 'generated-pbr-v3'
 CYLINDER_VERSION = 'generated-pbr-v4'
 HYDRAULIC_VERSION = 'generated-pbr-v5'
-CYLINDER_VERSIONS = (CYLINDER_VERSION, HYDRAULIC_VERSION)
+TRIPLE_WEAR_VERSION = 'generated-pbr-v6'
+HYDRAULIC_VERSIONS = (HYDRAULIC_VERSION, TRIPLE_WEAR_VERSION)
+CYLINDER_VERSIONS = (CYLINDER_VERSION, *HYDRAULIC_VERSIONS)
 PACK_VERSIONS = (VERSION, WEAR_VERSION, FORM_VERSION, *CYLINDER_VERSIONS)
 CHANNELS = {
     'oxide': ('oxidation', 'pitting', 'fine_relief'),
@@ -183,13 +185,16 @@ def build_pack(folder, sources, prompts, layouts, *, version=VERSION):
                                  'size': list(size), 'generator': 'ImageGen built-in', 'prompt': prompt}}
     if version in CYLINDER_VERSIONS:
         from .cylinder_wear import cylinder_wear_tile
-        for kind in ('cylinder', 'hydraulic') if version == HYDRAULIC_VERSION else ('cylinder',):
-            packed = cylinder_wear_tile(dense=kind == 'hydraulic')
+        for kind in ('cylinder', 'hydraulic') if version in HYDRAULIC_VERSIONS else ('cylinder',):
+            layers = 3 if version == TRIPLE_WEAR_VERSION and kind == 'hydraulic' else 1
+            packed = cylinder_wear_tile(dense=kind == 'hydraulic', layers=layers)
             baked = folder / f'{kind}-channels.png'
             save_image(Image.fromarray(packed), baked)
             maps[kind] = {'path': baked.name, 'sha256': file_hash(baked), 'size': list(packed.shape[1::-1]),
                           'color_space': 'Non-Color', 'channels': list(CYLINDER_CHANNELS),
                           'statistics': map_statistics(packed), 'source': {'generator': 'deterministic cylinder wear'}}
+            if layers > 1:
+                maps[kind]['source']['layers'] = layers
     atomic_json(manifest, {'version': version, 'maps': maps, 'atlases': layout})
     return manifest
 
@@ -201,7 +206,7 @@ def load_pack(manifest):
     expected = dict(CHANNELS)
     if version in CYLINDER_VERSIONS:
         expected['cylinder'] = CYLINDER_CHANNELS
-    if version == HYDRAULIC_VERSION:
+    if version in HYDRAULIC_VERSIONS:
         expected['hydraulic'] = CYLINDER_CHANNELS
     if version not in PACK_VERSIONS or set(raw.get('maps', {})) != set(expected):
         raise ValueError('unsupported generated_pbr manifest')

@@ -30,16 +30,29 @@ def _scratch(rng, center, length, angle, width):
     return np.concatenate((left, right[::-1]))
 
 
-def cylinder_wear_tile(size=1024, *, dense=False):
+def cylinder_wear_tile(size=1024, *, dense=False, layers=1):
     """Return uint8 channels for scrape wear, exposed steel, and rust nuclei.
 
     X follows the axis, and Y wraps once around the circumference. Strokes are
     grouped with related directions and interrupted by sparse clean regions.
+    Additional layers place independent clusters over the original pattern.
     """
     if type(size) is not int or not 1 <= size <= 2048:
         raise ValueError('cylindrical wear tile size must be an integer from 1 to 2048')
+    if type(layers) is not int or not 1 <= layers <= 3:
+        raise ValueError('cylindrical wear layers must be an integer from 1 to 3')
+    maps = _wear_layer(442763, dense)
+    for layer in range(1, layers):
+        np.maximum(maps, _wear_layer(442763 + layer, dense), out=maps)
+    if size != maps.shape[0]:
+        interpolation = cv2.INTER_AREA if size < maps.shape[0] else cv2.INTER_LINEAR
+        maps = cv2.resize(maps, (size, size), interpolation=interpolation)
+    return maps
+
+
+def _wear_layer(seed, dense):
     resolution = 1024
-    rng = np.random.default_rng(442763)
+    rng = np.random.default_rng(seed)
     abrasion = np.zeros((resolution, resolution), np.uint8)
     exposed = np.zeros_like(abrasion)
     pits = np.zeros_like(abrasion)
@@ -75,8 +88,4 @@ def cylinder_wear_tile(size=1024, *, dense=False):
             outline = point + directions * (radius * rng.uniform(.52, 1.35, (len(angles), 1)))
             _draw_wrapped(pits, outline, rng.integers(86, 238))
 
-    maps = np.stack((abrasion, np.minimum(exposed, abrasion), pits), axis=-1)
-    if size != resolution:
-        interpolation = cv2.INTER_AREA if size < resolution else cv2.INTER_LINEAR
-        maps = cv2.resize(maps, (size, size), interpolation=interpolation)
-    return maps
+    return np.stack((abrasion, np.minimum(exposed, abrasion), pits), axis=-1)
