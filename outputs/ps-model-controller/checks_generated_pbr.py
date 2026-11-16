@@ -359,13 +359,15 @@ for material_name, weights, cylinder, version in (
     ('Bottle excluded from amber ageing fixture', [0, 1, 0], 'source_uv', 'generated-pbr-v12'),
     ('Even dirt base on aluminium fixture', [0, 0, 1], None, 'generated-pbr-v13'),
     ('Bottle excluded from even dirt fixture', [0, 1, 0], 'source_uv', 'generated-pbr-v13'),
+    ('Even outer dirt on aluminium fixture', [0, 0, 1], None, 'generated-pbr-v14'),
+    ('Bottle excluded from outer dirt fixture', [0, 1, 0], 'source_uv', 'generated-pbr-v14'),
 ):
     material = bpy.data.materials.new(material_name)
     material.use_nodes = True
     tree = material.node_tree
     shader = tree.nodes.get('Principled BSDF')
     region = {{'coverage': weights, 'constant': weights, 'authored_atlas': True, 'cylinder': cylinder}}
-    amber_version = version in ('generated-pbr-v12', 'generated-pbr-v13')
+    amber_version = version in ('generated-pbr-v12', 'generated-pbr-v13', 'generated-pbr-v14')
     profile = {{'version': version, 'corrosion': True, 'amber_age': amber_version,
         'maps': {{**maps, 'cylinder': maps['paint'], 'handling': maps['paint']}},
         'regions': {{'materials': {{material_name: region}}}}}}
@@ -386,11 +388,17 @@ for material_name, weights, cylinder, version in (
         assert amber.inputs['Metallic'].default_value == 0.
         assert any(n.type == 'OUTPUT_AOV' and n.aov_name == 'amber_film' for n in tree.nodes)
     base_film = tree.nodes.get('Even mineral dirt film')
-    assert (base_film is not None) == (version == 'generated-pbr-v13' and cylinder is None)
+    assert (base_film is not None) == (version in ('generated-pbr-v13', 'generated-pbr-v14') and cylinder is None)
     if base_film:
         base_mix = base_film.outputs[0].links[0].to_node
         assert base_mix.inputs[1].links[0].from_node.type == 'MIX_SHADER'
         assert base_mix.outputs[0].links[0].to_node == amber.outputs[0].links[0].to_node
+    outer_film = tree.nodes.get('Even outer dirt film')
+    assert (outer_film is not None) == (version == 'generated-pbr-v14' and cylinder is None)
+    if outer_film:
+        outer_mix = outer_film.outputs[0].links[0].to_node
+        assert outer_mix.inputs[1].links[0].from_node == grime.outputs[0].links[0].to_node
+        assert outer_mix.outputs[0].links[0].to_node.type == 'OUTPUT_MATERIAL'
     if oxide:
         assert oxide.inputs['Metallic'].default_value == 0.
         assert oxide.inputs['Roughness'].is_linked

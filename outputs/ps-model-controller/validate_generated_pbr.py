@@ -19,7 +19,9 @@ from display_batch.ai import InvalidStructuredReply, ProviderUnavailable
 from display_batch.common import ROOT, atomic_json, file_hash, implementation_manifest, resolve, signature
 from display_batch.compose import compose, object_window, warp
 from display_batch.costs import cumulative, label
-from display_batch.generated_material import LOCAL_WEATHER_VERSIONS, VERSION as FIRST_PACK_VERSION, finish_regions, load_pack
+from display_batch.generated_material import (
+    LOCAL_WEATHER_VERSIONS, OUTER_DUST_VERSION, VERSION as FIRST_PACK_VERSION, finish_regions, load_pack,
+)
 from display_batch.pipeline import Pipeline
 from display_batch.rendering import (
     AMBER_PASS, CORROSION_PASS, FINISH_PASS, HANDLING_PASS, HYDRAULIC_PASS, render_dependencies, render_request,
@@ -180,7 +182,7 @@ def read_exr(path):
     return cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
 
 
-def material_diagnostic(folder, path, *, local_weather=False):
+def material_diagnostic(folder, path, *, local_weather=False, outer_dirt=False):
     values = finish_image(folder)
     with Image.open(folder / 'object.png') as image:
         core = np.asarray(image.getchannel('A')) > 245
@@ -208,9 +210,10 @@ def material_diagnostic(folder, path, *, local_weather=False):
         Image.fromarray(np.uint8(np.clip(amber, 0, 1) * 255)).save(image)
         result['amber_film'] = {'path': str(image)}
         if film[..., 2].max() > .005:
-            image = path.with_name('base-dirt.png')
-            Image.fromarray(np.uint8(np.clip(film[..., 2] / .26, 0, 1) * 255)).save(image)
-            result['base_dirt'] = {'path': str(image)}
+            name, weight = ('outer_dirt', .42) if outer_dirt else ('base_dirt', .26)
+            image = path.with_name(f'{name}.png')
+            Image.fromarray(np.uint8(np.clip(film[..., 2] / weight, 0, 1) * 255)).save(image)
+            result[name] = {'path': str(image)}
     return result
 
 
@@ -292,8 +295,9 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
                 result['amber_film'][name] = float(np.median(cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)[:, 0, 2]))
         even = coverage & (film[..., 2] > .20)
         if even.any():
-            result['base_dirt'] = {'coverage': float(even.sum() / coverage.sum()),
-                                   'median_weight': float(np.median(film[..., 2][even]))}
+            name = 'outer_dirt' if meta['generated_finish']['version'] == OUTER_DUST_VERSION else 'base_dirt'
+            result[name] = {'coverage': float(even.sum() / coverage.sum()),
+                            'median_weight': float(np.median(film[..., 2][even]))}
     return result
 
 
@@ -323,7 +327,8 @@ async def preview(pipe, case, asset, pack, out):
         folder.mkdir(exist_ok=True)
         metadata = await pipe.blender.ask('render_parts', {**request, 'parts': {'object': str(folder)}})
         timing[tag] = metadata['timings']
-        material_diagnostic(folder, folder / 'material.png', local_weather=pack['version'] in LOCAL_WEATHER_VERSIONS)
+        material_diagnostic(folder, folder / 'material.png', local_weather=pack['version'] in LOCAL_WEATHER_VERSIONS,
+                            outer_dirt=pack['version'] == OUTER_DUST_VERSION)
         renders.append(folder)
     coverage = []
     for folder in renders:
@@ -467,6 +472,9 @@ def write_report(out, cases, hashes, pack, preview_report, *, metal_review=False
         even_dirt = material.get('base_dirt', {}).get('path')
         if even_dirt:
             link += f' · <a href="{html.escape(relative(even_dirt, out), quote=True)}">均匀底泥分布</a>'
+        outer_dirt = material.get('outer_dirt', {}).get('path')
+        if outer_dirt:
+            link += f' · <a href="{html.escape(relative(outer_dirt, out), quote=True)}">均匀外层灰泥</a>'
         corrosion_stats = material.get('final_frame', {}).get('corrosion')
         coverage = (f'<p>可见物品内部锈蚀覆盖 {corrosion_stats["rust_fraction"]:.1%}，'
                     f'露钢覆盖 {corrosion_stats["exposed_steel_fraction"]:.1%}。</p>') if corrosion_stats else ''
@@ -563,7 +571,8 @@ async def run_case(pipe, case, pack, hashes, out):
         invariants['status'] = 'pass' if all(checks.values()) and raw['status'] == 'pass' else 'fail'
         failures = [k for k, v in comp['checks'].items() if v['status'] == 'fail']
         diagnostic = material_diagnostic(folder, out / 'material.png',
-                                         local_weather=pack['version'] in LOCAL_WEATHER_VERSIONS)
+                                         local_weather=pack['version'] in LOCAL_WEATHER_VERSIONS,
+                                         outer_dirt=pack['version'] == OUTER_DUST_VERSION)
         diagnostic['final_frame'] = frame_detail(case, comp, meta, folder, layers['alpha'])
         checks['surface_diagnostic_nonzero'] = max(diagnostic['p95']) > .01
         if not checks['surface_diagnostic_nonzero']:

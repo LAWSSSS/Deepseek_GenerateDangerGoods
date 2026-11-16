@@ -270,3 +270,19 @@ $controller = 'outputs/ps-model-controller'
 新旧 PNG 均为 3840×2160，相机、空气遮蔽、摆位、锚点、透明度和前景逐项一致，投影轮廓 IoU 均为 1.0。孔洞、保护像素、44 个源模型散列及 109 项回归通过。接触和尺度仍待审。运行 43.1 秒，Blender worker 19.9 秒，两次无物体阴影基准命中。API 0 次、0 token、¥0，无新增生图，本机用电金额未知。
 
 用 `prepare_generated_pbr.py --version generated-pbr-v13` 复建 `work/render-materials/even-dirt-v13/pack.json`。运行 `validate_generated_pbr.py all --pneumatic-review --offline --pack work/render-materials/even-dirt-v13/pack.json --compare-to outputs/气缸发黄老化-20261116 --out <新目录>`。
+
+
+## 气缸专项 · 均匀外层灰泥
+
+第十四版沿用均匀底泥，并在黄褐油膜与结块污渍上方增加一层低反光灰泥。外层在已确认金属面上的混合权重为 0.42，覆盖筒身、端盖和拉杆。原有局部划痕、结块和油膜图样继续参与着色，外层使成图中的局部对比有所减弱。
+
+| 场景 | 可见内部外层灰泥覆盖 | 较干净区域镜面亮度 P90，旧 → 新 | 物品局部纹理亮度差 P75，旧 → 新 |
+|---|---:|---:|---:|
+| `36_6_24` | 95.39% | 0.2281 → 0.1343，降低 41.1% | 8.29 → 6.88 |
+| `53_7_35` | 95.47% | 0.07467 → 0.04478，降低 40.0% | 4.61 → 4.01 |
+
+灰泥覆盖按投影后权重 >0.20 的可见内部像素统计。镜面分层取结块泥垢权重 <0.35 的已确认金属区域。局部划痕、污渍与油膜通道较上一版的平均绝对差均低于 0.00000003。两张图的物品与邻近废钢亮度差相对上一版均在 0.10 Lab L* 内。 [两组完整画面对照](outputs/气缸均匀厚污-20261116/index.html) · [验证记录](outputs/气缸均匀厚污-20261116/validation.json)
+
+两组新旧 PNG 均为 3840×2160，原始投影轮廓 IoU 为 1.0。薄雾、相机、摆位、锚点、透明度和前景一致，孔洞、保护像素和 44 个源模型散列通过，109 项回归通过。现场接触和尺度仍待审。本轮 44.1 秒，Blender worker 20.0 秒，无物体阴影基准两次命中。API 0 次、0 token、¥0，无新增生图，本机用电金额未知。
+
+用 `prepare_generated_pbr.py --version generated-pbr-v14` 复建 `work/render-materials/outer-dirt-v14/pack.json`。运行 `validate_generated_pbr.py all --pneumatic-review --offline --pack work/render-materials/outer-dirt-v14/pack.json --compare-to outputs/气缸均匀底泥-20261116 --out <新目录>`。
