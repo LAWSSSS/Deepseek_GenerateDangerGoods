@@ -357,13 +357,16 @@ for material_name, weights, cylinder, version in (
     ('Caked dirt on bottle fixture', [0, 1, 0], 'source_uv', 'generated-pbr-v11'),
     ('Amber ageing on aluminium fixture', [0, 0, 1], None, 'generated-pbr-v12'),
     ('Bottle excluded from amber ageing fixture', [0, 1, 0], 'source_uv', 'generated-pbr-v12'),
+    ('Even dirt base on aluminium fixture', [0, 0, 1], None, 'generated-pbr-v13'),
+    ('Bottle excluded from even dirt fixture', [0, 1, 0], 'source_uv', 'generated-pbr-v13'),
 ):
     material = bpy.data.materials.new(material_name)
     material.use_nodes = True
     tree = material.node_tree
     shader = tree.nodes.get('Principled BSDF')
     region = {{'coverage': weights, 'constant': weights, 'authored_atlas': True, 'cylinder': cylinder}}
-    profile = {{'version': version, 'corrosion': True, 'amber_age': version == 'generated-pbr-v12',
+    amber_version = version in ('generated-pbr-v12', 'generated-pbr-v13')
+    profile = {{'version': version, 'corrosion': True, 'amber_age': amber_version,
         'maps': {{**maps, 'cylinder': maps['paint'], 'handling': maps['paint']}},
         'regions': {{'materials': {{material_name: region}}}}}}
     assert finish_surface(material, shader, profile, env, 0.)
@@ -372,16 +375,22 @@ for material_name, weights, cylinder, version in (
     assert ('Axial stains and sediment' in tree.nodes) == (cylinder == 'source_uv')
     grime = tree.nodes['Ground-in nonmetallic grime']
     assert grime.inputs['Metallic'].default_value == 0.
-    caked = version in ('generated-pbr-v11', 'generated-pbr-v12')
+    caked = version == 'generated-pbr-v11' or amber_version
     assert ('Caked dirt and splatter' in tree.nodes) == caked
     if caked:
         assert grime.inputs['Normal'].links[0].from_node.name == 'Packed dirt relief'
         assert any(n.type == 'RGBTOBW' for n in tree.nodes) == (cylinder == 'source_uv')
     amber = tree.nodes.get('Old amber oil film')
-    assert (amber is not None) == (version == 'generated-pbr-v12' and cylinder is None)
+    assert (amber is not None) == (amber_version and cylinder is None)
     if amber:
         assert amber.inputs['Metallic'].default_value == 0.
         assert any(n.type == 'OUTPUT_AOV' and n.aov_name == 'amber_film' for n in tree.nodes)
+    base_film = tree.nodes.get('Even mineral dirt film')
+    assert (base_film is not None) == (version == 'generated-pbr-v13' and cylinder is None)
+    if base_film:
+        base_mix = base_film.outputs[0].links[0].to_node
+        assert base_mix.inputs[1].links[0].from_node.type == 'MIX_SHADER'
+        assert base_mix.outputs[0].links[0].to_node == amber.outputs[0].links[0].to_node
     if oxide:
         assert oxide.inputs['Metallic'].default_value == 0.
         assert oxide.inputs['Roughness'].is_linked

@@ -202,10 +202,15 @@ def material_diagnostic(folder, path, *, local_weather=False):
         Image.fromarray(np.uint8(np.clip(handling * [1.4, 1.4, 1.], 0, 1) * 255)).save(image)
         result['handling'] = {'path': str(image), 'channels': ['wide_scratch', 'grime', 'nonferrous_oxide']}
     if (folder / AMBER_PASS).is_file():
-        amber = finish_image(folder, AMBER_PASS)[..., 0]
+        film = finish_image(folder, AMBER_PASS)
+        amber = film[..., 0]
         image = path.with_name('amber-film.png')
         Image.fromarray(np.uint8(np.clip(amber, 0, 1) * 255)).save(image)
         result['amber_film'] = {'path': str(image)}
+        if film[..., 2].max() > .005:
+            image = path.with_name('base-dirt.png')
+            Image.fromarray(np.uint8(np.clip(film[..., 2] / .26, 0, 1) * 255)).save(image)
+            result['base_dirt'] = {'path': str(image)}
     return result
 
 
@@ -285,6 +290,10 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
                 with Image.open(path) as image:
                     rgb = np.float32(image.crop(bounds).convert('RGB'))[aged, None, :] / 255.
                 result['amber_film'][name] = float(np.median(cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)[:, 0, 2]))
+        even = coverage & (film[..., 2] > .20)
+        if even.any():
+            result['base_dirt'] = {'coverage': float(even.sum() / coverage.sum()),
+                                   'median_weight': float(np.median(film[..., 2][even]))}
     return result
 
 
@@ -455,6 +464,9 @@ def write_report(out, cases, hashes, pack, preview_report, *, metal_review=False
         amber = material.get('amber_film', {}).get('path')
         if amber:
             link += f' · <a href="{html.escape(relative(amber, out), quote=True)}">发黄油膜分布</a>'
+        even_dirt = material.get('base_dirt', {}).get('path')
+        if even_dirt:
+            link += f' · <a href="{html.escape(relative(even_dirt, out), quote=True)}">均匀底泥分布</a>'
         corrosion_stats = material.get('final_frame', {}).get('corrosion')
         coverage = (f'<p>可见物品内部锈蚀覆盖 {corrosion_stats["rust_fraction"]:.1%}，'
                     f'露钢覆盖 {corrosion_stats["exposed_steel_fraction"]:.1%}。</p>') if corrosion_stats else ''

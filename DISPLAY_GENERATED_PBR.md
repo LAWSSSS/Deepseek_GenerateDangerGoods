@@ -254,3 +254,19 @@ $controller = 'outputs/ps-model-controller'
 本轮 42.8 秒，Blender worker 19.6 秒，无物体阴影基准两次命中。API 0 次、0 token、¥0，无新增生图，本机用电金额未知。
 
 以 `prepare_generated_pbr.py --version generated-pbr-v12` 从三张已有素材复建 `work/render-materials/amber-age-v12/pack.json`。运行 `validate_generated_pbr.py all --pneumatic-review --offline --pack work/render-materials/amber-age-v12/pack.json --out <新目录>`。
+
+
+## 气缸专项 · 均匀薄底泥
+
+第十三版在已确认的金属区域加入均匀薄矿物泥层，混合权重 0.26。薄层位于局部旧油膜、结块泥垢和浮灰下方，主要改变较干净的金属反光。局部划痕、泥块和发黄图案沿用第十二版的遮罩与强度。使用邻近废钢的色偏校准薄层颜色。
+
+| 场景 | 可见内部的底泥覆盖 | 较干净区域的镜面亮度 P90，旧 → 新 | 结块泥垢覆盖 | 发黄油膜覆盖 |
+|---|---:|---:|---:|---:|
+| `36_6_24` | 94.14% | 0.3068 → 0.2290，降低 25.34% | 81.66% | 73.39% |
+| `53_7_35` | 93.87% | 0.09986 → 0.07493，降低 24.96% | 77.05% | 60.93% |
+
+底泥覆盖按投影后权重 >0.20 的可见内部像素统计。镜面分层统计取结块泥垢权重 <0.35 的已确认金属区域。原有划痕、结块泥垢与油膜通道同位置平均绝对差均低于 0.00000002，两组的局部泥垢和油膜覆盖率相同。较重薄雾的全景变化较轻。 [两组完整画面对照](outputs/气缸均匀底泥-20261116/index.html) · [验证记录](outputs/气缸均匀底泥-20261116/validation.json)
+
+新旧 PNG 均为 3840×2160，相机、空气遮蔽、摆位、锚点、透明度和前景逐项一致，投影轮廓 IoU 均为 1.0。孔洞、保护像素、44 个源模型散列及 109 项回归通过。接触和尺度仍待审。运行 43.1 秒，Blender worker 19.9 秒，两次无物体阴影基准命中。API 0 次、0 token、¥0，无新增生图，本机用电金额未知。
+
+用 `prepare_generated_pbr.py --version generated-pbr-v13` 复建 `work/render-materials/even-dirt-v13/pack.json`。运行 `validate_generated_pbr.py all --pneumatic-review --offline --pack work/render-materials/even-dirt-v13/pack.json --compare-to outputs/气缸发黄老化-20261116 --out <新目录>`。
