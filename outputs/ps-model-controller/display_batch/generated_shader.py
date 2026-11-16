@@ -84,6 +84,8 @@ def update_surface_palette(tree, environment):
         ('Local dull nonferrous oxide', (.175, .170, .153)),
         ('Local wet sediment', (.025, .021, .016)),
         ('Local dry sediment', (.21, .174, .125)),
+        ('Local caked oil dirt', (.024, .020, .016)),
+        ('Local caked mineral dirt', (.18, .158, .126)),
     ):
         node = tree.nodes.get(name)
         if node is not None:
@@ -123,6 +125,28 @@ def dull_nonferrous_layer(tree, substrate, coverage, fine, normal):
     assign(tree, substrate, layer.inputs[1])
     assign(tree, oxide.outputs[0], layer.inputs[2])
     return layer.outputs[0]
+
+
+def caked_dirt(tree, coords, texture_entry, surface, label, native_color):
+    """Separate packed wet dirt, dry crust and a thin splatter on bottle print."""
+    _, wet, grains = tile(tree, coords, texture_entry, 'Caked dirt and splatter', 2.36, (.61, .43, .82))
+    blotches = surface_noise(tree, coords, 8.5, 3.)
+    field = add(tree, mul(tree, blotches, .47), add(tree, mul(tree, wet, .42), mul(tree, grains, .29)))
+    packed = ramp(tree, field, .255, 3.8)
+    gain = mul(tree, surface, mul(tree, packed, .92))
+    if label is not None:
+        luma = tree.nodes.new('ShaderNodeRGBToBW')
+        assign(tree, native_color, luma.inputs[0])
+        # The audited print rectangle is part of the bottle material. Keep the
+        # brightest lettering under at most eight percent dirt.
+        visible_ink = ramp(tree, luma.outputs[0], .13, 5.)
+        allowance = add(tree, .08, mul(tree, math_node(tree, 'SUBTRACT', 1., visible_ink), .18))
+        splatter = mul(tree, label, mul(tree, packed, allowance))
+        gain = math_node(tree, 'ADD', gain, splatter, clamp=True)
+    mineral = ramp(tree, add(tree, mul(tree, grains, .62), mul(tree, blotches, .54)), .30, 2.8)
+    pigment = mix(tree, mineral, palette_socket(tree, 'Local caked oil dirt'),
+                  palette_socket(tree, 'Local caked mineral dirt'))
+    return gain, pigment, mul(tree, grains, packed)
 
 
 def shape_weld_beads(mesh, finish):
@@ -246,7 +270,7 @@ def finish_surface(material, shader, finish, environment, strength):
         color = tree.nodes.get('Generated dust tint')
         if color is not None:
             color.outputs[0].default_value = dust_color(environment)
-        if finish.get('version') in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10'):
+        if finish.get('version') in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10', 'generated-pbr-v11'):
             update_surface_palette(tree, environment)
         return True
     name = re.sub(r'\.\d{3}$', '', material.name)
@@ -281,8 +305,8 @@ def finish_surface(material, shader, finish, environment, strength):
         nonferrous = 0.
     known = math_node(tree, 'ADD', math_node(tree, 'ADD', metal, paint, clamp=True), nonferrous, clamp=True)
     version = finish.get('version')
-    local_weather = version in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10')
-    aged_surface = version == 'generated-pbr-v10'
+    local_weather = version in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10', 'generated-pbr-v11')
+    aged_surface = version in ('generated-pbr-v10', 'generated-pbr-v11')
     handling = 'handling' in finish['maps']
     corrosion = finish.get('corrosion', False)
     ferrous = corrosion and (entry.get('authored_atlas') or (
@@ -290,6 +314,8 @@ def finish_surface(material, shader, finish, environment, strength):
             r'\b(?:alumin\w*|brass|bronze|copper|stainless)\b', name, re.I)))
     cylinder_pack = 'cylinder' in finish['maps']
     cylindrical = cylinder_pack and entry.get('cylinder')
+    caked = version == 'generated-pbr-v11' and entry.get('authored_atlas') and (
+        cylindrical == 'source_uv' or entry['coverage'][2] > 0)
     hydraulic = 'hydraulic' in finish['maps'] and cylindrical == 'normalized_y'
     formed = cylinder_pack or version == 'generated-pbr-v3'
     layered_wear = formed or finish.get('version') == 'generated-pbr-v2'
@@ -456,14 +482,23 @@ def finish_surface(material, shader, finish, environment, strength):
         stain.name = 'Ground-in nonmetallic grime'
         stain['display_deposit'] = True
         stain.inputs['Specular IOR Level'].default_value = .16
-        if aged_surface and cylindrical == 'source_uv':
+        stain_normal = normal
+        if caked:
+            bottle = cylindrical == 'source_uv'
+            surface = paint if bottle else math_node(tree, 'ADD', metal, nonferrous, clamp=True)
+            print_region = math_node(tree, 'SUBTRACT', 1., paint) if bottle else None
+            crust, color, texture_height = caked_dirt(tree, coords, finish['maps']['handling'], surface, print_region,
+                                                    original(shader.inputs['Base Color']))
+            grime = math_node(tree, 'MAXIMUM', grime, crust)
+            stain_normal = relief(tree, 'Packed dirt relief', texture_height, normal, .00074, .26)
+        elif aged_surface and cylindrical == 'source_uv':
             color = mix(tree, sediment, palette_socket(tree, 'Local wet sediment'),
                         palette_socket(tree, 'Local dry sediment'))
         else:
             color = palette_socket(tree, 'Local ground-in grime')
         assign(tree, color, stain.inputs['Base Color'])
         assign(tree, add(tree, .69, mul(tree, fine, .19)), stain.inputs['Roughness'])
-        assign(tree, normal, stain.inputs['Normal'])
+        assign(tree, stain_normal, stain.inputs['Normal'])
         layer = tree.nodes.new('ShaderNodeMixShader')
         assign(tree, grime, layer.inputs[0])
         assign(tree, substrate, layer.inputs[1])

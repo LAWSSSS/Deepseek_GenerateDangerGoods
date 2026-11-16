@@ -50,6 +50,10 @@ class GeneratedFinishTests(unittest.TestCase):
             rgb, alpha, reference, {'basis': 'nearby_same_support_and_depth'}, deep_grime=True)
         self.assertLess(details['luma_gap_after_lab'], summary['luma_gap_after_lab'])
         np.testing.assert_array_equal(stronger[alpha == 0], rgb[alpha == 0])
+        caked, details_caked = match_surface_context(
+            rgb, alpha, reference, {'basis': 'nearby_same_support_and_depth'}, caked_dirt=True)
+        np.testing.assert_array_equal(caked[alpha == 0], rgb[alpha == 0])
+        self.assertLess(details_caked['luma_gap_after_lab'], details['luma_gap_after_lab'])
 
     def test_maps_are_distinct_and_wrap(self):
         source = np.random.default_rng(12).integers(0, 256, (512, 512, 3), dtype=np.uint8)
@@ -346,16 +350,18 @@ aov = next(node for node in tree.nodes if node.type == 'OUTPUT_AOV' and node.aov
 channels = aov.inputs['Color'].links[0].from_node
 assert channels.inputs['Blue'].is_linked
 
-for material_name, weights, cylinder in (
-    ('Protected oxidized aluminium fixture', [0, 0, 1], None),
-    ('Painted bottle fixture', [0, 1, 0], 'source_uv'),
+for material_name, weights, cylinder, version in (
+    ('Protected oxidized aluminium fixture', [0, 0, 1], None, 'generated-pbr-v10'),
+    ('Painted bottle fixture', [0, 1, 0], 'source_uv', 'generated-pbr-v10'),
+    ('Caked dirt on aluminium fixture', [0, 0, 1], None, 'generated-pbr-v11'),
+    ('Caked dirt on bottle fixture', [0, 1, 0], 'source_uv', 'generated-pbr-v11'),
 ):
     material = bpy.data.materials.new(material_name)
     material.use_nodes = True
     tree = material.node_tree
     shader = tree.nodes.get('Principled BSDF')
     region = {{'coverage': weights, 'constant': weights, 'authored_atlas': True, 'cylinder': cylinder}}
-    profile = {{'version': 'generated-pbr-v10', 'corrosion': True,
+    profile = {{'version': version, 'corrosion': True,
         'maps': {{**maps, 'cylinder': maps['paint'], 'handling': maps['paint']}},
         'regions': {{'materials': {{material_name: region}}}}}}
     assert finish_surface(material, shader, profile, env, 0.)
@@ -364,6 +370,11 @@ for material_name, weights, cylinder in (
     assert ('Axial stains and sediment' in tree.nodes) == (cylinder == 'source_uv')
     grime = tree.nodes['Ground-in nonmetallic grime']
     assert grime.inputs['Metallic'].default_value == 0.
+    caked = version == 'generated-pbr-v11'
+    assert ('Caked dirt and splatter' in tree.nodes) == caked
+    if caked:
+        assert grime.inputs['Normal'].links[0].from_node.name == 'Packed dirt relief'
+        assert any(n.type == 'RGBTOBW' for n in tree.nodes) == (cylinder == 'source_uv')
     if oxide:
         assert oxide.inputs['Metallic'].default_value == 0.
         assert oxide.inputs['Roughness'].is_linked

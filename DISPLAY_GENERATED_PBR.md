@@ -216,3 +216,23 @@ $controller = 'outputs/ps-model-controller'
 首版流痕在全景中的变化偏轻，增大泥层对比后生成最终版。最终运行 82.2 秒、Blender worker 40.0 秒，4 个无物体阴影基准全部命中。含首轮累计 165.0 秒、Blender worker 80.5 秒，API 0 次、0 token、¥0，无新增生图，本机电费未知。
 
 复跑时使用 `prepare_generated_pbr.py --version generated-pbr-v10` 从三张原素材重建 `work/render-materials/aged-surface-v10/pack.json`，再运行 `validate_generated_pbr.py all --surface-review --offline --pack work/render-materials/aged-surface-v10/pack.json --out <新目录>`。
+
+
+## 气缸与灭火器 · 重泥垢对照
+
+第十一版在气缸筒身、端盖和拉杆所属的金属区域加入结块油泥与干燥矿物泥层。沉积由多尺度斑块、污迹和颗粒分布驱动，带独立的粗糙度与浅浮雕。灭火器保留筒身原有流痕，加强泥斑和飞溅。已审计的铭牌区使用受限薄层，明亮字样的泥层混合权重上限为 0.08。使用现有材质地图和现场局部色偏。
+
+| 场景与物品 | 可见污渍覆盖，上一版 → 本版 |
+|---|---:|
+| `36_6_24` 气缸 | 42.07% → 81.66% |
+| `53_7_35` 气缸 | 35.00% → 77.05% |
+| `36_6_6` 灭火器 | 36.29% → 54.06% |
+| `53_7_35` 灭火器 | 34.64% → 58.00% |
+
+覆盖取投影中可见物品内部的污渍权重 >0.12。重泥垢使 `36_6_24` 气缸更暗。复用渲染通道，只校正物品的低频亮度，最终该图与邻近废钢的 Lab L* 中位差为 6.76，初稿为 10.64，上一版为 4.94。其他场景依次为 3.58、9.44、3.48。泥垢渲染测量在复合前后完全一致，灭火器铭牌仍可辨。
+
+四组新旧全景均为 3840×2160，原始投影轮廓 IoU 均为 1.0。核对相机、雾场、模糊、投影尺寸、接触锚点、透明度与前景遮罩。孔洞、保护区和 44 个源模型散列通过，109 项回归通过。现场接触和尺度保留待审。 [完整画面对照](outputs/气缸灭火器-重泥垢-20261116-v2/index.html) · [验证记录](outputs/气缸灭火器-重泥垢-20261116-v2/validation.json)
+
+首轮渲染与合成 82.6 秒，最终复用三类渲染通道合成 51.2 秒，累计 133.8 秒、Blender worker 49.7 秒。API 0 次、0 token、¥0，无新增生图，本机电费未知。
+
+使用 `prepare_generated_pbr.py --version generated-pbr-v11` 从原三张 PNG 重建 `work/render-materials/caked-dirt-v11/pack.json`，再运行 `validate_generated_pbr.py all --surface-review --offline --pack work/render-materials/caked-dirt-v11/pack.json --compare-to outputs/气缸深度做旧与灭火器积污-20261116-v2 --out <新目录>`。

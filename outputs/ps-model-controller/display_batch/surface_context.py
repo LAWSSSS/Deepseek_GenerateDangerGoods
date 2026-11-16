@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 
 
-def match_surface_context(rgb, alpha, reference_pixels, context, *, deep_grime=False):
+def match_surface_context(rgb, alpha, reference_pixels, context, *, deep_grime=False, caked_dirt=False):
     """Match low-frequency object colour and leave background pixels exact."""
     reference = np.asarray(reference_pixels, np.float32) / 255.
     core = alpha > .96
@@ -17,7 +17,9 @@ def match_surface_context(rgb, alpha, reference_pixels, context, *, deep_grime=F
     shade = lab[..., 0]
     obj_low, obj_center, obj_high = np.percentile(shade[core], (15, 50, 85))
     difference = center - obj_center
-    slack, gain, max_shift = (2.8, .86, 10.) if deep_grime else (4., .72, 8.)
+    slack, gain, max_shift = (2.8, .86, 10.) if deep_grime or caked_dirt else (4., .72, 8.)
+    if caked_dirt:
+        max_shift = 14.
     shift = float(np.clip(np.sign(difference) * max(0., abs(difference) - slack) * gain, -max_shift, max_shift))
     allowed_span = max(14., (high - low) * 1.15)
     contrast = float(np.clip(allowed_span / max(obj_high - obj_low, 1.), .77, 1.))
