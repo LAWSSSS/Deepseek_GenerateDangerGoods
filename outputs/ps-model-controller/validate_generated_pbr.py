@@ -21,7 +21,7 @@ from display_batch.compose import compose, object_window, warp
 from display_batch.costs import cumulative, label
 from display_batch.generated_material import VERSION as FIRST_PACK_VERSION, finish_regions, load_pack
 from display_batch.pipeline import Pipeline
-from display_batch.rendering import FINISH_PASS, HYDRAULIC_PASS, render_dependencies, render_request
+from display_batch.rendering import CORROSION_PASS, FINISH_PASS, HYDRAULIC_PASS, render_dependencies, render_request
 from display_batch.schema import BatchConfig
 from display_batch.strict_contact import visual_veto
 from display_batch.structured import _review, frame_inputs
@@ -45,6 +45,12 @@ RENDER_SOURCE_FILES = (
     'display_batch/contact_geometry.py', 'display_batch/scanned_shader.py', 'display_batch/local_light.py',
 )
 PILOT_LEGACY_DEPS = 'cb25c083092008cd5cd451c7d1eaddc3d2ef5a4a4d2bc8f804ee8e2258d39523'
+METAL_COMPARISONS = {
+    '3': 'outputs/实物细节复测-20261116',
+    '22': 'outputs/实物细节复测-20261116',
+    '31': 'outputs/液压缸三倍划痕锈迹-20261116',
+    '33': 'outputs/圆柱划痕与锈蚀-20261116',
+}
 
 
 @dataclass(frozen=True)
@@ -144,6 +150,14 @@ def generated_params(case, pack):
             'rust_spots': '0', 'rust_pattern': 'procedural', 'rust_relief': False, 'rust_relief_strength': 1.}
 
 
+def bind_comparison(case, previous):
+    row = read(previous / 'cases' / case.key / 'result.json')
+    if (row['invariants']['fixed_geometry_signature'] != signature(case.candidate)
+            or row['invariants']['status'] != 'pass' or file_hash(row['image']) != row['image_hash']):
+        raise ValueError(f'comparison image or geometry mismatch: {case.key}')
+    return replace(case, previous_image=row['image'], previous_hash=row['image_hash'])
+
+
 def bind_inputs(path, payload):
     if path.is_file() and read(path) != payload:
         raise ValueError(f'frozen inputs changed: {path.name}; choose a new output directory')
@@ -168,9 +182,15 @@ def material_diagnostic(folder, path):
     if not core.any() or values.shape[:2] != core.shape:
         raise ValueError('material diagnostic and coverage mismatch')
     Image.fromarray(np.uint8(np.clip(values * [1., 2., 2.], 0, 1) * 255)).save(path)
-    return {'path': str(path), 'red': 'oxidation and paint chips', 'green': 'scratches', 'blue': 'powder',
+    result = {'path': str(path), 'red': 'oxidation and paint chips', 'green': 'scratches', 'blue': 'powder',
             'mean': values[core].mean(axis=0).tolist(),
             'p95': np.percentile(values[core], 95, axis=0).tolist()}
+    if (folder / CORROSION_PASS).is_file():
+        corrosion = finish_image(folder, CORROSION_PASS)
+        image = path.with_name('corrosion.png')
+        Image.fromarray(np.uint8(np.clip(corrosion * [1.5, 1.5, .35], 0, 1) * 255)).save(image)
+        result['corrosion'] = {'path': str(image), 'channels': ['oxide', 'exposed_steel', 'ferrous_region']}
+    return result
 
 
 def frame_detail(case, comp, meta, folder, visible_alpha):
@@ -194,19 +214,37 @@ def frame_detail(case, comp, meta, folder, visible_alpha):
     result = {'status': 'measured', 'core_pixels': int(coverage.sum()),
               'projected_fraction_gt_0_03': (projected[coverage] > .03).mean(axis=0).tolist(),
               'previous': measure(case.comparison_image), 'current': measure(comp['image'])}
-    if (folder / HYDRAULIC_PASS).is_file():
+    def share_between(first, second):
+        if first.sum() < 20 or second.sum() < 20:
+            return None
+        gloss, diffuse = (warp(np.maximum(0., read_exr(folder / pass_file)[..., :3].mean(axis=2)),
+            full, offset, bounds, window=window) for pass_file in ('specular0001.exr', 'diffuse0001.exr'))
+        share = gloss / np.maximum(gloss + diffuse, 1e-5)
+        return float(np.median(share[first])), float(np.median(share[second]))
+
+    if (folder / CORROSION_PASS).is_file():
+        oxide, steel, ferrous = warp(finish_image(folder, CORROSION_PASS), full, offset, bounds,
+                                    window=window).transpose(2, 0, 1)
+        affected = coverage & (ferrous > .5)
+        result['corrosion'] = {
+            'ferrous_pixels': int(affected.sum()),
+            'rust_fraction': float(np.mean(oxide[coverage] > .03)),
+            'rust_fraction_gt_0_20': float(np.mean(oxide[coverage] > .20)),
+            'exposed_steel_fraction': float(np.mean(steel[coverage] > .03)),
+        }
+        shares = share_between(affected & (steel > .22) & (oxide < .16), affected & (oxide > .45))
+        if shares is not None:
+            result['corrosion']['specular_fraction_median'] = dict(zip(('exposed_steel', 'oxide'), shares))
+    elif (folder / HYDRAULIC_PASS).is_file():
         wear = warp(finish_image(folder, HYDRAULIC_PASS), full, offset, bounds, window=window)
         result['hydraulic_channels'] = dict(zip(('rust', 'exposed_steel', 'scrapes'),
             (wear[coverage] > .03).mean(axis=0).tolist()))
         steel = coverage & (wear[..., 1] > .20)
         nearby = cv2.dilate(np.uint8(steel), np.ones((19, 19), np.uint8)) > 0
         paint = coverage & nearby & (wear.max(axis=2) < .03)
-        if steel.sum() >= 20 and paint.sum() >= 20:
-            gloss, diffuse = (warp(np.maximum(0., read_exr(folder / pass_file)[..., :3].mean(axis=2)),
-                full, offset, bounds, window=window) for pass_file in ('specular0001.exr', 'diffuse0001.exr'))
-            share = gloss / np.maximum(gloss + diffuse, 1e-5)
-            result['specular_fraction_median'] = {'exposed_steel': float(np.median(share[steel])),
-                                                  'nearby_intact_paint': float(np.median(share[paint]))}
+        shares = share_between(steel, paint)
+        if shares is not None:
+            result['specular_fraction_median'] = dict(zip(('exposed_steel', 'nearby_intact_paint'), shares))
     return result
 
 
@@ -325,7 +363,7 @@ def material_target_met(review):
     return review.get('preferred') == 'new' and min(scores.get('material', 0), scores.get('texture', 0)) >= 3
 
 
-def write_report(out, cases, hashes, pack, preview_report):
+def write_report(out, cases, hashes, pack, preview_report, *, metal_review=False):
     rows = []
     for case in cases:
         file = out / 'cases' / case.key / 'result.json'
@@ -342,7 +380,7 @@ def write_report(out, cases, hashes, pack, preview_report):
               'material_targets': sum(material_target_met(r.get('review', {})) for r in sample),
               'reviewed': sum(bool(r.get('review')) for r in rows), 'sample_photography_pass': len(passed),
               'sample_count': len(sample),
-              'sample_gate': len(passed) >= 5 and {row['asset_id'] for row in passed} == {'3', '22', '31'}
+              'sample_gate': not metal_review and len(passed) >= 5 and {row['asset_id'] for row in passed} == {'3', '22', '31'}
                   and unchanged and all(row.get('invariants', {}).get('status') == 'pass' for row in rows),
               'source_models_unchanged': unchanged, 'source_model_count': len(hashes),
               'cost_total': usage, 'runs': runs, 'pilot_preview': preview_report,
@@ -350,8 +388,10 @@ def write_report(out, cases, hashes, pack, preview_report):
               'imagegen': {'builtin_calls': len(pack['maps']) if pack['version'] == FIRST_PACK_VERSION else 0,
                            'estimated_cost': None}, 'jobs': rows}
     atomic_json(out / 'validation.json', report)
+    names = {'3': '03 轴承座', '11': '11 千斤顶', '22': '22 气缸', '31': '31 液压缸', '33': '33 灭火器'}
     cards = []
-    for row in rows:
+    display_rows = sorted(rows, key=lambda row: (names[row['asset_id']], row['group'])) if metal_review else rows
+    for row in display_rows:
         frames = []
         new_title = '新材质 · 待审' if row['status'] == 'review' else '新材质 · 诊断'
         for title, path in (('对照版', row['baseline']), (new_title, row.get('image'))):
@@ -361,19 +401,28 @@ def write_report(out, cases, hashes, pack, preview_report):
                               f'<img loading="lazy" src="{url}"></a></figure>')
             else:
                 frames.append('<p>未生成</p>')
-        key = html.escape(row['key'])
+        key = html.escape(f"{names[row['asset_id']]} · {row['group']}" if metal_review else row['key'])
         review = html.escape(row.get('review', {}).get('reason', row.get('stop_reason', '')))
         diagnosis = row.get('material_diagnostic', {}).get('path')
         link = f'<a href="{html.escape(relative(diagnosis, out), quote=True)}">材质分布</a>' if diagnosis else ''
+        material = row.get('material_diagnostic', {})
+        corrosion = material.get('corrosion', {}).get('path')
+        if corrosion:
+            link += f' · <a href="{html.escape(relative(corrosion, out), quote=True)}">锈蚀与露钢分布</a>'
+        corrosion_stats = material.get('final_frame', {}).get('corrosion')
+        coverage = (f'<p>可见物品内部锈蚀覆盖 {corrosion_stats["rust_fraction"]:.1%}，'
+                    f'露钢覆盖 {corrosion_stats["exposed_steel_fraction"]:.1%}。</p>') if corrosion_stats else ''
         scores = row.get('review', {}).get('new_scores', {})
         rating = f"材质 {scores['material']}/4，纹理 {scores['texture']}/4。 " if scores else ''
-        cards.append(f'<section><h2>{key}</h2><div>{"".join(frames)}</div><p>{rating}{review}</p>{link}</section>')
+        cards.append(f'<section><h2>{key}</h2><div>{"".join(frames)}</div><p>{rating}{review}</p>{coverage}{link}</section>')
+    summary = (f'本轮生成 {report["generated"]}/{len(cases)} 张完整画面，供人工点评。' if metal_review
+               else f'摄影门槛 {report["sample_photography_pass"]}/{report["sample_count"]}。')
     (out / 'index.html').write_text('<!doctype html><html lang="zh"><meta charset="utf-8">'
         '<title>废钢材质同摆位对照</title><style>body{font:16px sans-serif;margin:24px;color:#192323}'
         'section{margin:32px 0}section div{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr))}'
         'figure{margin:6px}img{width:100%;height:auto}</style><h1>废钢材质同摆位对照</h1>'
         '<p>点击完整画面可查看原尺寸 PNG。现场尺度和接触证据为估计时，结果保留待审。</p>'
-        f'<p>摄影门槛 {report["sample_photography_pass"]}/{report["sample_count"]}。{html.escape(label(usage))}</p>'
+        f'<p>{summary}{html.escape(label(usage))}</p>'
         + ''.join(cards), encoding='utf8')
     if any(r.get('image') for r in rows):
         make_overview(out, rows)
@@ -437,7 +486,8 @@ async def run_case(pipe, case, pack, hashes, out):
         comp = await asyncio.to_thread(compose, scene, fixed, folder, meta, env, samples, params, case.seed,
                                        out / 'after.png', capture_local=True)
         layers = comp.pop('local_layers')
-        invariants, metrics = check_invariants(item, comp, meta, case.meta, scene, fixed, layers)
+        invariants, metrics = check_invariants(item, comp, meta, case.meta, scene, fixed, layers,
+                                               estimated_occlusion=pack.get('corrosion', False))
         invariants['raw_render_alpha'] = raw
         checks = invariants['checks']
         checks['camera_blur_unchanged'] = abs(comp['photo']['blur_sigma'] - baseline['photo']['blur_sigma']) < 1e-6
@@ -509,24 +559,22 @@ async def run(args):
     pilot = hydraulic_case(cache)
     if args.hydraulic or args.cylinders:
         sample = [case for case in sample if case.asset_id == '31']
-    if args.cylinders:
-        from cylinder_wear_cases import extinguisher_cases
+    if args.cylinders or args.metal_review:
+        from cylinder_wear_cases import extinguisher_cases, jack_cases
         sample += extinguisher_cases(cache)
+        if args.metal_review:
+            sample += jack_cases(cache)
     cases = [pilot, *sample]
-    if args.compare_to:
-        previous = resolve(args.compare_to)
-        previous_cases = []
-        for case in cases:
-            if args.cylinders and case.asset_id == '33':
-                previous_cases.append(case)
-                continue
-            row = read(previous / 'cases' / case.key / 'result.json')
-            if (row['invariants']['fixed_geometry_signature'] != signature(case.candidate)
-                    or row['invariants']['status'] != 'pass' or file_hash(row['image']) != row['image_hash']):
-                raise ValueError(f'comparison image or geometry mismatch: {case.key}')
-            previous_cases.append(replace(case, previous_image=row['image'], previous_hash=row['image_hash']))
-        cases = previous_cases
-        pilot, *sample = cases
+    previous_cases = []
+    for case in cases:
+        comparison = args.compare_to
+        if args.cylinders and case.asset_id == '33':
+            comparison = None
+        elif args.metal_review and not comparison:
+            comparison = METAL_COMPARISONS.get(case.asset_id)
+        previous_cases.append(bind_comparison(case, resolve(comparison)) if comparison else case)
+    cases = previous_cases
+    pilot, *sample = cases
     if model_hashes() != hashes:
         raise ValueError('44-model source baseline differs')
     binding = {'version': VERSION, 'pack': pack['signature'], 'models': hashes,
@@ -542,7 +590,7 @@ async def run(args):
             if path.is_file() and (row := read(path)).get('image') and file_hash(row['image']) != row['image_hash']:
                 raise ValueError(f'archived image changed: {case.key}')
         if args.stage == 'report':
-            write_report(out, cases, hashes, pack, preview_report)
+            write_report(out, cases, hashes, pack, preview_report, metal_review=args.metal_review)
             return
     else:
         bind_inputs(out / 'frozen.json', {**binding, 'render_dependencies': render_dependencies(),
@@ -563,7 +611,7 @@ async def run(args):
                 raise ValueError('pilot program checks failed')
             for case in sample:
                 await run_case(pipe, case, pack, hashes, out / 'cases' / case.key)
-        if args.stage == 'review' or (args.stage == 'all' and not args.offline):
+        if args.stage == 'review' or (args.stage == 'all' and not args.offline and not args.metal_review):
             pipe.vision.offline = args.offline
             for case in cases if args.compare_to else sample:
                 await review_case(pipe, case, out / 'cases' / case.key)
@@ -575,7 +623,7 @@ async def run(args):
             'seconds': time.monotonic() - start, 'blender_seconds': pipe.blender.seconds,
             'render_counts': dict(pipe.renders.totals), 'render_timings': dict(pipe.renders.timings),
             'api_requests': len(pipe.vision.calls)})
-        report = write_report(out, cases, hashes, pack, preview_report)
+        report = write_report(out, cases, hashes, pack, preview_report, metal_review=args.metal_review)
         print('report', out / 'index.html', report['generated'], report['reviewed'], report['sample_gate'], flush=True)
 
 
@@ -589,6 +637,8 @@ def main():
     scope = parser.add_mutually_exclusive_group()
     scope.add_argument('--cylinders', action='store_true', help='replay the 31 hydraulic cylinder and 33 extinguisher')
     scope.add_argument('--hydraulic', action='store_true', help='replay only the three fixed-view 31 hydraulic cylinder samples')
+    scope.add_argument('--metal-review', action='store_true',
+                       help='prepare fixed-frame comparisons for five metal objects for manual review')
     parser.add_argument('--offline', action='store_true')
     asyncio.run(run(parser.parse_args()))
 

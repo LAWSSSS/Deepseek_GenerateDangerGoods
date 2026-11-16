@@ -130,7 +130,7 @@ def air_summary(photo):
         'blur_sigma': photo.get('blur_sigma'), 'surface_dust': effects.get('requested', {}).get('surface_dust')}
 
 
-def check_invariants(item, comp, meta, old_meta, scene, candidate, layers):
+def check_invariants(item, comp, meta, old_meta, scene, candidate, layers, *, estimated_occlusion=False):
     old = item['baseline_entry']
     invariants = {key: old[key] == comp[key] for key in MASK_KEYS}
     geometry = {k: v for k, v in candidate.items() if k not in ('fixed_alpha_dir', 'fixed_alpha_window')}
@@ -141,8 +141,13 @@ def check_invariants(item, comp, meta, old_meta, scene, candidate, layers):
         invariants['canvas_unchanged'] = tuple(image.size) == tuple(scene['size'])
     anchor_error = float(np.linalg.norm(np.subtract(meta['anchor_uv'], old_meta['anchor_uv']))*candidate['full_px'])
     invariants['contact_anchor_unchanged'] = anchor_error <= 1e-6
-    invariants['source_pixels_preserved'] = all(comp['checks'].get(k, {}).get('status') == 'pass'
-        for k in ('protected', 'outside_edit', 'holes_alpha', 'occlusion'))
+    occlusion = comp['checks'].get('occlusion', {})
+    # Unknown scene ordering can still preserve every identified foreground pixel.
+    foreground_preserved = occlusion.get('status') == 'pass' or (
+        estimated_occlusion and occlusion.get('status') == 'unknown'
+        and occlusion.get('foreground_changed_pixels') == 0)
+    invariants['source_pixels_preserved'] = foreground_preserved and all(
+        comp['checks'].get(k, {}).get('status') == 'pass' for k in ('protected', 'outside_edit', 'holes_alpha'))
     invariants['edit_bounds_unchanged'] = old['edit_bounds'] == comp['edit_bounds']
     if invariants['edit_bounds_unchanged']:
         bounds = comp['edit_bounds']

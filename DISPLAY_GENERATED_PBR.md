@@ -137,3 +137,24 @@ $controller = 'outputs/ps-model-controller'
 整轮 117.7 秒，Blender worker 61.2 秒；3 次实际评审、0 次重试、10,977 token，API 估算 ¥0.0117–0.0233。新增生图 0 次，本机用电金额未知。 [DeepSeek 计价](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
 
 用 `prepare_generated_pbr.py --version generated-pbr-v6` 和原三张 PNG 复建贴图。本机清单为 `work/render-materials/hydraulic-wear-v6/pack.json`。使用 `validate_generated_pbr.py all --hydraulic --pack work/render-materials/hydraulic-wear-v6/pack.json --compare-to outputs/液压缸强化露钢-最终对照-20261116` 并指定新的输出目录。加 `--offline` 可省略盲评。
+
+
+## 五件金属物品 · 扩大锈蚀与恢复露钢反光
+
+第七版在物体空间生成斑块状锈蚀。独立哑光氧化层覆盖钢件和已判定的钢基漆面，擦伤和剥落边缘允许露出金属度为 1 的钢材。宽度不规则的反光和局部粗糙度保留曲面起伏。锈蚀只使用已确认区域或有源材质名称支持的钢件分区。已标注的铝和黄铜区域只调整反光粗糙度，保留加工面、橡胶、软管和灭火器标签。沿用现有贴图和液压缸三层划痕配方。
+
+首次预览的液压缸可见锈层覆盖约 96%，压住了部分露钢。收紧宽斑块的过渡范围，并给较深的擦伤和剥落边缘保留通道后复跑。最终三张液压缸的锈蚀覆盖由上一轮的 35.65%、51.21%、49.50% 增至 73.74%、68.70%、66.70%。露钢区的镜面亮度占比中位数为 41.9%–57.7%，重锈区约 9.7%–10.0%。覆盖按透明边缘内的着色权重超过 0.03 测量。旧轮记录的液压缸通道覆盖筒身，新通道还统计已确认的其他钢区。
+
+| 物品 | 新版对照数 | 可见物品内部的锈蚀覆盖 |
+|---|---:|---:|
+| 03 轴承座 | 2 | 36.3%–39.2% |
+| 11 千斤顶 | 2 | 56.6%–57.4% |
+| 22 气缸 | 2 | 0.28%–0.44%，仅已确认的钢制区域 |
+| 31 液压缸 | 3 | 66.7%–73.7% |
+| 33 灭火器 | 2 | 23.5%–27.1% |
+
+11 组新旧 PNG 均为 3840×2160，沿用原相机、雾场、曝光、模糊、锚点和几何透明度。接触锚点 0 px 偏移，最小原始投影 IoU 为 0.99938。孔洞、前景、保护区、编辑范围外像素和 44 个源模型散列通过。两张千斤顶的遮挡次序仍缺现场证据，已识别的前景像素均为 0 变化。所有样片均供人工点评，现场尺寸与实际接触保持待审；批量使用现行默认。107 项回归通过。 [五件全景对照](outputs/扩大锈蚀与露钢-五物品-20261116-v2/index.html) · [逐图验证](outputs/扩大锈蚀与露钢-五物品-20261116-v2/validation.json)
+
+最终运行墙钟 209.8 秒，Blender worker 114.7 秒，11 个无物体阴影基准命中。含预览、首轮和最终复跑共 425.6 秒、Blender worker 236.3 秒。全部离线，API 0 次、0 token、已知 API 成本 ¥0，无新增生图；本机用电金额未知。
+
+用 `prepare_generated_pbr.py --version generated-pbr-v7` 从已有三张 PNG 复建清单。本机版为 `work/render-materials/corrosion-metal-v7/pack.json`。`validate_generated_pbr.py all --metal-review --offline --pack work/render-materials/corrosion-metal-v7/pack.json --out <新目录>` 可重跑，自动按物品关联上一轮归档图。

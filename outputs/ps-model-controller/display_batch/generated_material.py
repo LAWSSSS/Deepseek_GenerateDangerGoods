@@ -18,7 +18,8 @@ FORM_VERSION = 'generated-pbr-v3'
 CYLINDER_VERSION = 'generated-pbr-v4'
 HYDRAULIC_VERSION = 'generated-pbr-v5'
 TRIPLE_WEAR_VERSION = 'generated-pbr-v6'
-HYDRAULIC_VERSIONS = (HYDRAULIC_VERSION, TRIPLE_WEAR_VERSION)
+CORROSION_VERSION = 'generated-pbr-v7'
+HYDRAULIC_VERSIONS = (HYDRAULIC_VERSION, TRIPLE_WEAR_VERSION, CORROSION_VERSION)
 CYLINDER_VERSIONS = (CYLINDER_VERSION, *HYDRAULIC_VERSIONS)
 PACK_VERSIONS = (VERSION, WEAR_VERSION, FORM_VERSION, *CYLINDER_VERSIONS)
 CHANNELS = {
@@ -186,7 +187,7 @@ def build_pack(folder, sources, prompts, layouts, *, version=VERSION):
     if version in CYLINDER_VERSIONS:
         from .cylinder_wear import cylinder_wear_tile
         for kind in ('cylinder', 'hydraulic') if version in HYDRAULIC_VERSIONS else ('cylinder',):
-            layers = 3 if version == TRIPLE_WEAR_VERSION and kind == 'hydraulic' else 1
+            layers = 3 if version in (TRIPLE_WEAR_VERSION, CORROSION_VERSION) and kind == 'hydraulic' else 1
             packed = cylinder_wear_tile(dense=kind == 'hydraulic', layers=layers)
             baked = folder / f'{kind}-channels.png'
             save_image(Image.fromarray(packed), baked)
@@ -225,7 +226,8 @@ def load_pack(manifest):
             if tile.mode != 'RGB' or list(tile.size) != entry.get('size'):
                 raise ValueError(f'{kind} map dimensions or channels changed')
         maps[kind] = {'path': str(image), 'sha256': digest}
-    return {'version': version, 'manifest': str(path), 'maps': maps, 'atlases': layouts,
+    return {'version': version, 'corrosion': version == CORROSION_VERSION,
+            'manifest': str(path), 'maps': maps, 'atlases': layouts,
             'signature': signature(version, {kind: row['sha256'] for kind, row in maps.items()}, layouts)}
 
 
@@ -234,6 +236,15 @@ def finish_regions(asset, pack, cache):
     layout = pack['atlases'].get(asset['mesh_hash'])
     if layout is None:
         regions, _ = prepare_uv_masks(asset, Path(cache) / 'scanned-uv')
+        if pack['version'] == CORROSION_VERSION:
+            classes = set(asset['semantic']['material_classes'])
+            names = ' '.join(regions['materials']).lower()
+            # Asset labels group aluminium and stainless with steel. Require
+            # named source components too before adding iron oxide.
+            ferrous = bool(classes & {'steel', 'iron', 'cast_iron'}) and bool(re.search(r'\b(?:steel|iron)\b', names))
+            known_other_metal = re.search(r'\b(?:alumin\w*|brass|bronze|copper|stainless)\b', names)
+            mixed = bool(classes & {'aluminum', 'aluminium', 'brass', 'bronze', 'copper', 'stainless', 'stainless_steel'})
+            regions = {**regions, 'ferrous_source': ferrous and not (mixed or known_other_metal)}
         return regions
     key = signature(VERSION, asset['mesh_hash'], layout)
     folder = Path(cache) / 'generated-pbr-regions' / key

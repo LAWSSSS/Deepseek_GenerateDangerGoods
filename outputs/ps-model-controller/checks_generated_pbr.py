@@ -13,7 +13,10 @@ from PIL import Image
 from display_batch.common import BLENDER, HERE, atomic_json, file_hash
 from display_batch.cylinder_wear import cylinder_wear_tile
 from display_batch.effects import parameters
-from display_batch.generated_material import CHANNELS, FORM_VERSION, VERSION, WEAR_VERSION, derive_maps, finish_regions, load_pack, map_statistics
+from display_batch.generated_material import (
+    CHANNELS, CORROSION_VERSION, FORM_VERSION, VERSION, WEAR_VERSION, derive_maps, finish_regions, load_pack,
+    map_statistics,
+)
 from display_batch.rendering import RenderCache, part_keys
 from display_batch.schema import Action, EffectSettings, apply_actions
 
@@ -137,6 +140,17 @@ class GeneratedFinishTests(unittest.TestCase):
                 self.assertEqual(mask.getpixel((128, 160)), (0, 0, 0))
                 self.assertEqual(mask.getpixel((64, 160)), (0, 255, 0))
 
+    def test_corrosion_requires_named_ferrous_evidence_beyond_asset_class(self):
+        asset = {'mesh_hash': 'mesh', 'semantic': {'material_classes': ['steel']}}
+        pack = {'version': CORROSION_VERSION, 'atlases': {}}
+        for materials, recognized in ((['paint', 'plate'], False),
+                                      (['cast steel', 'rubber seal'], True),
+                                      (['steel rod', 'aluminium body'], False)):
+            regions = {'materials': dict.fromkeys(materials)}
+            with self.subTest(materials=materials), patch(
+                    'display_batch.generated_material.prepare_uv_masks', return_value=(regions, True)):
+                self.assertIs(finish_regions(asset, pack, HERE)['ferrous_source'], recognized)
+
     def test_review_ignores_presentation_metadata_but_requires_evidence(self):
         from validate_generated_pbr import BlindPair
         scores = dict.fromkeys(('support', 'occlusion', 'lighting', 'edge', 'texture', 'material', 'structure'), 3)
@@ -259,6 +273,32 @@ assert mix.inputs[1].links[0].from_node == source and mix.inputs[2].links[0].fro
 aov = next(node for node in tree.nodes if node.type == 'OUTPUT_AOV' and node.aov_name == 'hydraulic_finish')
 pack = aov.inputs['Color'].links[0].from_node
 assert pack.inputs['Green'].links[0].from_socket == mix.inputs[0].links[0].from_socket
+
+for name, weights, ferrous_source, authored, oxidizes in (
+    ('Cast steel fixture', [1, 0, 0, 0], True, False, True),
+    ('Chipped steel paint fixture', [0, 1, 0, 0], True, False, True),
+    ('Protected chrome rod', [1, 0, 0, 0], True, False, False),
+    ('Aluminium fixture', [1, 0, 0, 0], True, False, False),
+    ('Unknown metallic surface', [1, 0, 0, 0], False, False, False),
+):
+    material = bpy.data.materials.new(name)
+    material.use_nodes = True
+    tree = material.node_tree
+    source = tree.nodes.get('Principled BSDF')
+    profile = {{'version': 'generated-pbr-v7', 'corrosion': True, 'maps': {{**maps, 'cylinder': maps['paint']}},
+               'regions': {{'ferrous_source': ferrous_source, 'materials': {{name: {{
+                   'coverage': weights, 'constant': weights, 'authored_atlas': authored}}}}}}}}
+    finish_surface(material, source, profile, env, 0.)
+    oxide = tree.nodes.get('Matte iron oxide')
+    assert (oxide is not None) == oxidizes
+    assert source.inputs['Alpha'].default_value == 1.
+    if oxide is not None:
+        steel = tree.nodes['Weathered exposed steel']
+        assert oxide.inputs['Metallic'].default_value == 0. and steel.inputs['Metallic'].default_value == 1.
+        oxide_mix = tree.nodes['Material Output'].inputs['Surface'].links[0].from_node
+        assert oxide_mix.inputs[2].links[0].from_node == oxide
+        aov = next(node for node in tree.nodes if node.type == 'OUTPUT_AOV' and node.aov_name == 'corrosion_finish')
+        assert aov.inputs['Color'].links[0].from_node.inputs['Red'].links[0].from_socket == oxide_mix.inputs[0].links[0].from_socket
 
 # Corner 2 belongs to both faces. Only vertices unique to the weld face move.
 mesh = bpy.data.meshes.new('weld guard')
