@@ -14,12 +14,14 @@ from .surface_maps import prepare_uv_masks, save_image
 
 VERSION = 'generated-pbr-v1'
 WEAR_VERSION = 'generated-pbr-v2'
+FORM_VERSION = 'generated-pbr-v3'
+PACK_VERSIONS = (VERSION, WEAR_VERSION, FORM_VERSION)
 CHANNELS = {
     'oxide': ('oxidation', 'pitting', 'fine_relief'),
     'paint': ('chips', 'scratches', 'fine_relief'),
     'dust': ('coverage', 'granules', 'fine_relief'),
 }
-REGIONS = ('steel', 'paint', 'oxide', 'nonferrous')
+REGIONS = ('steel', 'paint', 'oxide', 'nonferrous', 'weld')
 LUMA = np.float32([.2126, .7152, .0722])
 
 
@@ -76,7 +78,7 @@ def derive_maps(rgb, kind, version=VERSION):
         # has few elongated features.
         peak = max(.12, float(np.quantile(marks, .995)))
         scratch = np.clip((marks - .04) / peak, 0., 1.)
-        if version == WEAR_VERSION:
+        if version in (WEAR_VERSION, FORM_VERSION):
             # Widen existing grooves by a few texels so downsampling retains
             # an abrasion mark without painting in additional scratches.
             halo = cv2.dilate(scratch, np.ones((5, 5), np.uint8))
@@ -122,13 +124,16 @@ def atlas_layouts(value):
 
 
 def build_pack(folder, sources, prompts, layouts, *, version=VERSION):
-    if version not in (VERSION, WEAR_VERSION):
+    if version not in PACK_VERSIONS:
         raise ValueError('unsupported generated_pbr manifest version')
     folder = Path(folder).resolve()
     manifest = folder / 'pack.json'
     if manifest.exists():
         raise FileExistsError(manifest)
     layout = atlas_layouts(layouts)
+    if version != FORM_VERSION:
+        layout = {digest: {**entry, 'tiles': ['paint' if name == 'weld' else name for name in entry['tiles']]}
+                  for digest, entry in layout.items()}
     folder.mkdir(parents=True, exist_ok=True)
     maps = {}
     for kind, channels in CHANNELS.items():
@@ -162,7 +167,7 @@ def load_pack(manifest):
     path = Path(manifest).resolve()
     raw = json.loads(path.read_text(encoding='utf8'))
     version = raw.get('version')
-    if version not in (VERSION, WEAR_VERSION) or set(raw.get('maps', {})) != set(CHANNELS):
+    if version not in PACK_VERSIONS or set(raw.get('maps', {})) != set(CHANNELS):
         raise ValueError('unsupported generated_pbr manifest')
     layouts = atlas_layouts(raw.get('atlases', {}))
     maps = {}
@@ -192,12 +197,17 @@ def finish_regions(asset, pack, cache):
     key = signature(VERSION, asset['mesh_hash'], layout)
     folder = Path(cache) / 'generated-pbr-regions' / key
     folder.mkdir(parents=True, exist_ok=True)
-    values = np.zeros((256, 256, 3), np.uint8)
+    weld_tiles = [i for i, tile in enumerate(layout['tiles']) if tile == 'weld']
+    values = np.zeros((256, 256, 4 if weld_tiles else 3), np.uint8)
     channels = {'steel': 0, 'oxide': 0, 'paint': 1, 'nonferrous': 2}
     for i, tile in enumerate(layout['tiles']):
         if tile is not None:
             row, col = 3 - i // 4, i % 4
-            values[row*64:(row+1)*64, col*64:(col+1)*64, channels[tile]] = 255
+            region = values[row*64:(row+1)*64, col*64:(col+1)*64]
+            if tile == 'weld':
+                region[..., 1] = region[..., 3] = 255
+            else:
+                region[..., channels[tile]] = 255
     path = folder / 'regions.png'
     if path.is_file():
         with Image.open(path) as old:
@@ -209,5 +219,7 @@ def finish_regions(asset, pack, cache):
     entry = {'coverage': (values > 0).mean(axis=(0, 1)).tolist(),
              'mask': str(path), 'mask_hash': file_hash(path), 'authored_atlas': True,
              'basis': 'authored_tiles_bound_to_exact_glb'}
+    if weld_tiles:
+        entry['weld_tiles'] = weld_tiles
     return {'signature': signature(key, entry['mask_hash']),
             'materials': {layout['material']: entry}}

@@ -2,6 +2,9 @@
 import re
 
 import bpy
+import numpy as np
+from mathutils import Vector
+from mathutils.noise import noise_vector
 
 from .scanned_shader import assign, math_node, mix, opaque_surface_output, original, texture
 
@@ -58,6 +61,48 @@ def dust_color(environment):
     return tuple(.22 * min(1.12, max(.88, value / luma)) for value in color) + (1.,)
 
 
+def surface_noise(tree, coordinates, scale, detail):
+    node = tree.nodes.new('ShaderNodeTexNoise')
+    assign(tree, coordinates, node.inputs['Vector'])
+    node.inputs['Scale'].default_value = scale
+    node.inputs['Detail'].default_value = detail
+    return node.outputs['Fac']
+
+
+def shape_weld_beads(mesh, finish):
+    """Deform only vertices whose incident corners belong to documented weld tiles."""
+    tiles = {tile for entry in finish['regions']['materials'].values() for tile in entry.get('weld_tiles', ())}
+    if not tiles or not mesh.uv_layers.active:
+        return {'vertices': 0, 'max_offset': 0.}
+    uv = np.empty((len(mesh.loops), 2), np.float32)
+    mesh.uv_layers.active.uv.foreach_get('vector', uv.ravel())
+    corner_ids = np.empty(len(mesh.loops), np.int32)
+    mesh.loops.foreach_get('vertex_index', corner_ids)
+    cells = np.floor(uv * 4).astype(np.int32)
+    weld_corners = np.isin(cells[:, 0] + cells[:, 1] * 4, list(tiles)) & ((cells >= 0) & (cells < 4)).all(axis=1)
+    selected = np.unique(corner_ids[weld_corners])
+    selected = np.setdiff1d(selected, corner_ids[~weld_corners])
+    if not len(selected):
+        return {'vertices': 0, 'max_offset': 0.}
+    vertices = np.empty((len(mesh.vertices), 3), np.float32)
+    normals = np.empty_like(vertices)
+    mesh.vertices.foreach_get('co', vertices.ravel())
+    mesh.vertex_normals.foreach_get('vector', normals.ravel())
+    # Source coordinates and normals keep the perturbation continuous across
+    # coincident UV corners. A sub-millimetric relief leaves the parts intact.
+    offsets = np.empty(len(selected), np.float32)
+    for index, point in enumerate(vertices[selected]):
+        position = Vector(point)
+        coarse = noise_vector(position * 51.)[0]
+        detail = noise_vector(position * 123.)[1]
+        offsets[index] = .00078 * (.72 * coarse + .28 * detail)
+    vertices[selected] += offsets[:, None] * normals[selected]
+    mesh.vertices.foreach_set('co', vertices.ravel())
+    mesh.update()
+    return {'vertices': int(len(selected)), 'max_offset': float(np.max(np.abs(offsets))),
+            'basis': 'authored_weld_uv_tiles_only_in_unit_length_mesh'}
+
+
 def finish_surface(material, shader, finish, environment, strength):
     tree = material.node_tree
     if shader.get('generated_finish'):
@@ -77,10 +122,14 @@ def finish_surface(material, shader, finish, environment, strength):
     if not 0 <= strength <= .5:
         raise ValueError('generated_pbr surface dust exceeds the supported range')
     coordinates = tree.nodes.new('ShaderNodeTexCoord')
+    weld = 0.
     if 'mask' in entry:
         mask = texture(tree, entry['mask'], coordinates.outputs['UV'], 'Known surface regions')
         mask.interpolation = 'Closest'
         metal, paint, third = channels(tree, mask.outputs['Color'])
+        if entry.get('weld_tiles'):
+            mask.image.alpha_mode = 'CHANNEL_PACKED'
+            weld = mask.outputs['Alpha']
     else:
         metal, paint, third = entry['constant'][:3]
     rough = original(shader.inputs['Roughness'])
@@ -92,7 +141,8 @@ def finish_surface(material, shader, finish, environment, strength):
         metal = math_node(tree, 'ADD', mul(tree, metal, ramp(tree, rough, .17, 7.)), third, clamp=True)
         nonferrous = 0.
     known = math_node(tree, 'ADD', math_node(tree, 'ADD', metal, paint, clamp=True), nonferrous, clamp=True)
-    layered_wear = finish.get('version') == 'generated-pbr-v2'
+    formed = finish.get('version') == 'generated-pbr-v3'
+    layered_wear = formed or finish.get('version') == 'generated-pbr-v2'
     coords = coordinates.outputs['Object']  # Canonical mesh is scaled uniformly by longest axis.
     oxidation, pits, fine = tile(tree, coords, finish['maps']['oxide'], 'Generated oxidation', 1.9, (.17, .39, .72))
     chips, lines, chip_grain = tile(tree, coords, finish['maps']['paint'], 'Generated chipped paint', 2.4, (.57, .12, .29))
@@ -106,6 +156,9 @@ def finish_surface(material, shader, finish, environment, strength):
         # Give it a separate projection and scale from the exposed steel.
         mottling, _, _ = tile(tree, coords, finish['maps']['oxide'], 'Generated paint weathering',
                              2.8, (.73, .17, .51))
+        if formed:
+            # Retain the irregular islands but break up the uniform dark fill.
+            mottling = mul(tree, mottling, add(tree, .46, mul(tree, surface_noise(tree, coords, 64., 2.), 1.0)))
         paint_wear = mul(tree, paint, ramp(tree, mottling, .15, 1.55))
         worn = math_node(tree, 'ADD', worn, paint_wear, clamp=True)
     base = original(shader.inputs['Base Color'])
@@ -116,6 +169,9 @@ def finish_surface(material, shader, finish, environment, strength):
     base = mix(tree, mul(tree, rust_area, .78), base, oxide_tint)
     if layered_wear:
         base = mix(tree, mul(tree, paint_wear, .58), base, oxide_tint)
+    if formed:
+        bead = surface_noise(tree, coords, 102., 2.)
+        base = mix(tree, mul(tree, weld, .72), base, add(tree, .62, mul(tree, bead, .34)), blend='MULTIPLY')
     base = mix(tree, mul(tree, chip_area, .79), base, chip_tint)
     base = mix(tree, mul(tree, scratches, .32), base, .55, blend='MULTIPLY')
     assign(tree, base, shader.inputs['Base Color'])
@@ -127,6 +183,13 @@ def finish_surface(material, shader, finish, environment, strength):
         # into iron oxide or changing the untouched areas' metalness.
         abrasion = mul(tree, nonferrous, ramp(tree, oxidation, .18, 1.35))
         rough = mix(tree, mul(tree, abrasion, .5), rough, math_node(tree, 'MAXIMUM', rough, .68))
+    if formed:
+        # Different wear levels interrupt the large continuous highlight on
+        # exposed metal and paint, while protected chrome is still excluded.
+        glancing = surface_noise(tree, coords, 19., 3.)
+        scuff = mul(tree, math_node(tree, 'ADD', nonferrous, paint, clamp=True), ramp(tree, glancing, .40, 2.8))
+        rough = mix(tree, mul(tree, scuff, .40), rough, math_node(tree, 'MAXIMUM', rough, .63))
+        rough = mix(tree, mul(tree, weld, .64), rough, add(tree, .55, mul(tree, bead, .30)))
     assign(tree, mix(tree, mul(tree, scratches, .35), rough, .72), shader.inputs['Roughness'])
     metalness = original(shader.inputs['Metallic'])
     metalness = mix(tree, mul(tree, rust_area, .80), metalness, .06)
@@ -137,6 +200,8 @@ def finish_surface(material, shader, finish, environment, strength):
     paint_height = mul(tree, paint, add(tree, mul(tree, chip_grain, .20), mul(tree, chips, -.63)))
     height = add(tree, add(tree, steel_height, paint_height),
                  add(tree, mul(tree, nonferrous, mul(tree, fine, .20)), mul(tree, scratches, -.38)))
+    if formed:
+        height = add(tree, height, add(tree, mul(tree, scuff, mul(tree, glancing, .48)), mul(tree, weld, bead)))
     normal = relief(tree, 'Generated shallow surface relief', height, source_normal, .00048, mul(tree, known, .34))
     assign(tree, normal, shader.inputs['Normal'])
     powder = 0.

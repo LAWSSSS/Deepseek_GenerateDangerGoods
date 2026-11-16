@@ -77,3 +77,15 @@ $controller = 'outputs/ps-model-controller'
 7 套物体及有物体阴影重渲，7 个无物体阴影基准命中。生成 84.2 秒，Blender worker 51.2 秒，复核 43.3 秒。ImageGen 新增调用 0，视觉请求 9 次（含 2 次重试），34,036 token，API 估算 ¥0.0453–0.0905。本机用电金额未知。 [完整画面新旧对照](outputs/片状磨损-固定摆位-20261113/index.html) · [逐图验证与成本](outputs/片状磨损-固定摆位-20261113/validation.json)
 
 旧清单可继续使用。用 `prepare_generated_pbr.py --version generated-pbr-v2` 从原始三张 PNG 建立新版清单，批次配置的 `surface_finish_manifest` 指向新版清单。固定样片入口通过 `--pack work/render-materials/generated-pbr-v2/pack.json --compare-to outputs/生成贴图-固定摆位-20261113-v2` 复跑对照。
+
+## 第三轮 · 焊缝与曲面反光
+
+31 号完整缸壁由两道端环生成，焊道使用规则环面。新试验按已有焊缝的 UV 区域调整 8,096 个渲染顶点，最大变化为标准化模型长边的 0.0514%。与非焊缝面共用的顶点保持原位。焊缝有独立的底色、粗糙度和凹凸。漆面斑块内细分明暗与受光，铝面用局部粗糙度和浅凹凸打散反光。参考照的镀铬杆与拉杆仍应有金属高光，孔洞和通过确认的完整筒壁沿用原模型。 [Blender 网格接口](https://docs.blender.org/api/4.5/bpy.types.Mesh.html) · [凹凸节点](https://docs.blender.org/manual/en/4.5/render/shader_nodes/vector/bump.html)
+
+固定摆位、相机、雾化和照明重新生成 7 张 3840×2160 PNG，沿用 7 个无物体阴影基准。切换光向时材质遮罩不变，线性高光均差 0.0060。原始渲染轮廓最低 IoU 为 0.99948，成图尺寸、接触锚点、孔洞、前景和保护像素检查通过。44 个源模型散列一致。正式支撑和尺度仍待审。
+
+六组门槛样片中，两张气缸和 53 号液压缸偏好新版且达标，共 **3/6**。两组相近，53 号轴承座格式复核未完成。额外的 `36_6_6` 液压缸首样偏好新版。轴承座全景变化小，气缸长反光仍在。两个气缸样片的线性镜面分量 P95 分别从 1.057 降到 1.000、从 0.209 升到 0.265，曲面材质改动对光带的影响受场景照明制约。批量沿用原配置。
+
+102 项回归通过。本地渲染试验 153.5 秒，Blender worker 90.8 秒。本轮复用 ImageGen 贴图，新增生图 0 次。盲评累计 25 次实际请求、93,990 token，估算 ¥0.1247–0.2494。服务回包含展示字段导致部分盲评失败。第一次兼容处理又使严格区域坐标校验失败，改用显式可选字段后仅补跑缺失项，25 次已含两次格式修复验证及重试，保留最后一项缺测。 [原尺寸对照](outputs/实物细节复测-20261116/index.html) · [验证与用量](outputs/实物细节复测-20261116/validation.json) · [DeepSeek 计价](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
+
+用 `prepare_generated_pbr.py --version generated-pbr-v3` 从原始三张 PNG 建立新版清单。固定样片复跑使用 `--pack work/render-materials/generated-pbr-v3/pack.json --compare-to outputs/片状磨损-固定摆位-20261113`。后续可将气缸的假设面光源与场景反射分开对照，轴承座优先核对落点、遮挡和可见接收面。

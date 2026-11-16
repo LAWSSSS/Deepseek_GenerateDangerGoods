@@ -19,7 +19,7 @@ from display_batch.ai import InvalidStructuredReply, ProviderUnavailable
 from display_batch.common import ROOT, atomic_json, file_hash, implementation_manifest, resolve, signature
 from display_batch.compose import compose, object_window, warp
 from display_batch.costs import cumulative, label
-from display_batch.generated_material import WEAR_VERSION, finish_regions, load_pack
+from display_batch.generated_material import VERSION as FIRST_PACK_VERSION, finish_regions, load_pack
 from display_batch.pipeline import Pipeline
 from display_batch.rendering import FINISH_PASS, render_dependencies, render_request
 from display_batch.schema import BatchConfig
@@ -38,6 +38,7 @@ OUTPUT = 'outputs/生成贴图-固定摆位-20261113'
 PACK = 'work/render-materials/generated-pbr-v1/pack.json'
 PILOT = '36_6_6-31'
 VERSION = 'fixed-generated-pbr-v1'
+REVIEW_CONTRACT = 'paired-brief-v3'
 RENDER_SOURCE_FILES = (
     'blender_display_worker.py', 'blender_worker.py', 'display_batch/geometry.py',
     'display_batch/framing.py', 'display_batch/materials.py', 'display_batch/rendering.py',
@@ -243,12 +244,16 @@ async def preview(pipe, case, asset, pack, out):
     return report
 
 
+class BlindBrief(PhotoBrief):
+    findings_order: object = Field(default=None, exclude=True)
+
+
 class BlindPair(Strict):
-    a: PhotoBrief
-    b: PhotoBrief
+    a: BlindBrief
+    b: BlindBrief
     preferred: Literal['a', 'b', 'tie']
     reason: Annotated[str, Field(min_length=1, max_length=80)]
-
+    type: str | None = Field(default=None, exclude=True)
 
 async def compare(pipe, case, result, asset, out):
     comp = result['composition']
@@ -269,9 +274,11 @@ async def compare(pipe, case, result, asset, out):
     prompt = role_prompt('observer').replace(
         '首图是唯一评审画面，其余用于局部细节或物品识别。', '两张全景分别评审，每张全景有一张对应的局部图。')
     prompt = prompt.replace('只输出含 trace、scores、findings 的 JSON。', '')
+    prompt = prompt.replace('最多五条观察。', '每张最多三条观察。')
     prompt += ('\n图1是 A 全景，图2是 A 局部，图3是 B 全景，图4是 B 局部。a 和 b 分别写各版评分、trace 和 findings。'
                'region 始终对应各自全景。给出更像现场的材质与磨损版本 preferred，微小或不可辨差异用 tie。'
-               'reason 简述可见锈斑、粉尘、划痕、反光及识别细节的差异。保持正常材料差异，勿以变化多寡推定质量。')
+               'reason 简述可见锈斑、粉尘、划痕、反光及识别细节的差异。保持正常材料差异，勿以变化多寡推定质量。'
+               '根字段仅 a、b、preferred、reason。a 与 b 仅 trace、scores、findings。')
     pair = await pipe.vision.ask('photographer_material_blind_pair', BlindPair, prompt,
         {'item': asset['name'], 'materials': asset['semantic']['material_classes'],
          'target_region': region, 'camera_and_placement': 'same for A and B'},
@@ -324,7 +331,7 @@ def write_report(out, cases, hashes, pack, preview_report):
               'source_models_unchanged': unchanged, 'source_model_count': len(hashes),
               'cost_total': usage, 'runs': runs, 'pilot_preview': preview_report,
               'pack': pack['manifest'], 'pack_signature': pack['signature'],
-              'imagegen': {'builtin_calls': 0 if pack['version'] == WEAR_VERSION else len(pack['maps']),
+              'imagegen': {'builtin_calls': len(pack['maps']) if pack['version'] == FIRST_PACK_VERSION else 0,
                            'estimated_cost': None}, 'jobs': rows}
     atomic_json(out / 'validation.json', report)
     cards = []
@@ -450,13 +457,16 @@ async def review_case(pipe, case, out):
     if not path.exists():
         return
     result = read(path)
-    if result.get('review') or result.get('review_error') or result['status'] != 'review':
+    if (result.get('review') or result['status'] != 'review'
+            or (result.get('review_error') and result.get('review_contract') == REVIEW_CONTRACT)):
         return
     if file_hash(result['image']) != result['image_hash']:
         raise ValueError('generated image changed before review')
     asyncio.current_task().set_name(case.key)
     before = len(pipe.vision.calls)
     started = time.monotonic()
+    result['review_contract'] = REVIEW_CONTRACT
+    result.pop('review_error', None)
     try:
         result['review'] = await compare(pipe, case, result, read(case.asset_record), out)
         if result['review']['visual_vetoes']:

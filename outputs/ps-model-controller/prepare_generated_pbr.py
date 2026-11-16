@@ -4,13 +4,13 @@ import json
 from pathlib import Path
 
 from display_batch.common import HERE
-from display_batch.generated_material import CHANNELS, VERSION, WEAR_VERSION, build_pack
+from display_batch.generated_material import CHANNELS, PACK_VERSIONS, VERSION, build_pack
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', required=True, type=Path)
-    parser.add_argument('--version', choices=(VERSION, WEAR_VERSION), default=VERSION)
+    parser.add_argument('--version', choices=PACK_VERSIONS, default=VERSION)
     for kind in CHANNELS:
         parser.add_argument('--' + kind, required=True, type=Path)
     args = parser.parse_args()

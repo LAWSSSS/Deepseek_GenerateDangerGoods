@@ -1,4 +1,5 @@
 """Material pack integrity, cache scope and actual Blender shader guards."""
+import json
 from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
@@ -11,7 +12,7 @@ from PIL import Image
 
 from display_batch.common import BLENDER, HERE, atomic_json, file_hash
 from display_batch.effects import parameters
-from display_batch.generated_material import CHANNELS, VERSION, WEAR_VERSION, derive_maps, finish_regions, load_pack, map_statistics
+from display_batch.generated_material import CHANNELS, FORM_VERSION, VERSION, WEAR_VERSION, derive_maps, finish_regions, load_pack, map_statistics
 from display_batch.rendering import RenderCache, part_keys
 from display_batch.schema import Action, EffectSettings, apply_actions
 
@@ -86,6 +87,32 @@ class GeneratedFinishTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'geometry_or_light_changed'):
                 cache.archived_receiver({**request, 'light_gain': .8}, ref)
 
+    def test_weld_tile_retains_paint_and_separate_geometry_mask(self):
+        atlas = {'material': 'cast', 'tiles': [None, 'paint', 'weld'] + [None] * 13}
+        with TemporaryDirectory() as temp:
+            record = finish_regions({'mesh_hash': 'mesh'}, {'version': FORM_VERSION, 'atlases': {'mesh': atlas}}, temp)
+            entry = record['materials']['cast']
+            self.assertEqual(entry['weld_tiles'], [2])
+            with Image.open(entry['mask']) as mask:
+                self.assertEqual(mask.getpixel((96, 224)), (0, 255, 0, 0))
+                self.assertEqual(mask.getpixel((160, 224)), (0, 255, 0, 255))
+                self.assertEqual(mask.getpixel((224, 224)), (0, 0, 0, 0))
+
+    def test_review_ignores_presentation_metadata_but_requires_evidence(self):
+        from validate_generated_pbr import BlindPair
+        scores = dict.fromkeys(('support', 'occlusion', 'lighting', 'edge', 'texture', 'material', 'structure'), 3)
+        brief = {'trace': 'visible', 'scores': scores, 'findings': [{
+            'factor': 'wear_detail', 'region': [.2, .2, .3, .3], 'severity': 'minor',
+            'visibility': 'visible', 'confidence': .8, 'direction': 'unknown', 'cue': '斑驳', 'reference': None}]}
+        payload = {'type': 'object', 'a': {**brief, 'findings_order': []}, 'b': brief,
+                   'preferred': 'tie', 'reason': '材质接近'}
+        reply = BlindPair.model_validate_json(json.dumps(payload))
+        self.assertEqual(reply.preferred, 'tie')
+        self.assertNotIn('type', reply.model_dump())
+        self.assertNotIn('findings_order', reply.a.model_dump())
+        with self.assertRaises(ValueError):
+            BlindPair.model_validate_json(json.dumps({**payload, 'b': {'trace': 'none'}}))
+
     def test_mode_and_powder_bounds(self):
         self.assertNotIn('surface_finish', parameters(EffectSettings()))
         inputs = {'surface_finish': 'generated_pbr', 'surface_finish_manifest': 'pack.json'}
@@ -107,7 +134,7 @@ class GeneratedFinishTests(unittest.TestCase):
 import sys
 sys.path.insert(0, {str(HERE)!r})
 import bpy
-from display_batch.generated_shader import finish_surface
+from display_batch.generated_shader import finish_surface, shape_weld_beads
 
 env = {{'dust_color': [.16, .14, .13]}}
 maps = {{kind: {{'path': {str(texture)!r}}} for kind in ('oxide', 'paint', 'dust')}}
@@ -175,6 +202,22 @@ for name, weights, strength, expected in (
             assert len(tree.nodes) == count
     else:
         assert layer is None and source.inputs['Normal'].links[0].from_node == norm
+
+# Corner 2 belongs to both faces. Only vertices unique to the weld face move.
+mesh = bpy.data.meshes.new('weld guard')
+mesh.from_pydata([(.17, .16, 0), (.52, .11, 0), (.2, .77, 0), (.80, .60, 0), (.90, .50, 0)],
+                 [], [(0, 1, 2), (2, 3, 4)])
+mesh.update()
+uv = mesh.uv_layers.new().uv
+for i, corner in enumerate(uv):
+    corner.vector = (.38, .64) if i < 3 else (.1, .1)
+before = [v.co.copy() for v in mesh.vertices]
+topology = [tuple(face.vertices) for face in mesh.polygons]
+record = shape_weld_beads(mesh, {{'regions': {{'materials': {{'cast': {{'weld_tiles': [9]}}}}}}}})
+assert record['vertices'] == 2 and 0 < record['max_offset'] <= .00078
+assert [tuple(face.vertices) for face in mesh.polygons] == topology
+assert all(mesh.vertices[i].co == before[i] for i in (2, 3, 4))
+assert any(mesh.vertices[i].co != before[i] for i in (0, 1))
 print('GENERATED_SHADER_CHECKS_OK')
 """, encoding='utf8')
             completed = subprocess.run([str(BLENDER), '--background', '--factory-startup',

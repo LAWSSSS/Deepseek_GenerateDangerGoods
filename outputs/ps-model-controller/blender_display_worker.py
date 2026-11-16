@@ -17,7 +17,7 @@ from display_batch.geometry import camera_for, contact_geometry, horizontal_angl
 from display_batch.common import atomic_json
 from display_batch.materials import material_kind, SURFACE_DUST
 from display_batch.scanned_shader import matte_dust_surface, overcast_pixels, scanned_surface
-from display_batch.generated_shader import finish_surface
+from display_batch.generated_shader import finish_surface, shape_weld_beads
 
 BASE = None
 BASE_PATH = None
@@ -1031,6 +1031,7 @@ def render_parts(request):
             bpy.data.orphans_purge(do_recursive=True)
         asset=normalized_mesh(request['mesh'])
         state.update(asset=asset,arrays=arrays(asset),mesh_key=mesh_key)
+        state['weld_detail'] = shape_weld_beads(asset.data, finish) if finish and finish['version'] == 'generated-pbr-v3' else None
         imported=1;import_seconds=time.monotonic()-begin
     obj=state['asset'];vertices,faces=state['arrays']
     points,rotation=pose_points(vertices,request['matrix'],request['yaw'])
@@ -1117,6 +1118,7 @@ def render_parts(request):
         'dust_strength': request.get('surface_dust', 0.), 'paint_dust_fraction': .5,
         'diagnostic_channels': ['oxidation_and_chips', 'scratches', 'dust_coverage'],
         'coordinate_basis': 'uniform_normalized_object_space',
+        'weld_geometry': state.get('weld_detail'),
     }
     return {'anchor_uv':anchor.tolist() if anchor is not None else None,
             'contact_polygons':[q.tolist() for q in polys],'camera':camera,'device':DEVICE,
