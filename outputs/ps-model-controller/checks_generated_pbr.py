@@ -346,6 +346,29 @@ aov = next(node for node in tree.nodes if node.type == 'OUTPUT_AOV' and node.aov
 channels = aov.inputs['Color'].links[0].from_node
 assert channels.inputs['Blue'].is_linked
 
+for material_name, weights, cylinder in (
+    ('Protected oxidized aluminium fixture', [0, 0, 1], None),
+    ('Painted bottle fixture', [0, 1, 0], 'source_uv'),
+):
+    material = bpy.data.materials.new(material_name)
+    material.use_nodes = True
+    tree = material.node_tree
+    shader = tree.nodes.get('Principled BSDF')
+    region = {{'coverage': weights, 'constant': weights, 'authored_atlas': True, 'cylinder': cylinder}}
+    profile = {{'version': 'generated-pbr-v10', 'corrosion': True,
+        'maps': {{**maps, 'cylinder': maps['paint'], 'handling': maps['paint']}},
+        'regions': {{'materials': {{material_name: region}}}}}}
+    assert finish_surface(material, shader, profile, env, 0.)
+    oxide = tree.nodes.get('Dull nonferrous oxide islands')
+    assert (oxide is not None) == (cylinder is None)
+    assert ('Axial stains and sediment' in tree.nodes) == (cylinder == 'source_uv')
+    grime = tree.nodes['Ground-in nonmetallic grime']
+    assert grime.inputs['Metallic'].default_value == 0.
+    if oxide:
+        assert oxide.inputs['Metallic'].default_value == 0.
+        assert oxide.inputs['Roughness'].is_linked
+    assert shader.inputs['Alpha'].default_value == 1.
+
 # Corner 2 belongs to both faces. Only vertices unique to the weld face move.
 mesh = bpy.data.meshes.new('weld guard')
 mesh.from_pydata([(.17, .16, 0), (.52, .11, 0), (.2, .77, 0), (.80, .60, 0), (.90, .50, 0)],

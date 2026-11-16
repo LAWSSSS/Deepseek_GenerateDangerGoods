@@ -81,6 +81,9 @@ def update_surface_palette(tree, environment):
         ('Local light oxide', (.202, .154, .116)),
         ('Local nonferrous patina', (.24, .235, .220)),
         ('Local ground-in grime', (.042, .035, .028)),
+        ('Local dull nonferrous oxide', (.175, .170, .153)),
+        ('Local wet sediment', (.025, .021, .016)),
+        ('Local dry sediment', (.21, .174, .125)),
     ):
         node = tree.nodes.get(name)
         if node is not None:
@@ -91,6 +94,35 @@ def palette_socket(tree, name):
     node = tree.nodes.new('ShaderNodeRGB')
     node.name = name
     return node.outputs[0]
+
+
+def ground_sediment(tree, coordinates, entry, paint, grime):
+    """Mud patches with runs along the normal service axis of the painted bottle."""
+    stretch = tree.nodes.new('ShaderNodeVectorMath')
+    stretch.operation = 'MULTIPLY'
+    assign(tree, coordinates, stretch.inputs[0])
+    stretch.inputs[1].default_value = (2.8, .62, 2.8)
+    _, runoff, grains = tile(tree, stretch.outputs[0], entry, 'Axial stains and sediment', 1.6, (.46, .28, .39))
+    burden = add(tree, mul(tree, runoff, .78), mul(tree, grains, .34))
+    mud = mul(tree, paint, ramp(tree, burden, .035, 2.35))
+    return math_node(tree, 'MAXIMUM', grime, mud), ramp(tree, grains, .18, 1.9)
+
+
+def dull_nonferrous_layer(tree, substrate, coverage, fine, normal):
+    oxide = tree.nodes.new('ShaderNodeBsdfPrincipled')
+    oxide.name = 'Dull nonferrous oxide islands'
+    oxide['display_deposit'] = True
+    oxide.inputs['Metallic'].default_value = 0.
+    oxide.inputs['Specular IOR Level'].default_value = .11
+    tint = palette_socket(tree, 'Local dull nonferrous oxide')
+    assign(tree, mix(tree, mul(tree, fine, .72), tint, .57, blend='MULTIPLY'), oxide.inputs['Base Color'])
+    assign(tree, add(tree, .78, mul(tree, fine, .17)), oxide.inputs['Roughness'])
+    assign(tree, normal, oxide.inputs['Normal'])
+    layer = tree.nodes.new('ShaderNodeMixShader')
+    assign(tree, coverage, layer.inputs[0])
+    assign(tree, substrate, layer.inputs[1])
+    assign(tree, oxide.outputs[0], layer.inputs[2])
+    return layer.outputs[0]
 
 
 def shape_weld_beads(mesh, finish):
@@ -214,7 +246,7 @@ def finish_surface(material, shader, finish, environment, strength):
         color = tree.nodes.get('Generated dust tint')
         if color is not None:
             color.outputs[0].default_value = dust_color(environment)
-        if finish.get('version') in ('generated-pbr-v8', 'generated-pbr-v9'):
+        if finish.get('version') in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10'):
             update_surface_palette(tree, environment)
         return True
     name = re.sub(r'\.\d{3}$', '', material.name)
@@ -249,7 +281,8 @@ def finish_surface(material, shader, finish, environment, strength):
         nonferrous = 0.
     known = math_node(tree, 'ADD', math_node(tree, 'ADD', metal, paint, clamp=True), nonferrous, clamp=True)
     version = finish.get('version')
-    local_weather = version in ('generated-pbr-v8', 'generated-pbr-v9')
+    local_weather = version in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10')
+    aged_surface = version == 'generated-pbr-v10'
     handling = 'handling' in finish['maps']
     corrosion = finish.get('corrosion', False)
     ferrous = corrosion and (entry.get('authored_atlas') or (
@@ -273,6 +306,8 @@ def finish_surface(material, shader, finish, environment, strength):
         scuff_lines = mul(tree, scratch_lines, inspection_wear)
         grime = mul(tree, oil, add(tree, mul(tree, known, .51), mul(tree, nonferrous, .24)))
         scratches = math_node(tree, 'MAXIMUM', scratches, scuff_lines)
+        if aged_surface and cylindrical == 'source_uv':
+            grime, sediment = ground_sediment(tree, coords, finish['maps']['handling'], paint, grime)
     worn = math_node(tree, 'ADD', rust_area, chip_area, clamp=True)
     paint_wear = 0.
     if layered_wear:
@@ -411,12 +446,22 @@ def finish_surface(material, shader, finish, environment, strength):
         assign(tree, substrate, output.inputs['Surface'])
     if hydraulic:
         write_surface_pass(tree, 'hydraulic_finish', (body_rust, scratch_steel, scuffs))
+    if aged_surface and entry.get('authored_atlas') and entry['coverage'][2] > 0:
+        veil = ramp(tree, patina, .11, 1.7)
+        rubbed = math_node(tree, 'SUBTRACT', 1., mul(tree, scuff_lines, .33))
+        substrate = dull_nonferrous_layer(tree, substrate, mul(tree, mul(tree, veil, rubbed), .87), fine, normal)
+        assign(tree, substrate, output.inputs['Surface'])
     if handling:
         stain = tree.nodes.new('ShaderNodeBsdfPrincipled')
         stain.name = 'Ground-in nonmetallic grime'
         stain['display_deposit'] = True
         stain.inputs['Specular IOR Level'].default_value = .16
-        assign(tree, palette_socket(tree, 'Local ground-in grime'), stain.inputs['Base Color'])
+        if aged_surface and cylindrical == 'source_uv':
+            color = mix(tree, sediment, palette_socket(tree, 'Local wet sediment'),
+                        palette_socket(tree, 'Local dry sediment'))
+        else:
+            color = palette_socket(tree, 'Local ground-in grime')
+        assign(tree, color, stain.inputs['Base Color'])
         assign(tree, add(tree, .69, mul(tree, fine, .19)), stain.inputs['Roughness'])
         assign(tree, normal, stain.inputs['Normal'])
         layer = tree.nodes.new('ShaderNodeMixShader')

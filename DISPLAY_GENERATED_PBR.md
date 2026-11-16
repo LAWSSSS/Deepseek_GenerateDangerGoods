@@ -196,3 +196,23 @@ $controller = 'outputs/ps-model-controller'
 首轮物体和阴影渲染耗时 193.9 秒，复用缓存的最终合成用时 97.7 秒。合计 291.6 秒，Blender worker 累计 115.4 秒，最终物体和两份阴影渲染通道全部命中。全程离线，API 0 次、0 token、¥0，无新增生图，本机用电金额未知。
 
 用 `prepare_generated_pbr.py --version generated-pbr-v9` 从上一版的三张 PNG 复建清单。运行 `validate_generated_pbr.py all --weathered-review --offline --pack work/render-materials/handling-weather-v9/pack.json --compare-to outputs/四件加锈与局部融合-20261116 --out <新目录>`。
+
+
+## 气缸与灭火器专项 · 哑光氧化、深油泥与干泥流痕
+
+第十版给已经确认的非铁金属区域增加独立哑光氧化层。氧化斑由已有的斑驳遮罩控制，擦伤处减弱覆盖，保留断续的旧金属反光。灭火器沿筒身原使用方向投射油泥和干泥流痕，使用原油漆分区限制粘附。铭牌与软管保持独立的材质分区。
+
+| 场景与物品 | 上一版 → 本版 |
+|---|---:|
+| `36_6_24` 气缸，非铁区域高光 P90 | 0.30127 → 0.13835，降低 54.1% |
+| `53_7_35` 气缸，非铁区域高光 P90 | 0.11373 → 0.05357，降低 52.9% |
+| `36_6_6` 灭火器，可见污渍覆盖 | 23.97% → 36.29% |
+| `53_7_35` 灭火器，可见污渍覆盖 | 22.83% → 34.64% |
+
+高光 P90 按 Blender 线性镜面分层测量，选用不透明物体内部且非铁氧化权重 >0.22 的像素。污渍范围按成图投影中的着色权重 >0.12 统计。36 号场景的气缸连续高光被斑块打断，物品与邻近废钢的亮度差从 2.08 增至 4.94 Lab L*。灭火器可见深浅不一的污迹，铭牌仍可辨。本轮作为材质对照供人工检查。
+
+四组新旧全景均为 3840×2160，核对相机、摆位、接触锚点、雾场、模糊、几何透明度与前景遮罩。原始投影轮廓 IoU 均为 1.0，接触锚点偏移 0 px。孔洞、保护区及 44 个源模型散列通过，109 项回归通过。现场接触与尺度保持待审。 [四组完整画面对照](outputs/气缸深度做旧与灭火器积污-20261116-v2/index.html) · [验证记录](outputs/气缸深度做旧与灭火器积污-20261116-v2/validation.json)
+
+首版流痕在全景中的变化偏轻，增大泥层对比后生成最终版。最终运行 82.2 秒、Blender worker 40.0 秒，4 个无物体阴影基准全部命中。含首轮累计 165.0 秒、Blender worker 80.5 秒，API 0 次、0 token、¥0，无新增生图，本机电费未知。
+
+复跑时使用 `prepare_generated_pbr.py --version generated-pbr-v10` 从三张原素材重建 `work/render-materials/aged-surface-v10/pack.json`，再运行 `validate_generated_pbr.py all --surface-review --offline --pack work/render-materials/aged-surface-v10/pack.json --out <新目录>`。

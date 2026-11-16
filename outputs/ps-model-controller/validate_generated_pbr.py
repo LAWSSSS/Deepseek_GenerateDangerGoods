@@ -1,4 +1,4 @@
-"""Compare the generated PBR finish on one hydraulic trial and six frozen frames."""
+"""Compare generated surface materials against archived fixed-geometry frames."""
 import argparse
 import asyncio
 from dataclasses import dataclass, replace
@@ -52,6 +52,7 @@ METAL_COMPARISONS = {
     '33': 'outputs/圆柱划痕与锈蚀-20261116',
 }
 WEATHER_COMPARISON = 'outputs/扩大锈蚀与露钢-五物品-20261116-v2'
+HANDLING_COMPARISON = 'outputs/气缸重点划痕锈蚀污渍-四物品-20261116-v2'
 
 
 @dataclass(frozen=True)
@@ -587,13 +588,17 @@ async def run(args):
         'max_iterations': 0, 'review_profile': 'photographer'})
     cache = resolve(config.cache)
     sample, hashes = frozen_cases(source, cache)
-    pilot = hydraulic_case(cache)
-    metal_review = args.metal_review or args.weathered_review
+    metal_review = args.metal_review or args.weathered_review or args.surface_review
+    if args.surface_review:
+        from cylinder_wear_cases import extinguisher_cases
+        pilot, *sample = [case for case in sample if case.asset_id == '22'] + extinguisher_cases(cache)
+    else:
+        pilot = hydraulic_case(cache)
     if args.hydraulic or args.cylinders:
         sample = [case for case in sample if case.asset_id == '31']
     if args.weathered_review:
         sample = [case for case in sample if case.asset_id != '3']
-    if args.cylinders or metal_review:
+    if args.cylinders or args.metal_review or args.weathered_review:
         from cylinder_wear_cases import extinguisher_cases, jack_cases
         sample += extinguisher_cases(cache)
         if metal_review:
@@ -604,6 +609,8 @@ async def run(args):
         comparison = args.compare_to
         if args.cylinders and case.asset_id == '33':
             comparison = None
+        elif args.surface_review and not comparison:
+            comparison = HANDLING_COMPARISON
         elif args.weathered_review and not comparison:
             comparison = WEATHER_COMPARISON
         elif args.metal_review and not comparison:
@@ -642,14 +649,14 @@ async def run(args):
                 raise ValueError(f"pilot stopped: {result['stop_reason']}")
         if args.stage in ('six', 'all'):
             if not preview_report or preview_report['status'] != 'pass':
-                raise ValueError('complete the material preview before the six-frame comparison')
+                raise ValueError('complete the material preview before the fixed-frame comparison')
             if read(out / 'cases' / pilot.key / 'result.json')['invariants']['status'] != 'pass':
                 raise ValueError('pilot program checks failed')
             for case in sample:
                 await run_case(pipe, case, pack, hashes, out / 'cases' / case.key)
         if args.stage == 'review' or (args.stage == 'all' and not args.offline and not metal_review):
             pipe.vision.offline = args.offline
-            for case in cases if args.compare_to else sample:
+            for case in cases if args.compare_to or args.surface_review else sample:
                 await review_case(pipe, case, out / 'cases' / case.key)
     finally:
         await pipe.vision.close()
@@ -677,6 +684,8 @@ def main():
                        help='prepare fixed-frame comparisons for five metal objects for manual review')
     scope.add_argument('--weathered-review', action='store_true',
                        help='compare the four weathered objects against the previous corrosion trial')
+    scope.add_argument('--surface-review', action='store_true',
+                       help='compare oxidized cylinders and stained extinguishers in two fixed views each')
     parser.add_argument('--offline', action='store_true')
     asyncio.run(run(parser.parse_args()))
 
