@@ -103,6 +103,31 @@ def shape_weld_beads(mesh, finish):
             'basis': 'authored_weld_uv_tiles_only_in_unit_length_mesh'}
 
 
+def cylinder_channels(tree, coordinates, entry, texture_entry):
+    """Sample axial scrapes and circumferential scuffs without box projection seams."""
+    mode = entry['cylinder']
+    split = tree.nodes.new('ShaderNodeSeparateXYZ')
+    assign(tree, coordinates.outputs['UV' if mode == 'source_uv' else 'Object'], split.inputs[0])
+    x, y, z = (split.outputs[axis] for axis in 'XYZ')
+    if mode == 'source_uv':
+        axial, angle, domain = y, x, 1.
+    else:
+        low, high, center_x, center_z, radius = entry['barrel']
+        axial = mul(tree, add(tree, y, -low), 1. / (high - low))
+        radial_x, radial_z = add(tree, x, -center_x), add(tree, z, -center_z)
+        angle = add(tree, mul(tree, math_node(tree, 'ARCTAN2', radial_z, radial_x), 1. / (2. * np.pi)), .5)
+        radial = math_node(tree, 'SQRT', add(tree, mul(tree, radial_x, radial_x), mul(tree, radial_z, radial_z)), 0.)
+        wall = math_node(tree, 'ABSOLUTE', math_node(tree, 'SUBTRACT', radial, radius), 0.)
+        domain = mul(tree, ramp(tree, math_node(tree, 'SUBTRACT', .125 * radius, wall), 0., 11. / radius),
+                     mul(tree, ramp(tree, axial, -.012, 55.),
+                         ramp(tree, math_node(tree, 'SUBTRACT', 1.012, axial), 0., 55.)))
+    vector = tree.nodes.new('ShaderNodeCombineXYZ')
+    assign(tree, axial, vector.inputs['X'])
+    assign(tree, angle, vector.inputs['Y'])
+    wear = texture(tree, texture_entry['path'], vector.outputs[0], 'Cylinder wear · axial and angular')
+    return (*channels(tree, wear.outputs['Color']), domain)
+
+
 def finish_surface(material, shader, finish, environment, strength):
     tree = material.node_tree
     if shader.get('generated_finish'):
@@ -141,7 +166,8 @@ def finish_surface(material, shader, finish, environment, strength):
         metal = math_node(tree, 'ADD', mul(tree, metal, ramp(tree, rough, .17, 7.)), third, clamp=True)
         nonferrous = 0.
     known = math_node(tree, 'ADD', math_node(tree, 'ADD', metal, paint, clamp=True), nonferrous, clamp=True)
-    formed = finish.get('version') == 'generated-pbr-v3'
+    cylindrical = finish.get('version') == 'generated-pbr-v4' and entry.get('cylinder')
+    formed = finish.get('version') in ('generated-pbr-v3', 'generated-pbr-v4')
     layered_wear = formed or finish.get('version') == 'generated-pbr-v2'
     coords = coordinates.outputs['Object']  # Canonical mesh is scaled uniformly by longest axis.
     oxidation, pits, fine = tile(tree, coords, finish['maps']['oxide'], 'Generated oxidation', 1.9, (.17, .39, .72))
@@ -161,6 +187,15 @@ def finish_surface(material, shader, finish, environment, strength):
             mottling = mul(tree, mottling, add(tree, .46, mul(tree, surface_noise(tree, coords, 64., 2.), 1.0)))
         paint_wear = mul(tree, paint, ramp(tree, mottling, .15, 1.55))
         worn = math_node(tree, 'ADD', worn, paint_wear, clamp=True)
+    if cylindrical:
+        scrape, exposed, nuclei, domain = cylinder_channels(tree, coordinates, entry, finish['maps']['cylinder'])
+        surface = mul(tree, paint, domain)
+        body_rust = mul(tree, surface, ramp(tree, add(tree, oxidation, mul(tree, nuclei, .74)), .18, 1.7))
+        clean = math_node(tree, 'SUBTRACT', 1., mul(tree, body_rust, .87))
+        scratch_steel = mul(tree, mul(tree, surface, exposed), clean)
+        scuffs = mul(tree, surface, scrape)
+        worn = math_node(tree, 'MAXIMUM', worn, body_rust)
+        scratches = math_node(tree, 'MAXIMUM', scratches, scuffs)
     base = original(shader.inputs['Base Color'])
     base = mix(tree, mul(tree, known, .58), base, add(tree, .89, mul(tree, fine, .21)), blend='MULTIPLY')
     base = mix(tree, mul(tree, nonferrous, oxidation), base, .67, blend='MULTIPLY')
@@ -174,6 +209,12 @@ def finish_surface(material, shader, finish, environment, strength):
         base = mix(tree, mul(tree, weld, .72), base, add(tree, .62, mul(tree, bead, .34)), blend='MULTIPLY')
     base = mix(tree, mul(tree, chip_area, .79), base, chip_tint)
     base = mix(tree, mul(tree, scratches, .32), base, .55, blend='MULTIPLY')
+    if cylindrical:
+        # The surrounding rust is dark and rough; only a few deep scrape
+        # centers expose the cooler steel response.
+        rust_color = mix(tree, fine, (.074, .035, .020, 1.), (.18, .093, .045, 1.))
+        base = mix(tree, mul(tree, body_rust, .78), base, rust_color)
+        base = mix(tree, scratch_steel, base, (.30, .287, .265, 1.))
     assign(tree, base, shader.inputs['Base Color'])
     rough_area = math_node(tree, 'ADD', mul(tree, nonferrous, .64), mul(tree, metal, .31), clamp=True)
     rough = mix(tree, rough_area, rough, math_node(tree, 'MAXIMUM', rough, add(tree, .50, mul(tree, pits, .20))))
@@ -190,11 +231,21 @@ def finish_surface(material, shader, finish, environment, strength):
         scuff = mul(tree, math_node(tree, 'ADD', nonferrous, paint, clamp=True), ramp(tree, glancing, .40, 2.8))
         rough = mix(tree, mul(tree, scuff, .40), rough, math_node(tree, 'MAXIMUM', rough, .63))
         rough = mix(tree, mul(tree, weld, .64), rough, add(tree, .55, mul(tree, bead, .30)))
-    assign(tree, mix(tree, mul(tree, scratches, .35), rough, .72), shader.inputs['Roughness'])
+    rough = mix(tree, mul(tree, scratches, .35), rough, .72)
+    if cylindrical:
+        rough = mix(tree, body_rust, rough, add(tree, .68, mul(tree, pits, .21)))
+        rough = mix(tree, scratch_steel, rough, add(tree, .28, mul(tree, fine, .16)))
+        coat = shader.inputs['Coat Weight']
+        damage = math_node(tree, 'MAXIMUM', body_rust, scuffs)
+        assign(tree, mul(tree, original(coat), math_node(tree, 'SUBTRACT', 1., mul(tree, damage, .85))), coat)
+    assign(tree, rough, shader.inputs['Roughness'])
     metalness = original(shader.inputs['Metallic'])
     metalness = mix(tree, mul(tree, rust_area, .80), metalness, .06)
-    assign(tree, mix(tree, mul(tree, chip_area, .72), metalness, mix(tree, oxidation, .72, .12)),
-           shader.inputs['Metallic'])
+    metalness = mix(tree, mul(tree, chip_area, .72), metalness, mix(tree, oxidation, .72, .12))
+    if cylindrical:
+        metalness = mix(tree, body_rust, metalness, .04)
+        metalness = mix(tree, scratch_steel, metalness, .88)
+    assign(tree, metalness, shader.inputs['Metallic'])
     source_normal = original(shader.inputs['Normal']) if shader.inputs['Normal'].is_linked else None
     steel_height = mul(tree, metal, add(tree, mul(tree, fine, .32), mul(tree, pits, -.45)))
     paint_height = mul(tree, paint, add(tree, mul(tree, chip_grain, .20), mul(tree, chips, -.63)))
@@ -202,6 +253,8 @@ def finish_surface(material, shader, finish, environment, strength):
                  add(tree, mul(tree, nonferrous, mul(tree, fine, .20)), mul(tree, scratches, -.38)))
     if formed:
         height = add(tree, height, add(tree, mul(tree, scuff, mul(tree, glancing, .48)), mul(tree, weld, bead)))
+    if cylindrical:
+        height = add(tree, height, add(tree, mul(tree, scuffs, -.80), mul(tree, mul(tree, body_rust, pits), -.54)))
     normal = relief(tree, 'Generated shallow surface relief', height, source_normal, .00048, mul(tree, known, .34))
     assign(tree, normal, shader.inputs['Normal'])
     powder = 0.

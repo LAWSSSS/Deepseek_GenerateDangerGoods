@@ -89,3 +89,15 @@ $controller = 'outputs/ps-model-controller'
 102 项回归通过。本地渲染试验 153.5 秒，Blender worker 90.8 秒。本轮复用 ImageGen 贴图，新增生图 0 次。盲评累计 25 次实际请求、93,990 token，估算 ¥0.1247–0.2494。服务回包含展示字段导致部分盲评失败。第一次兼容处理又使严格区域坐标校验失败，改用显式可选字段后仅补跑缺失项，25 次已含两次格式修复验证及重试，保留最后一项缺测。 [原尺寸对照](outputs/实物细节复测-20261116/index.html) · [验证与用量](outputs/实物细节复测-20261116/validation.json) · [DeepSeek 计价](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
 
 用 `prepare_generated_pbr.py --version generated-pbr-v3` 从原始三张 PNG 建立新版清单。固定样片复跑使用 `--pack work/render-materials/generated-pbr-v3/pack.json --compare-to outputs/片状磨损-固定摆位-20261113`。后续可将气缸的假设面光源与场景反射分开对照，轴承座优先核对落点、遮挡和可见接收面。
+
+## 圆柱筒身 · 密集划痕、锈蚀与露钢
+
+第四版贴图包把短擦痕、较长轴向划痕、局部露钢和成簇锈坑按筒轴及周向投射。1024 px 贴图中，划痕、露钢、锈核三通道超过 0.15 的面积分别为 14.4%、4.0%、7.0%。完整漆面保留原有颜色，锈层更粗糙，深划痕中心才露出较冷的钢材反光。剥落处减少原清漆层，浅凹凸随光向表现。 [Blender 金属度与粗糙度](https://docs.blender.org/manual/en/4.5/render/shader_nodes/shader/principled.html)
+
+31 号使用核对过轴线、半径和两端的完整钢筒，范围限于筒身外壁。33 号复用原圆柱 UV，保护标签区域，软管、阀门和底座保持原材质。两件型材按源模型散列绑定，其他素材仍可使用原材质包。
+
+按历史摆位生成液压缸 3 张、灭火器 2 张，均为 3840×2160。五张可见内部的纹理亮度差 P75 增长 11%–57%，用于确认划痕经过雾化、缩放和相机模糊后仍有变化。53 号场景的两件均偏好新版，36 号一组相近、两组偏好旧版。五张保留待审状态，批量沿用原默认。测量长轴和落点一致，原始轮廓最小 IoU 为 0.99954，孔洞、保护区和编辑范围外像素检查通过，44 个源模型散列一致。104 项回归通过。
+
+正式生成用时 141.8 秒，Blender worker 81.2 秒，复用 5 个无物体阴影基准。首次试样另用 51.7 秒。复用已有 ImageGen 素材。盲评 6 次实际请求（含 1 次重试），22,589 token，API 估算 ¥0.0290–0.0580。 [完整画面新旧对照](outputs/圆柱划痕与锈蚀-20261116/index.html) · [逐项测量与费用](outputs/圆柱划痕与锈蚀-20261116/validation.json) · [DeepSeek 计价](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)
+
+用 `prepare_generated_pbr.py --version generated-pbr-v4` 准备贴图包。样片运行 `validate_generated_pbr.py all --cylinders --pack work/render-materials/cylinder-wear-v1/pack.json --compare-to outputs/实物细节复测-20261116` 并指定新的输出目录。液压缸对照为上一轮材质，灭火器使用两张历史固定摆位图。

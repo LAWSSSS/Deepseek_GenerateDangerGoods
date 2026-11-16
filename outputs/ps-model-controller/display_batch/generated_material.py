@@ -15,12 +15,14 @@ from .surface_maps import prepare_uv_masks, save_image
 VERSION = 'generated-pbr-v1'
 WEAR_VERSION = 'generated-pbr-v2'
 FORM_VERSION = 'generated-pbr-v3'
-PACK_VERSIONS = (VERSION, WEAR_VERSION, FORM_VERSION)
+CYLINDER_VERSION = 'generated-pbr-v4'
+PACK_VERSIONS = (VERSION, WEAR_VERSION, FORM_VERSION, CYLINDER_VERSION)
 CHANNELS = {
     'oxide': ('oxidation', 'pitting', 'fine_relief'),
     'paint': ('chips', 'scratches', 'fine_relief'),
     'dust': ('coverage', 'granules', 'fine_relief'),
 }
+CYLINDER_CHANNELS = ('scuffs', 'exposed_steel', 'rust_nuclei')
 REGIONS = ('steel', 'paint', 'oxide', 'nonferrous', 'weld')
 LUMA = np.float32([.2126, .7152, .0722])
 
@@ -78,7 +80,7 @@ def derive_maps(rgb, kind, version=VERSION):
         # has few elongated features.
         peak = max(.12, float(np.quantile(marks, .995)))
         scratch = np.clip((marks - .04) / peak, 0., 1.)
-        if version in (WEAR_VERSION, FORM_VERSION):
+        if version != VERSION:
             # Widen existing grooves by a few texels so downsampling retains
             # an abrasion mark without painting in additional scratches.
             halo = cv2.dilate(scratch, np.ones((5, 5), np.uint8))
@@ -117,6 +119,21 @@ def atlas_layouts(value):
         if not isinstance(entry.get('material'), str) or not entry['material']:
             raise ValueError('source atlas needs its exact material name')
         tiles = entry.get('tiles')
+        if entry.get('cylinder') == 'source_uv' and tiles is None:
+            label = entry.get('protected_uv')
+            if (not isinstance(label, list) or len(label) != 4 or
+                    not all(type(x) in (float, int) and 0 <= x <= 1 for x in label) or
+                    label[0] >= label[2] or label[1] >= label[3]):
+                raise ValueError('invalid protected UV rectangle')
+            continue
+        if entry.get('cylinder') not in (None, 'normalized_y'):
+            raise ValueError('unsupported cylinder coordinates')
+        if entry.get('cylinder') == 'normalized_y':
+            barrel = entry.get('barrel')
+            if (not isinstance(barrel, list) or len(barrel) != 5
+                    or not all(type(x) in (float, int) and -.5 <= x <= .5 for x in barrel)
+                    or barrel[1] <= barrel[0] or not .01 <= barrel[4] <= .5):
+                raise ValueError('invalid normalized barrel bounds, center or radius')
         if not isinstance(tiles, list) or len(tiles) != 16 or any(
                 tile is not None and tile not in REGIONS for tile in tiles):
             raise ValueError('source atlas must declare its 4x4 regions; null preserves the source')
@@ -131,7 +148,10 @@ def build_pack(folder, sources, prompts, layouts, *, version=VERSION):
     if manifest.exists():
         raise FileExistsError(manifest)
     layout = atlas_layouts(layouts)
-    if version != FORM_VERSION:
+    if version != CYLINDER_VERSION:
+        layout = {digest: {k: v for k, v in entry.items() if k not in ('cylinder', 'barrel')}
+                  for digest, entry in layout.items() if 'tiles' in entry}
+    if version in (VERSION, WEAR_VERSION):
         layout = {digest: {**entry, 'tiles': ['paint' if name == 'weld' else name for name in entry['tiles']]}
                   for digest, entry in layout.items()}
     folder.mkdir(parents=True, exist_ok=True)
@@ -159,6 +179,14 @@ def build_pack(folder, sources, prompts, layouts, *, version=VERSION):
                       'color_space': 'Non-Color', 'channels': list(channels), 'statistics': stats,
                       'source': {'path': original.name, 'sha256': file_hash(original),
                                  'size': list(size), 'generator': 'ImageGen built-in', 'prompt': prompt}}
+    if version == CYLINDER_VERSION:
+        from .cylinder_wear import cylinder_wear_tile
+        packed = cylinder_wear_tile()
+        baked = folder / 'cylinder-channels.png'
+        save_image(Image.fromarray(packed), baked)
+        maps['cylinder'] = {'path': baked.name, 'sha256': file_hash(baked), 'size': list(packed.shape[1::-1]),
+                            'color_space': 'Non-Color', 'channels': list(CYLINDER_CHANNELS),
+                            'statistics': map_statistics(packed), 'source': {'generator': 'deterministic cylinder wear'}}
     atomic_json(manifest, {'version': version, 'maps': maps, 'atlases': layout})
     return manifest
 
@@ -167,11 +195,12 @@ def load_pack(manifest):
     path = Path(manifest).resolve()
     raw = json.loads(path.read_text(encoding='utf8'))
     version = raw.get('version')
-    if version not in PACK_VERSIONS or set(raw.get('maps', {})) != set(CHANNELS):
+    expected = {**CHANNELS, 'cylinder': CYLINDER_CHANNELS} if version == CYLINDER_VERSION else CHANNELS
+    if version not in PACK_VERSIONS or set(raw.get('maps', {})) != set(expected):
         raise ValueError('unsupported generated_pbr manifest')
     layouts = atlas_layouts(raw.get('atlases', {}))
     maps = {}
-    for kind, channels in CHANNELS.items():
+    for kind, channels in expected.items():
         entry = raw['maps'][kind]
         image = (path.parent / entry['path']).resolve()
         if not image.is_relative_to(path.parent) or entry.get('color_space') != 'Non-Color' or (
@@ -197,10 +226,11 @@ def finish_regions(asset, pack, cache):
     key = signature(VERSION, asset['mesh_hash'], layout)
     folder = Path(cache) / 'generated-pbr-regions' / key
     folder.mkdir(parents=True, exist_ok=True)
-    weld_tiles = [i for i, tile in enumerate(layout['tiles']) if tile == 'weld']
+    tiles = layout.get('tiles', [])
+    weld_tiles = [i for i, tile in enumerate(tiles) if tile == 'weld']
     values = np.zeros((256, 256, 4 if weld_tiles else 3), np.uint8)
     channels = {'steel': 0, 'oxide': 0, 'paint': 1, 'nonferrous': 2}
-    for i, tile in enumerate(layout['tiles']):
+    for i, tile in enumerate(tiles):
         if tile is not None:
             row, col = 3 - i // 4, i % 4
             region = values[row*64:(row+1)*64, col*64:(col+1)*64]
@@ -208,6 +238,11 @@ def finish_regions(asset, pack, cache):
                 region[..., 1] = region[..., 3] = 255
             else:
                 region[..., channels[tile]] = 255
+    if layout.get('cylinder') == 'source_uv':
+        l, b, r, t = layout['protected_uv']
+        values[..., 1] = 255
+        values[int(256 * (1 - t)):int(np.ceil(256 * (1 - b))),
+               int(l * 256):int(np.ceil(r * 256)), 1] = 0
     path = folder / 'regions.png'
     if path.is_file():
         with Image.open(path) as old:
@@ -221,5 +256,9 @@ def finish_regions(asset, pack, cache):
              'basis': 'authored_tiles_bound_to_exact_glb'}
     if weld_tiles:
         entry['weld_tiles'] = weld_tiles
+    if layout.get('cylinder'):
+        entry['cylinder'] = layout['cylinder']
+        if 'barrel' in layout:
+            entry['barrel'] = layout['barrel']
     return {'signature': signature(key, entry['mask_hash']),
             'materials': {layout['material']: entry}}

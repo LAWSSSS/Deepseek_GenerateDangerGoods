@@ -1031,7 +1031,8 @@ def render_parts(request):
             bpy.data.orphans_purge(do_recursive=True)
         asset=normalized_mesh(request['mesh'])
         state.update(asset=asset,arrays=arrays(asset),mesh_key=mesh_key)
-        state['weld_detail'] = shape_weld_beads(asset.data, finish) if finish and finish['version'] == 'generated-pbr-v3' else None
+        state['weld_detail'] = shape_weld_beads(asset.data, finish) if finish and finish['version'] in (
+            'generated-pbr-v3', 'generated-pbr-v4') else None
         imported=1;import_seconds=time.monotonic()-begin
     obj=state['asset'];vertices,faces=state['arrays']
     points,rotation=pose_points(vertices,request['matrix'],request['yaw'])

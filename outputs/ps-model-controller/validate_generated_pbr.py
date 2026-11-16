@@ -326,6 +326,7 @@ def write_report(out, cases, hashes, pack, preview_report):
               'failed': sum(r['status'] == 'failed' for r in rows),
               'material_targets': sum(material_target_met(r.get('review', {})) for r in sample),
               'reviewed': sum(bool(r.get('review')) for r in rows), 'sample_photography_pass': len(passed),
+              'sample_count': len(sample),
               'sample_gate': len(passed) >= 5 and {row['asset_id'] for row in passed} == {'3', '22', '31'}
                   and unchanged and all(row.get('invariants', {}).get('status') == 'pass' for row in rows),
               'source_models_unchanged': unchanged, 'source_model_count': len(hashes),
@@ -357,7 +358,7 @@ def write_report(out, cases, hashes, pack, preview_report):
         'section{margin:32px 0}section div{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr))}'
         'figure{margin:6px}img{width:100%;height:auto}</style><h1>废钢材质同摆位对照</h1>'
         '<p>点击完整画面可查看原尺寸 PNG。现场尺度和接触证据为估计时，结果保留待审。</p>'
-        f'<p>摄影门槛 {report["sample_photography_pass"]}/6。{html.escape(label(usage))}</p>'
+        f'<p>摄影门槛 {report["sample_photography_pass"]}/{report["sample_count"]}。{html.escape(label(usage))}</p>'
         + ''.join(cards), encoding='utf8')
     if any(r.get('image') for r in rows):
         make_overview(out, rows)
@@ -491,11 +492,17 @@ async def run(args):
     cache = resolve(config.cache)
     sample, hashes = frozen_cases(source, cache)
     pilot = hydraulic_case(cache)
+    if args.cylinders:
+        from cylinder_wear_cases import extinguisher_cases
+        sample = [case for case in sample if case.asset_id == '31'] + extinguisher_cases(cache)
     cases = [pilot, *sample]
     if args.compare_to:
         previous = resolve(args.compare_to)
         previous_cases = []
         for case in cases:
+            if args.cylinders and case.asset_id == '33':
+                previous_cases.append(case)
+                continue
             row = read(previous / 'cases' / case.key / 'result.json')
             if (row['invariants']['fixed_geometry_signature'] != signature(case.candidate)
                     or row['invariants']['status'] != 'pass' or file_hash(row['image']) != row['image_hash']):
@@ -562,6 +569,7 @@ def main():
     parser.add_argument('--out', default=OUTPUT)
     parser.add_argument('--pack', default=PACK)
     parser.add_argument('--compare-to', help='prior fixed-geometry trial used as the visual baseline')
+    parser.add_argument('--cylinders', action='store_true', help='replay the 31 hydraulic cylinder and 33 extinguisher')
     parser.add_argument('--offline', action='store_true')
     asyncio.run(run(parser.parse_args()))
 

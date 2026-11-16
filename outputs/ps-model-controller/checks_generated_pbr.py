@@ -11,6 +11,7 @@ import numpy as np
 from PIL import Image
 
 from display_batch.common import BLENDER, HERE, atomic_json, file_hash
+from display_batch.cylinder_wear import cylinder_wear_tile
 from display_batch.effects import parameters
 from display_batch.generated_material import CHANNELS, FORM_VERSION, VERSION, WEAR_VERSION, derive_maps, finish_regions, load_pack, map_statistics
 from display_batch.rendering import RenderCache, part_keys
@@ -97,6 +98,27 @@ class GeneratedFinishTests(unittest.TestCase):
                 self.assertEqual(mask.getpixel((96, 224)), (0, 255, 0, 0))
                 self.assertEqual(mask.getpixel((160, 224)), (0, 255, 0, 255))
                 self.assertEqual(mask.getpixel((224, 224)), (0, 0, 0, 0))
+
+    def test_cylinder_strokes_are_dense_with_local_steel_and_wrapped_angle(self):
+        tile = cylinder_wear_tile()
+        np.testing.assert_array_equal(tile, cylinder_wear_tile())
+        self.assertTrue(np.all(tile[..., 1] <= tile[..., 0]))
+        coverage = (tile > 38).mean(axis=(0, 1))
+        for actual, (low, high) in zip(coverage, ((.08, .18), (.02, .07), (.03, .11))):
+            self.assertTrue(low < actual < high)
+        values = tile.astype(float)
+        seam = np.abs(values[0] - values[-1]).mean(axis=0)
+        interior = np.abs(np.diff(values, axis=0)).mean(axis=1)
+        self.assertTrue(np.all(seam < np.percentile(interior, 95, axis=0)))
+
+    def test_body_wear_excludes_protected_label(self):
+        layout = {'material': 'body paint', 'cylinder': 'source_uv', 'protected_uv': [.34, .018, .69, .67]}
+        with TemporaryDirectory() as temp:
+            record = finish_regions({'mesh_hash': 'mesh'}, {'atlases': {'mesh': layout}}, temp)
+            self.assertEqual(set(record['materials']), {'body paint'})
+            with Image.open(record['materials']['body paint']['mask']) as mask:
+                self.assertEqual(mask.getpixel((128, 160)), (0, 0, 0))
+                self.assertEqual(mask.getpixel((64, 160)), (0, 255, 0))
 
     def test_review_ignores_presentation_metadata_but_requires_evidence(self):
         from validate_generated_pbr import BlindPair

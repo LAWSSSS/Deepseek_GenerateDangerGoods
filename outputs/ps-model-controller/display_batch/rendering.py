@@ -82,7 +82,7 @@ def render_dependencies():
 @lru_cache(maxsize=1)
 def finish_dependencies():
     return signature(*(file_hash(HERE / 'display_batch' / name)
-                       for name in ('generated_material.py', 'generated_shader.py', 'surface_maps.py')))
+                       for name in ('generated_material.py', 'generated_shader.py', 'surface_maps.py', 'cylinder_wear.py')))
 
 
 def part_keys(request, device, dependencies, *, include_detail=True):
