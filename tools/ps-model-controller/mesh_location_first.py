@@ -151,6 +151,9 @@ async def run(args):
     library=[json.loads(line) for line in args.library.read_text(encoding="utf8").splitlines() if line.strip()]
     matches=[r for r in library if (args.asset.isdigit() and r["number"]==int(args.asset)) or r["asset_id"]==args.asset]
     if len(matches)!=1:raise NeedsReview("物品不存在或尚未入库")
+    from display_batch.inventory import is_storage_tank
+    if is_storage_tank(matches[0]['number']):
+        raise ValueError('储罐已从可摆放物品中移除')
     row=dict(matches[0]);row["calls"]=[];row["job_id"]=f'location-first-{row["asset_id"]}'
     mesh=Path(row["mesh"]);source=Path(row["source_view"]);alpha=source.parent/"source-alpha.png"
     for file,key in ((mesh,"mesh_sha256"),(source,"source_view_sha256"),(alpha,"source_alpha_sha256"),(Path(row["rust"]),"rust_sha256")):

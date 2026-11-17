@@ -18,7 +18,7 @@ def evaluation_manifests(backgrounds,out):
         if camera is None:raise ValueError('背景缺少可核对的评估相机分组')
         group='heldout' if camera[1]=='36' else 'development'
         groups[group].extend({'background':str(path.resolve()),'asset_id':k,'group':group}
-                             for k in ('3','6','10','13','19-1','31'))
+                             for k in ('3','8','10','13','19-1','31'))
     for group,jobs in groups.items():atomic_json(Path(out)/(group+'.json'),jobs)
     return {k:len(v) for k,v in groups.items()}
 

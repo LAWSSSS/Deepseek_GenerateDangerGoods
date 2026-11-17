@@ -17,7 +17,7 @@ class ReviewViewerTests(unittest.TestCase):
     def setUpClass(cls):
         cls.catalog = viewer.load_catalog()
         cls.server = viewer.ReviewServer(('127.0.0.1', 0), viewer.Handler)
-        cls.server.catalog = cls.catalog
+        cls.server.catalog = viewer.load_catalog(include_archived=False)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
         cls.thread.start()
         cls.port = cls.server.server_address[1]
@@ -38,22 +38,25 @@ class ReviewViewerTests(unittest.TestCase):
         conn.close()
         return result
 
-    def test_catalog_has_the_39_real_candidates(self):
+    def test_catalog_lists_active_models_and_hides_storage_tanks(self):
         code, _, data = self.request('/api/items')
         items = json.loads(data)
         self.assertEqual(code, 200)
         expected = [str(x) for x in range(1,19)] + [f'19-{x}' for x in range(1,7)] + [str(x) for x in range(20,40)]
-        self.assertEqual([x['id'] for x in items], expected)
+        self.assertEqual([x['id'] for x in items], [k for k in expected if k not in {'5','6','7','38','39'}])
+        self.assertEqual(len(self.catalog), 44)
+        for tank in ('05','06','07','38','39'):
+            self.assertEqual(self.request(f'/api/model/{tank}')[0], 404)
         self.assertTrue(all(x['available'] for x in items))
         self.assertTrue(next(x for x in items if x['id']=='37')['reference_missing'])
-        self.assertEqual(sum(x['human_review']=='approved' for x in items), 35)
+        self.assertEqual(sum(x['human_review']=='approved' for x in items), 30)
         self.assertEqual(next(x for x in items if x['id']=='10')['human_review'], 'revision_pending_review')
         self.assertTrue(all(x['quantity']==1 and x['human_review']=='revision_pending_review'
                             for x in items if x['id'].startswith('19-')))
         self.assertFalse(any('_mesh' in x for x in items))
 
     def test_model_headers_and_image(self):
-        for number in (1, 10, 13, 14, '19-1', '19-2', '19-3', '19-4', '19-5', '19-6', 22, 27, 31, 33, 37, 39):
+        for number in (1, 10, 13, 14, '19-1', '19-2', '19-3', '19-4', '19-5', '19-6', 22, 27, 31, 33, 37):
             with self.subTest(number=number):
                 code, headers, data = self.request(f'/api/model/{number}', 4)
                 self.assertEqual(code, 200)

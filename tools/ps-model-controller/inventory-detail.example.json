@@ -1,0 +1,391 @@
+{
+  "version": "inventory-detail-v1",
+  "assets": {
+    "2": {
+      "source_sha256": "2707f700bc420b26689efbe65eef5c5fa141cb4e83eccd8ae9d6e64ce3f1da3c",
+      "basis": "铸造阀体分缝和安装法兰孔口",
+      "profile": "cast",
+      "parts": [
+        "Body split flange",
+        "Bored neck plus",
+        "Bored neck minus"
+      ]
+    },
+    "3": {
+      "source_sha256": "a66b84f411cf86a3719225aebed54e59e59b854f1062efd9171282f1486da327",
+      "basis": "底脚铸件与安装孔座",
+      "profile": "cast",
+      "parts": [
+        "Base plate",
+        "Foot collar minus",
+        "Foot collar plus",
+        "Foot saddle minus",
+        "Foot saddle plus"
+      ]
+    },
+    "4": {
+      "source_sha256": "c1a7df31e6edd61b8377b258a385ea0817e400bc88dc329dfea67d1c48daf7e8",
+      "basis": "轴承圈与底脚安装肩",
+      "profile": "machine",
+      "parts": [
+        "Bearing outer ring",
+        "Bearing inner ring",
+        "Mounting pad minus",
+        "Mounting pad plus"
+      ]
+    },
+    "8": {
+      "source_sha256": "460be991d8ac413f6f0db177138d1bfcaddf110310ec4faacdb94c74458d218d",
+      "basis": "分离过滤器接管法兰和起吊孔",
+      "profile": "machine",
+      "parts": [
+        "Nozzle -Y flange",
+        "Nozzle +Y flange",
+        "Lift lug eye"
+      ]
+    },
+    "9": {
+      "source_sha256": "f853e5b9ff4624d9e5d609a847e2273807c189ac68dfdecd6ecc5f317721431e",
+      "basis": "过滤器法兰孔沿和支脚",
+      "profile": "machine",
+      "parts": [
+        "Top flange",
+        "Side flange",
+        "Foot pad 1",
+        "Foot pad 2",
+        "Foot pad 3",
+        "Foot pad 4"
+      ]
+    },
+    "10": {
+      "source_sha256": "080b30140d78ad8a223a547a286de25ade1ed49e2d7deb3015b294b5bc6e477f",
+      "basis": "铸底与托头接合边",
+      "profile": "cast",
+      "parts": [
+        "Cast base",
+        "Saddle top rim",
+        "Socket rim open"
+      ]
+    },
+    "11": {
+      "source_sha256": "5527577ad2558fbb12e4391b06442e0eec18350b56f97927b053ecd99f92f191",
+      "basis": "千斤顶铸底和插杆孔口",
+      "profile": "cast",
+      "parts": [
+        "Cast base",
+        "Base outer rim",
+        "Socket rim"
+      ]
+    },
+    "12": {
+      "source_sha256": "33579819710685b64eac98df57278144fe75fb16c382c04d2909a59504e94701",
+      "basis": "千斤顶车架钢板与托盘",
+      "profile": "formed",
+      "parts": [
+        "Frame left plate",
+        "Frame right plate",
+        "Saddle rim"
+      ]
+    },
+    "13": {
+      "source_sha256": "5e779052a25e4ec035857ab66031c9feddc62daf0d49873bb4eed2cf2d4b8e47",
+      "basis": "塑料盖的卷边与卡扣",
+      "profile": "polymer",
+      "parts": [
+        "Can rear lid",
+        "Can rear recess rim",
+        "Can rear latch upper",
+        "Can rear latch lower"
+      ]
+    },
+    "14": {
+      "source_sha256": "3a8ff942e6190248fc79b661325e47b26204b267e2fee06827172e038aad26fb",
+      "basis": "喷罐金属底卷边",
+      "profile": "formed",
+      "parts": [
+        "Can bottom cup",
+        "Can bottom rim",
+        "Can bottom step"
+      ]
+    },
+    "15": {
+      "source_sha256": "863149499bd96f489129b6c9bcbe6d9645214bbe32637f9149d218e2dc33972f",
+      "basis": "底卷边和喷嘴盖开口",
+      "profile": "formed",
+      "parts": [
+        "Bottom rolled rim",
+        "Bottom rim upper lip",
+        "Window bezel"
+      ]
+    },
+    "16": {
+      "source_sha256": "45f83ce3c1424820e1d6c43fe884dbcd97e22c3505157ff3125efb706ada0554",
+      "basis": "喷罐底环、罐帽和凹口",
+      "profile": "polymer",
+      "parts": [
+        "Cap shell",
+        "Cap recess rim",
+        "Cap seam ring"
+      ]
+    },
+    "17": {
+      "source_sha256": "c45081cc0047abc2ef3601f15b150d88d374906680e9a7d671736435874f9ee8",
+      "basis": "减震器安装眼和衬套",
+      "profile": "machine",
+      "parts": [
+        "Top eye lug",
+        "Top eye bushing",
+        "Bottom eye lug",
+        "Bottom bushing"
+      ]
+    },
+    "18": {
+      "source_sha256": "013340ec08c49409482f39c982ee8fa427235f0d62f4f0c5d98fea820e490262",
+      "basis": "连接端耳板和衬套",
+      "profile": "machine",
+      "parts": [
+        "Top eyelet plate L",
+        "Top eyelet plate R",
+        "Top eyelet bushing",
+        "Bottom eyelet plate L",
+        "Bottom eyelet plate R",
+        "Bottom eyelet bushing"
+      ]
+    },
+    "19-1": {
+      "source_sha256": "5caccb0199a3714899b634f8abbaaa0f0a3ac0ea15c37094b0fa4a428bc5d5bb",
+      "basis": "已拆分单瓶的卷边及阀帽",
+      "profile": "formed",
+      "parts": [
+        "红色高瓶 底部卷边",
+        "红色高瓶 阀帽",
+        "红色高瓶 阀帽底圈"
+      ]
+    },
+    "19-2": {
+      "source_sha256": "42e68c8019adc3a30add9d3fc60ee7b04c6d6f2b933eb0de4df1c02b0af31273",
+      "basis": "已拆分单瓶的护圈与底卷边",
+      "profile": "formed",
+      "parts": [
+        "绿色气瓶一 底部卷边",
+        "绿色气瓶一 护圈",
+        "绿色气瓶一 护圈底圈"
+      ]
+    },
+    "19-3": {
+      "source_sha256": "67a49dd97190612cf9d250e86771acbaaa8de191d1b69947ce429dc007a521fb",
+      "basis": "已拆分单瓶的护圈与底卷边",
+      "profile": "formed",
+      "parts": [
+        "绿色气瓶二 底部卷边",
+        "绿色气瓶二 护圈",
+        "绿色气瓶二 护圈底圈"
+      ]
+    },
+    "19-4": {
+      "source_sha256": "2c447ebec7a141a6dee32afcd8459c4ba97e336fb7abb2e45c827ccdfc63bfd3",
+      "basis": "已拆分单瓶的卷边和黄铜六角",
+      "profile": "machine",
+      "parts": [
+        "蓝色气瓶一 底部卷边",
+        "蓝色气瓶一 黄铜六角锁母",
+        "蓝色气瓶一 黄铜出气口"
+      ]
+    },
+    "19-5": {
+      "source_sha256": "aa61ff6ed6005ab25103e25da59ce56bba37ff4708eea97a1cf452f03f1380be",
+      "basis": "已拆分单瓶的表圈和阀座",
+      "profile": "machine",
+      "parts": [
+        "蓝色气瓶二 底部卷边",
+        "蓝色气瓶二 压力表表圈",
+        "蓝色气瓶二 减压器进气六角"
+      ]
+    },
+    "19-6": {
+      "source_sha256": "ff7b66db5327391fa1a1ba54a9a2752f5b7d6a4dfc702f48f23e86121eb23216",
+      "basis": "已拆分单瓶的表圈和阀座",
+      "profile": "machine",
+      "parts": [
+        "蓝色气瓶三 底部卷边",
+        "蓝色气瓶三 压力表表圈",
+        "蓝色气瓶三 减压器进气六角"
+      ]
+    },
+    "20": {
+      "source_sha256": "202dec4ef2c842d267b29e0191e4c396c4889766f2e1681b588ecc8ed68cab3e",
+      "basis": "阀护罩和阀体六角",
+      "profile": "machine",
+      "parts": [
+        "Valve guard",
+        "Valve hex nut",
+        "Valve body"
+      ]
+    },
+    "21": {
+      "source_sha256": "82e23b65c0940a631250bd406847a9b3ad0070665b8931a2d0af3aca250c4d4a",
+      "basis": "阀体、压盖与瓶颈环",
+      "profile": "machine",
+      "parts": [
+        "Valve body",
+        "Valve packing nut",
+        "Neck ring 1",
+        "Neck ring 2"
+      ]
+    },
+    "22": {
+      "source_sha256": "3396c3c6ec2f3f3453d1e3391964819891fb49372f566539d29dccd73c025568",
+      "basis": "端盖加工肩和接头口圈",
+      "profile": "machine",
+      "parts": [
+        "cap_front",
+        "cap_rear",
+        "gland",
+        "port_ring_front",
+        "port_ring_rear"
+      ]
+    },
+    "23": {
+      "source_sha256": "4b7e08b77d99062bdb9635de746dab34a6ab77d78a69240aa608d26af148ef07",
+      "basis": "端盖、油封座外肩",
+      "profile": "machine",
+      "parts": [
+        "cap_front",
+        "cap_rear",
+        "gland_base",
+        "rear_boss"
+      ]
+    },
+    "24": {
+      "source_sha256": "5132793c84fbadff1be878701fffa5181f13a975faf652919b666c61a6777aeb",
+      "basis": "端盖及紧固件外沿",
+      "profile": "machine",
+      "parts": [
+        "cap_front",
+        "cap_rear",
+        "cap_front_small_head"
+      ]
+    },
+    "26": {
+      "source_sha256": "21ba03db7000d1ab2120f13e416113b8a45ce0296785a494491359745c304d41",
+      "basis": "红缸耳座、衬套和接头口圈",
+      "profile": "machine",
+      "parts": [
+        "eye_plate",
+        "eye_bushing",
+        "port_upper_mouth_ring",
+        "port_lower_mouth_ring"
+      ]
+    },
+    "27": {
+      "source_sha256": "a141f20dc36f89e5ee0dd5b7fb0931a2d9b72e21854798001558ec24c71a1e67",
+      "basis": "减震器端耳、衬套及端盖加工边",
+      "profile": "machine",
+      "parts": [
+        "top_plate_neg",
+        "top_plate_pos",
+        "top_bushing",
+        "bottom_bushing",
+        "top_cap",
+        "lower_body_plug"
+      ]
+    },
+    "28": {
+      "source_sha256": "857c6138c6ecb46323f69ef21d7ed2325840c0d09217c9223d4f0b911652a619",
+      "basis": "弹簧减震器两端的安装孔",
+      "profile": "machine",
+      "parts": [
+        "top_black_eye",
+        "top_steel_bushing",
+        "bottom_black_eye",
+        "bottom_steel_bushing"
+      ]
+    },
+    "29": {
+      "source_sha256": "b8fdf7c41cee2e7a6b797d831f3ebb058fc8448bf55c74e85703d847b2e15982",
+      "basis": "减震器红色端耳和安装衬套",
+      "profile": "machine",
+      "parts": [
+        "left_eye_arm",
+        "right_eye_arm",
+        "left_eye_steel_bushing",
+        "right_eye_steel_bushing"
+      ]
+    },
+    "30": {
+      "source_sha256": "0e6bb0287fb64ab4010681c707c9d678ab97b8a13cc18851d505083e9d41c9ed",
+      "basis": "缸体端耳和安装衬套",
+      "profile": "machine",
+      "parts": [
+        "base_lug_plate",
+        "base_lug_bushing",
+        "rod_eye_ring",
+        "rod_eye_bushing"
+      ]
+    },
+    "31": {
+      "source_sha256": "c4cb138c29bedf2d2bc24e776622f38e238d176064f2e577236548bfe2b31c0b",
+      "basis": "完整筒壁液压缸的两端衬套和压盖",
+      "profile": "machine",
+      "parts": [
+        "rear_clevis",
+        "rear_bushing",
+        "front_bushing",
+        "front_gland_cap"
+      ]
+    },
+    "32": {
+      "source_sha256": "95e880fcd7928a80f82b163ab684afabcd30f949c27b47a69a0af59918be6d86",
+      "basis": "液压缸密封盖和端耳衬套",
+      "profile": "machine",
+      "parts": [
+        "rear_clevis",
+        "front_cap",
+        "rear_bushing",
+        "front_bushing"
+      ]
+    },
+    "34": {
+      "source_sha256": "18bd72de4a30f6a87db6dd58387349d1905feab95e395253e7df78704c73e843",
+      "basis": "阀体、表圈和瓶底卷边",
+      "profile": "machine",
+      "parts": [
+        "gauge_bezel",
+        "body_bottom_rim",
+        "valve_body"
+      ]
+    },
+    "35": {
+      "source_sha256": "13644045e3b67ad57a0f45fde6f60c59f924845079c9d8204df72b754afaad80",
+      "basis": "阀体法兰、表圈和卷边",
+      "profile": "machine",
+      "parts": [
+        "35 chrome gauge bezel",
+        "35 valve bottom flange",
+        "35 lower rolled seam"
+      ]
+    },
+    "36": {
+      "source_sha256": "5a51a1483b667e1c9024bdcab18018c21187a6ad26c0dee5ecad914af2f67478",
+      "basis": "喷漆罐底盖和帽口",
+      "profile": "formed",
+      "parts": [
+        "Can base",
+        "Cap shell"
+      ]
+    },
+    "37": {
+      "source_sha256": "df22a6532c3f06af0606a4caaefc4d49eb01a0a30a2edcda31d9c4261382a412",
+      "basis": "集油部件支架和开槽边框",
+      "profile": "cast",
+      "parts": [
+        "bracket_plate",
+        "slot_frame_0_top",
+        "slot_frame_1_top",
+        "slot_frame_2_top",
+        "slot_frame_3_top",
+        "cap_edge_bead"
+      ]
+    }
+  }
+}

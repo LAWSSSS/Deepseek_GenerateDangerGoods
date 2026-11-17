@@ -45,6 +45,21 @@ $controller = 'tools/ps-model-controller'
 
 默认使用 `36_6_6` 和 `53_7_35`。宽承托复验针对首轮因位置或接触淘汰的组合，沿用同一物品、场景尺度和接触门槛。雾场重合成按原签名读取物体与成对阴影 EXR，通过 alpha、遮挡、阴影和编辑范围检查后输出。旧视觉评分绑定旧图。程序证据和视觉复核尚未完整的图片保留为待审。
 
+### 其余物品的局部几何精修
+
+[部件细化配置](../tools/ps-model-controller/inventory-detail.example.json)按当前源模型散列锁定已知部件。铸件、机加工件、卷边和塑料盖使用各自的有限倒角宽度。检查修改部件的开边拓扑、整体外廓、重开后的网格、UV、贴图以及同机位完整轮廓。新模型保存为独立候选。
+
+```powershell
+$python = 'work/triposr-env/Scripts/python.exe'
+$blender = 'work/blender45/blender-4.5.3-windows-x64/blender.exe'
+$controller = 'tools/ps-model-controller'
+& $python -X utf8 -B "$controller/report_inventory_details.py" --inventory work/detail-inventory.json
+& $blender -b --factory-startup --python-exit-code 1 --python "$controller/refine_inventory_details.py" -- --inventory work/detail-inventory.json --recipe "$controller/inventory-detail.example.json" --output outputs/inventory-detail
+& $python -X utf8 -B "$controller/report_inventory_details.py" --inventory work/detail-inventory.json --output outputs/inventory-detail
+```
+
+活动工作流中，05–07 和 38–39 为归档储罐。01、25 与 33 可继续查阅各自的专用细网格候选。这个入口处理其余 36 项。
+
 ## 准备与绑定
 
 `prepare_reference_textures.py` 有两种输入。普通六视图提取用于审计局部样本及结构污染风险；`--flat-master` 用于已经检查过的无结构表面母图。不能因为六视图提取有输出文件就自动当作合格纹理。

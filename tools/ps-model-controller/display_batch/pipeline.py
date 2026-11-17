@@ -32,6 +32,7 @@ from .materials import material_kind, SURFACE_DUST
 from .atmosphere import Atmospheres
 from .costs import cumulative, estimate, tariff, label as cost_label
 from .policy import asset_id, resize_candidate
+from .inventory import STORAGE_TANK_IDS
 from .effects import parameters as effect_parameters, render_identity
 from .reference_material import ReferenceInputChanged
 
@@ -82,7 +83,7 @@ def batch_lock(folder):
 
 
 def make_jobs(config,catalog):
-    excluded={asset_id(k) for k in config.excluded_assets}
+    excluded=STORAGE_TANK_IDS.union(asset_id(k) for k in config.excluded_assets)
     if config.manifest:
         jobs=json.loads(resolve(config.manifest).read_text(encoding='utf8'))
         if not isinstance(jobs,list) or not 1<=len(jobs)<=1000:raise ValueError('invalid manifest size')

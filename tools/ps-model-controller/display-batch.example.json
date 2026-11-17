@@ -2,7 +2,7 @@
   "backgrounds": "external/backgrounds",
   "output": "outputs/多背景批量展示",
   "assets": [],
-  "excluded_assets": ["5", "6", "7"],
+  "excluded_assets": ["5", "6", "7", "38", "39"],
   "asset_scale_factors": {"31": 0.375, "33": 0.25},
   "count": 100,
   "seed": 20261110,

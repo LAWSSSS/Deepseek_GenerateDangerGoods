@@ -4,6 +4,9 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, create_model, model_validator
 
 
+from .inventory import STORAGE_TANK_IDS
+
+
 class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
@@ -74,7 +77,7 @@ class BatchConfig(Strict):
     backgrounds: str
     output: str
     assets: list[str] = Field(default_factory=list)
-    excluded_assets: list[str] = Field(default_factory=lambda:['5','6','7'])
+    excluded_assets: list[str] = Field(default_factory=lambda:sorted(STORAGE_TANK_IDS, key=int))
     asset_scale_factors: dict[str, Annotated[float, Field(ge=.1, le=2.)]] = Field(default_factory=lambda:{'31':.375,'33':.25})
     count: int = Field(default=100, ge=1, le=1000)
     seed: int = Field(default=20261110, ge=0)

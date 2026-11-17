@@ -31,6 +31,7 @@ from contact_shadow import MIN_SUPPORT, contact_clusters, contact_coverage, make
 from occlusion import foreground_matte, refine_thin_mask, thin_line_seeds
 from lighting_estimate import estimate_light_from_rods
 from review_feedback import load_feedback
+from display_batch.inventory import is_storage_tank
 
 LIBRARY = ROOT / 'outputs/三维模型库-圆润复验/results.jsonl'
 SCENE = ROOT / 'outputs/固定场景-39件尺寸标注/场景配置.json'
@@ -637,6 +638,8 @@ def build_placement_rows():
     placement = {}
     for key, item in catalog.items():
         number = int(item['number'])
+        if is_storage_tank(number):
+            continue
         mesh = item.get('_mesh')
         existing = by_mesh.get(str(Path(mesh).resolve())) if mesh else None
         base = by_number.get(number)
@@ -737,7 +740,7 @@ async def assets(request):
                           'quantity':r.get('quantity'),
                           'passed': bool(r.get('reconstruction', {}).get('fidelity', {}).get('passed'))}
                          for r in sorted(rows.values(),key=lambda row:(row['number'],bool(row.get('manual_only'))))
-                         if not r.get('superseded_by_feedback')])
+                         if not r.get('superseded_by_feedback') and not is_storage_tank(r['number'])])
 
 
 async def model(request):
@@ -1045,8 +1048,15 @@ async def background(request):
         return err(e, 404)
 
 
+def active_row(asset):
+    row = row_for(asset)
+    if row and is_storage_tank(row['number']):
+        raise ValueError('储罐已从可摆放物品中移除')
+    return row
+
+
 def validate_state(data, s):
-    row = row_for(data.get('asset'))
+    row = active_row(data.get('asset'))
     if row is None:
         raise ValueError('请选择模型库中的物品')
     if row.get('superseded_by_feedback'):
@@ -1412,7 +1422,7 @@ async def preview(request):
         revision = data.get('revision')
         if revision != s['revision'] or not s['state']:
             return err('摆位已变化，请重新生成', 409)
-        if row_for(s['state']['asset']).get('superseded_by_feedback'):
+        if active_row(s['state']['asset']).get('superseded_by_feedback'):
             raise ValueError('此版本已按人工意见修订，请重新选择新模型')
         encoded = data.get('image', '')
         if not encoded.startswith('data:image/png;base64,') or len(encoded) > 12_000_000:
@@ -1446,7 +1456,7 @@ async def preview(request):
             st = s['state'].copy()
             job = {**s, 'selected': s['selected'].copy(),
                    'candidates': [candidate.copy() for candidate in s['candidates']]}
-        row = row_for(st['asset'])
+        row = active_row(st['asset'])
         mesh = Path(row['mesh'])
         if digest(mesh) != row.get('mesh_sha256'):
             raise ValueError('模型哈希与库记录不一致')
@@ -1780,11 +1790,11 @@ async def automatic(request):
         s = session(request)
         if not s['state']:
             raise ValueError('请先选择物品')
-        if row_for(s['state']['asset']).get('superseded_by_feedback'):
+        if active_row(s['state']['asset']).get('superseded_by_feedback'):
             raise ValueError('此版本已按人工意见修订，请重新选择新模型')
         if any(abs(float(s['state'].get(name, 0))) > 1e-6 for name in ('rot_x', 'rot_y', 'rot_z')):
             raise ValueError('自动放置暂不支持物体 X/Y/Z 旋转；请先归零物体角度')
-        if row_for(s['state']['asset']).get('manual_only'):
+        if active_row(s['state']['asset']).get('manual_only'):
             raise ValueError('当前条目来自三维模型查看器，仅供人工放置；自动放置需原模型库中具备源视图证据的条目')
         out = DATA / f"auto-{s['id']}-{int(time.time())}"
         command = [sys.executable, '-X', 'utf8', '-B', str(HERE.parent / 'mesh_location_first.py'),

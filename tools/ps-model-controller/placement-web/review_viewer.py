@@ -21,6 +21,8 @@ from review_feedback import load_feedback
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
+sys.path.insert(0, str(HERE.parent))
+from display_batch.inventory import is_storage_tank
 PARALLEL_ROOT = ROOT.parent / 'parallel-3d-rebuild'
 VENDOR = HERE / 'node_modules' / 'three'
 SEQUENCE = ROOT / 'work' / 'direct-deepseek' / 'sequence.json'
@@ -56,7 +58,7 @@ def local_file(raw, suffixes, roots):
     return path
 
 
-def load_catalog():
+def load_catalog(*, include_archived=True):
     sequence = json.loads(SEQUENCE.read_text(encoding='utf8'))
     library = {entry['number']: entry for entry in (
         json.loads(line) for line in LIBRARY.read_text(encoding='utf8').splitlines() if line.strip()
@@ -65,6 +67,8 @@ def load_catalog():
     catalog = {}
     roots = (ROOT, PARALLEL_ROOT)
     for number in range(1, 40):
+        if not include_archived and is_storage_tank(number):
+            continue
         source = library.get(number, {})
         key = str(number)
         entry = {'id': key, 'number': number, 'name': Path(source.get('file', f'{number:02}')).stem,
@@ -216,7 +220,7 @@ def main():
     args = parser.parse_args()
     address = f'http://127.0.0.1:{args.port}/'
     try:
-        catalog = load_catalog()
+        catalog = load_catalog(include_archived=False)
         if not VENDOR.is_dir():
             raise RuntimeError('缺少本地三维显示组件。')
         server = ReviewServer(('127.0.0.1', args.port), Handler)
