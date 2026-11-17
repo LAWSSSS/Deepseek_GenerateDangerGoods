@@ -2,6 +2,22 @@
 
 六视图用于学习磨损的外观和分布，不能直接作为校准后的 PBR 或六台相机的摄影测量。参考图中的白底、分格、文字、圆柱明暗和零件形状不能进入表面纹理。原模型、原贴图和生产默认保持不变，候选单独导出为打包依赖的 Blender 文件。
 
+## 按六视图里的锈斑位置重贴
+
+01 阀门、25 蓝色液压缸和 33 灭火器有对应的物品六视图，可使用 [部件对位配置](../tools/ps-model-controller/six-view-oxide.example.json)。清单绑定图片和模型散列。各视图的筒身区间、横截面轮廓与遮挡区域在配置中记录。圆柱图按角度合成，手轮、端面和压把等用平面图。匹配点和坐标轴使用渲染归一化后的网格，Blender 导入坐标需要经过工作进程的轴向转换。
+
+- 输出图集的三个数据通道依次是锈层或污渍、露钢、参考支持度。颜色通道取自参考锈斑，压低大范围明暗差。已有粗糙度、微凹凸和金属材质分区继续参与受光。灭火器塑料底座的棕斑作为非金属污渍。
+- 显眼印字、软管遮挡、孔洞和不对应的端部从源取样中排除。源模型印字仍由原几何或 UV 保护。斜视取样随掠射角降低，筒体投射在端盖法向上衰减。支持度不足时保留较轻的基础磨损，模型的隐藏面位置仍未知。
+- 25 的 `Right` 参考面有不同的端部件，另一面真实可对应的法兰圈仍可对位。01 的 `Right` 仅采用能核对的局部区域。对照相机匹配方向和大致俯角，生成参考图之间仍存在结构和光线差异。
+
+```powershell
+& work/triposr-env/Scripts/python.exe -X utf8 -B tools/ps-model-controller/prepare_six_view_oxide.py --spec tools/ps-model-controller/six-view-oxide.example.json --references <六视图目录> --baseline-library <分件PBR库.json> --output work/six-view-oxide
+& work/triposr-env/Scripts/python.exe -X utf8 -B tools/ps-model-controller/diagnose_reference_materials.py --reference-manifest work/six-view-oxide/library.json --output outputs/six-view-models --resolution 1024 --pose-mode inspection --surface-dust .24
+& work/blender45/blender-4.5.3-windows-x64/blender.exe -b --factory-startup --python-exit-code 1 --python tools/ps-model-controller/render_six_view_review.py -- --registration tools/ps-model-controller/six-view-oxide.example.json --candidates outputs/six-view-models --output outputs/six-view-models/registered-views
+```
+
+降采样预检使用 `--resolution 512`。`render_six_view_review.py --baseline <上一版候选目录>` 会按同样的相机和灯光增加每件的上一版正面。候选重开校验包含所有对位图集的散列、材质连接以及源几何和 UV 的指纹。
+
 ## 准备与绑定
 
 `prepare_reference_textures.py` 有两种输入。普通六视图提取用于审计局部样本及结构污染风险；`--flat-master` 用于已经检查过的无结构表面母图。不能因为六视图提取有输出文件就自动当作合格纹理。

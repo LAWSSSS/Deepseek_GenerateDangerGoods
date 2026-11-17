@@ -1,0 +1,1056 @@
+{
+  "version": "six-view-surface-registration-v1",
+  "coordinate_size": [1080, 720],
+  "assets": {
+    "1": {
+      "source_sheet": "07_DN350_valve_HD.png",
+      "source_sha256": "fd74f275cf67eb4b7eb5132898b7778b9e874bfe7632a5b6791ec1f1c1e077a0",
+      "mesh_sha256": "ab8f217913365186f65eaf04980d93b03dcee077f06cba42883b043b6c158ae5",
+      "basis": "Four side elevations guide the valve body and sleeve; the portrait marked Right is only an approximate quadrant. Top wheel and lower flange use separate face transfers.",
+      "surfaces": [
+        {
+          "name": "cast_body",
+          "parts": [
+            "Cast valve body"
+          ],
+          "material": "steel",
+          "mode": "cylinder",
+          "direction": "vertical",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 0, -1],
+            "u": [0, 1, 0]
+          },
+          "origin": [0, -0.052604, 0],
+          "limits": {
+            "v": [0.094792, 0.420833]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [111, 198, 246, 302],
+              "exclude": [
+                [136, 219, 221, 245],
+                [135, 242, 222, 252],
+                [170, 254, 191, 283]
+              ]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [475, 199, 607, 300],
+              "exclude": [
+                [438, 199, 483, 296]
+              ]
+            },
+            {
+              "view": "Left",
+              "angle": 90,
+              "rect": [834, 198, 966, 300],
+              "exclude": [
+                [844, 205, 958, 298]
+              ],
+              "weight": 0.7
+            },
+            {
+              "view": "Right",
+              "angle": -90,
+              "rect": [114, 558, 244, 658],
+              "exclude": [
+                [81, 552, 130, 654]
+              ],
+              "weight": 0.66
+            }
+          ],
+          "strength": 1.08
+        },
+        {
+          "name": "lower_rims",
+          "parts": [
+            "Lower base neck",
+            "Lower body rim"
+          ],
+          "material": "steel",
+          "mode": "cylinder",
+          "direction": "vertical",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 0, -1],
+            "u": [0, 1, 0]
+          },
+          "origin": [0, -0.052604, 0],
+          "limits": {
+            "v": [0.397917, 0.477083]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [126, 295, 235, 324]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [487, 297, 594, 325]
+            },
+            {
+              "view": "Left",
+              "angle": 90,
+              "rect": [849, 296, 949, 324]
+            },
+            {
+              "view": "Right",
+              "angle": -90,
+              "rect": [128, 653, 232, 679]
+            }
+          ],
+          "strength": 1.13
+        },
+        {
+          "name": "upper_flange",
+          "parts": [
+            "Body top flange",
+            "Body top flange lip",
+            "Top flange bolt 01",
+            "Top flange bolt 02",
+            "Top flange bolt 03",
+            "Top flange bolt 04",
+            "Top flange bolt 05",
+            "Top flange bolt 06",
+            "Top flange bolt 07",
+            "Top flange bolt 08",
+            "Top flange bolt 09",
+            "Top flange bolt 10",
+            "Top flange bolt 11",
+            "Top flange bolt 12"
+          ],
+          "material": "steel",
+          "mode": "cylinder",
+          "direction": "vertical",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 0, -1],
+            "u": [0, 1, 0]
+          },
+          "origin": [0, -0.052604, 0],
+          "limits": {
+            "v": [0.028125, 0.090625]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [111, 171, 245, 198]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [475, 171, 608, 198]
+            },
+            {
+              "view": "Left",
+              "angle": 90,
+              "rect": [833, 171, 966, 198]
+            },
+            {
+              "view": "Right",
+              "angle": -90,
+              "rect": [116, 531, 244, 558]
+            }
+          ],
+          "strength": 1.15
+        },
+        {
+          "name": "stem_sleeve",
+          "parts": [
+            "Machined stem sleeve"
+          ],
+          "material": "steel",
+          "mode": "cylinder",
+          "direction": "vertical",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 0, -1],
+            "u": [0, 1, 0]
+          },
+          "origin": [0, -0.052604, 0],
+          "limits": {
+            "v": [-0.208333, -0.03125]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [164, 101, 193, 161]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [525, 101, 555, 162]
+            },
+            {
+              "view": "Left",
+              "angle": 90,
+              "rect": [885, 101, 915, 161]
+            },
+            {
+              "view": "Right",
+              "angle": -90,
+              "rect": [164, 461, 194, 522]
+            }
+          ],
+          "strength": 1.08
+        },
+        {
+          "name": "side_cover",
+          "parts": [
+            "Side cover",
+            "Side cover bolt 01",
+            "Side cover bolt 02",
+            "Side cover bolt 03",
+            "Side cover bolt 04",
+            "Side cover bolt 05",
+            "Side cover bolt 06",
+            "Side cover bolt 07",
+            "Side cover bolt 08"
+          ],
+          "material": "steel",
+          "mode": "plane",
+          "origin": [0, 0, 0],
+          "axes": {
+            "u": [-1, 0, 0],
+            "v": [0, 0, -1],
+            "n": [0, 1, 0]
+          },
+          "limits": {
+            "u": [-0.120833, 0.120833],
+            "v": [0.125, 0.366667]
+          },
+          "views": [
+            {
+              "view": "Left",
+              "angle": 0,
+              "rect": [852, 209, 952, 297]
+            }
+          ]
+        },
+        {
+          "name": "handwheel_top",
+          "parts": [
+            "Four-spoke wheel rim",
+            "Handwheel center hub",
+            "Wheel center cap",
+            "Handwheel spoke 1",
+            "Handwheel spoke 2",
+            "Handwheel spoke 3",
+            "Handwheel spoke 4"
+          ],
+          "material": "blue",
+          "mode": "plane",
+          "origin": [0, -0.052604, 0],
+          "axes": {
+            "u": [0, 1, 0],
+            "v": [1, 0, 0],
+            "n": [0, 0, 1]
+          },
+          "limits": {
+            "u": [-0.179687, 0.179687],
+            "v": [-0.179687, 0.179687]
+          },
+          "views": [
+            {
+              "view": "Top",
+              "angle": 0,
+              "rect": [416, 389, 638, 611]
+            }
+          ]
+        },
+        {
+          "name": "mounting_flange_bottom",
+          "parts": [
+            "Bottom mounting flange with holes"
+          ],
+          "material": "steel",
+          "mode": "plane",
+          "origin": [0, -0.052604, 0],
+          "axes": {
+            "u": [0, 1, 0],
+            "v": [-1, 0, 0],
+            "n": [0, 0, -1]
+          },
+          "limits": {
+            "u": [-0.152, 0.152],
+            "v": [-0.152, 0.152]
+          },
+          "views": [
+            {
+              "view": "Bottom",
+              "angle": 0,
+              "rect": [782, 413, 997, 628],
+              "exclude": [
+                [835, 468, 941, 572]
+              ]
+            }
+          ]
+        },
+        {
+          "name": "bonnet_rim",
+          "parts": [
+            "Upper flange lower",
+            "Upper flange upper",
+            "Bonnet bolt 01",
+            "Bonnet bolt 02",
+            "Bonnet bolt 03",
+            "Bonnet bolt 04",
+            "Bonnet bolt 05",
+            "Bonnet bolt 06",
+            "Bonnet bolt 07",
+            "Bonnet bolt 08"
+          ],
+          "mode": "cylinder",
+          "material": "steel",
+          "direction": "vertical",
+          "axes": {
+            "u": [0, 1, 0],
+            "v": [0, 0, -1],
+            "n": [1, 0, 0]
+          },
+          "origin": [0, -0.052604, 0],
+          "limits": {
+            "v": [-0.285417, -0.239583]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [152, 73, 205, 99]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [514, 73, 568, 99]
+            },
+            {
+              "view": "Left",
+              "angle": 90,
+              "rect": [872, 74, 927, 99]
+            },
+            {
+              "view": "Right",
+              "angle": -90,
+              "rect": [152, 431, 205, 459]
+            }
+          ],
+          "strength": 1.12
+        },
+        {
+          "name": "bonnet_stem",
+          "parts": [
+            "Tapered blue bonnet",
+            "Handwheel hub lower"
+          ],
+          "mode": "cylinder",
+          "material": "blue",
+          "direction": "vertical",
+          "axes": {
+            "u": [0, 1, 0],
+            "v": [0, 0, -1],
+            "n": [1, 0, 0]
+          },
+          "origin": [0, -0.052604, 0],
+          "limits": {
+            "v": [-0.448958, -0.272917]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [168, 32, 190, 76]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [530, 31, 552, 76]
+            },
+            {
+              "view": "Left",
+              "angle": 90,
+              "rect": [892, 31, 910, 75]
+            },
+            {
+              "view": "Right",
+              "angle": -90,
+              "rect": [169, 391, 190, 436]
+            }
+          ],
+          "strength": 1.12
+        },
+        {
+          "name": "stem_bottom_collar",
+          "parts": [
+            "Blue stem base"
+          ],
+          "mode": "cylinder",
+          "material": "blue",
+          "direction": "vertical",
+          "axes": {
+            "u": [0, 1, 0],
+            "v": [0, 0, -1],
+            "n": [1, 0, 0]
+          },
+          "origin": [0, -0.052604, 0],
+          "limits": {
+            "v": [-0.03125, 0.045833]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [145, 161, 211, 177]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [508, 161, 572, 177]
+            },
+            {
+              "view": "Left",
+              "angle": 90,
+              "rect": [868, 162, 931, 177]
+            },
+            {
+              "view": "Right",
+              "angle": -90,
+              "rect": [147, 520, 212, 534]
+            }
+          ],
+          "strength": 1.06
+        },
+        {
+          "name": "stem_top_collar",
+          "parts": [
+            "Blue upper stem collar"
+          ],
+          "mode": "cylinder",
+          "material": "blue",
+          "direction": "vertical",
+          "axes": {
+            "u": [0, 1, 0],
+            "v": [0, 0, -1],
+            "n": [1, 0, 0]
+          },
+          "origin": [0, -0.052604, 0],
+          "limits": {
+            "v": [-0.241667, -0.205208]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [162, 96, 193, 109]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [524, 96, 555, 109]
+            },
+            {
+              "view": "Left",
+              "angle": 90,
+              "rect": [884, 97, 916, 108]
+            },
+            {
+              "view": "Right",
+              "angle": -90,
+              "rect": [164, 453, 195, 468]
+            }
+          ],
+          "strength": 1.06
+        },
+        {
+          "name": "branch_side",
+          "parts": [
+            "Rounded cast branch",
+            "Side flange inner"
+          ],
+          "mode": "cylinder",
+          "material": "steel",
+          "direction": "horizontal",
+          "axes": {
+            "u": [0, 0, -1],
+            "v": [0, 1, 0],
+            "n": [1, 0, 0]
+          },
+          "origin": [0, 0, -0.245833],
+          "limits": {
+            "v": [0.057, 0.203646]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [239, 201, 281, 291]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [438, 199, 482, 290],
+              "reverse": true,
+              "flip_across": true
+            }
+          ],
+          "strength": 1.16
+        }
+      ],
+      "review_pitch_degrees": 10
+    },
+    "25": {
+      "source_sheet": "10_蓝色液压缸_新重绘.png",
+      "source_sha256": "d44eae965f69607a50f7ebadec601bd2e108ff9b80778ae03dd25d4bb1e631f1",
+      "mesh_sha256": "9e3cfe9b1b0ddb6487a419bdff5ecc5c574ae51e6b7d799fd14b5a79c69515e0",
+      "basis": "Four long views register barrel, flange and eyes. Left locates the rim face; the Right portrait depicts a different end fixture and is excluded.",
+      "surfaces": [
+        {
+          "name": "barrel",
+          "parts": [
+            "barrel",
+            "barrel_seam_rear",
+            "barrel_seam_front"
+          ],
+          "material": "blue",
+          "mode": "cylinder",
+          "direction": "horizontal",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 1, 0],
+            "u": [0, 0, -1]
+          },
+          "origin": [0, 0, -0.035499],
+          "limits": {
+            "v": [-0.328802, 0.132427]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [66, 151, 228, 207],
+              "exclude": [
+                [85, 132, 143, 155]
+              ]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [492, 153, 650, 207],
+              "reverse": true,
+              "flip_across": true,
+              "exclude": [
+                [582, 129, 634, 157]
+              ]
+            },
+            {
+              "view": "Top",
+              "angle": -90,
+              "rect": [423, 488, 598, 547],
+              "exclude": [
+                [430, 498, 489, 539],
+                [488, 509, 583, 522]
+              ]
+            },
+            {
+              "view": "Bottom",
+              "angle": 90,
+              "rect": [782, 488, 946, 546]
+            }
+          ]
+        },
+        {
+          "name": "rod_flange",
+          "parts": [
+            "rod_flange"
+          ],
+          "material": "blue",
+          "mode": "cylinder",
+          "direction": "horizontal",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 1, 0],
+            "u": [0, 0, -1]
+          },
+          "origin": [0, 0, -0.035499],
+          "limits": {
+            "v": [0.119335, 0.179758]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [225, 148, 260, 210]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [457, 149, 493, 212],
+              "reverse": true,
+              "flip_across": true
+            },
+            {
+              "view": "Top",
+              "angle": -90,
+              "rect": [591, 485, 625, 549]
+            },
+            {
+              "view": "Bottom",
+              "angle": 90,
+              "rect": [943, 484, 978, 550]
+            }
+          ]
+        },
+        {
+          "name": "rear_end",
+          "parts": [
+            "rear_cap",
+            "rear_cap_seam",
+            "rear_cap_band"
+          ],
+          "material": "blue",
+          "mode": "cylinder",
+          "direction": "horizontal",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 1, 0],
+            "u": [0, 0, -1]
+          },
+          "origin": [0, 0, -0.035499],
+          "limits": {
+            "v": [-0.348943, -0.313696]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [55, 151, 75, 206]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [643, 153, 664, 207],
+              "reverse": true,
+              "flip_across": true
+            },
+            {
+              "view": "Top",
+              "angle": -90,
+              "rect": [411, 490, 431, 547]
+            },
+            {
+              "view": "Bottom",
+              "angle": 90,
+              "rect": [772, 490, 789, 545]
+            }
+          ]
+        },
+        {
+          "name": "rear_eye",
+          "parts": [
+            "base_clevis",
+            "base_boss_neg",
+            "base_boss_pos"
+          ],
+          "material": "blue",
+          "mode": "cylinder",
+          "direction": "horizontal",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 1, 0],
+            "u": [0, 0, -1]
+          },
+          "origin": [0, 0, -0.035499],
+          "limits": {
+            "v": [-0.5, -0.323766]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [10, 150, 69, 208],
+              "exclude": [
+                [22, 168, 49, 194]
+              ]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [653, 151, 711, 207],
+              "reverse": true,
+              "flip_across": true,
+              "exclude": [
+                [673, 169, 699, 194]
+              ]
+            },
+            {
+              "view": "Top",
+              "angle": -90,
+              "rect": [371, 492, 423, 542],
+              "exclude": [
+                [379, 513, 409, 538]
+              ]
+            },
+            {
+              "view": "Bottom",
+              "angle": 90,
+              "rect": [730, 491, 780, 544],
+              "exclude": [
+                [741, 508, 765, 534]
+              ]
+            }
+          ]
+        },
+        {
+          "name": "rod_eye",
+          "parts": [
+            "rod_clevis",
+            "rod_boss_neg",
+            "rod_boss_pos"
+          ],
+          "material": "blue",
+          "mode": "cylinder",
+          "direction": "horizontal",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 1, 0],
+            "u": [0, 0, -1]
+          },
+          "origin": [0, 0, -0.035499],
+          "limits": {
+            "v": [0.350957, 0.5]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [296, 155, 348, 206],
+              "exclude": [
+                [310, 170, 332, 194]
+              ]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [371, 155, 424, 207],
+              "reverse": true,
+              "flip_across": true,
+              "exclude": [
+                [384, 170, 409, 196]
+              ]
+            },
+            {
+              "view": "Top",
+              "angle": -90,
+              "rect": [659, 494, 709, 543],
+              "exclude": [
+                [669, 513, 697, 538]
+              ]
+            },
+            {
+              "view": "Bottom",
+              "angle": 90,
+              "rect": [1013, 493, 1068, 543],
+              "exclude": [
+                [1029, 510, 1053, 537]
+              ]
+            }
+          ]
+        },
+        {
+          "name": "exposed_rod",
+          "parts": [
+            "rod"
+          ],
+          "material": "steel",
+          "mode": "cylinder",
+          "direction": "horizontal",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 1, 0],
+            "u": [0, 0, -1]
+          },
+          "origin": [0, 0, -0.035499],
+          "limits": {
+            "v": [0.183283, 0.350957]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [260, 163, 297, 196]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [423, 164, 458, 197],
+              "reverse": true,
+              "flip_across": true
+            },
+            {
+              "view": "Top",
+              "angle": -90,
+              "rect": [626, 503, 661, 533]
+            },
+            {
+              "view": "Bottom",
+              "angle": 90,
+              "rect": [976, 502, 1014, 533]
+            }
+          ]
+        },
+        {
+          "name": "head_rim_face",
+          "parts": [
+            "flange_outer_rim"
+          ],
+          "material": "blue",
+          "mode": "plane",
+          "origin": [0, 0, -0.035499],
+          "axes": {
+            "u": [-1, 0, 0],
+            "v": [0, 0, -1],
+            "n": [0, 1, 0]
+          },
+          "limits": {
+            "u": [-0.103223, 0.103223],
+            "v": [-0.103223, 0.103223]
+          },
+          "views": [
+            {
+              "view": "Left",
+              "angle": 0,
+              "rect": [843, 146, 960, 260],
+              "exclude": [
+                [868, 191, 935, 270]
+              ]
+            }
+          ]
+        },
+        {
+          "name": "valve_block_top",
+          "parts": [
+            "valve_block"
+          ],
+          "material": "blue",
+          "mode": "plane",
+          "origin": [0, 0, 0],
+          "axes": {
+            "u": [0, 1, 0],
+            "v": [1, 0, 0],
+            "n": [0, 0, 1]
+          },
+          "limits": {
+            "u": [-0.197885, -0.046828],
+            "v": [-0.055388, 0.055388]
+          },
+          "views": [
+            {
+              "view": "Top",
+              "angle": 0,
+              "rect": [429, 497, 490, 539]
+            }
+          ]
+        }
+      ],
+      "review_pitch_degrees": 5
+    },
+    "33": {
+      "source_sheet": "06_GLORIA灭火器_新重绘.png",
+      "source_sha256": "14d2f409804aa4cdcd78eb0b032187633717b31314975ffc57510aa21d87333d",
+      "mesh_sha256": "5005f43274d9edfe0d99ca9ab8cdba809b914b3c2a0b89988c425a6fadfc5f2f",
+      "basis": "Four elevations describe the shell and base. The hose masks Left and printed borders are excluded. Top and Bottom supply the lever and base dirt.",
+      "surfaces": [
+        {
+          "name": "red_shell",
+          "parts": [
+            "body",
+            "body_bottom_seam",
+            "body_shoulder_seam"
+          ],
+          "material": "red",
+          "mode": "cylinder",
+          "direction": "vertical",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 0, -1],
+            "u": [0, 1, 0]
+          },
+          "origin": [0, 0.03271, 0],
+          "limits": {
+            "v": [-0.261885, 0.3966]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [130, 76, 238, 335],
+              "profile": [
+                [0.0, 163, 204],
+                [0.075, 129, 237],
+                [0.93, 130, 238],
+                [1.0, 132, 236]
+              ],
+              "exclude": [
+                [136, 125, 236, 325]
+              ]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [479, 76, 587, 337],
+              "profile": [
+                [0.0, 514, 555],
+                [0.075, 480, 587],
+                [0.93, 480, 587],
+                [1.0, 481, 586]
+              ],
+              "exclude": [
+                [509, 103, 559, 162]
+              ]
+            },
+            {
+              "view": "Left",
+              "angle": -90,
+              "rect": [858, 76, 965, 335],
+              "profile": [
+                [0.0, 887, 933],
+                [0.075, 858, 965],
+                [0.93, 858, 965],
+                [1.0, 860, 965]
+              ],
+              "exclude": [
+                [898, 76, 925, 335],
+                [949, 136, 964, 321]
+              ]
+            },
+            {
+              "view": "Right",
+              "angle": 90,
+              "rect": [141, 467, 223, 661],
+              "profile": [
+                [0.0, 156, 207],
+                [0.095, 141, 224],
+                [0.97, 141, 223],
+                [1.0, 146, 218]
+              ],
+              "weight": 0.92,
+              "exclude": [
+                [141, 514, 156, 654]
+              ]
+            }
+          ],
+          "strength": 1.19
+        },
+        {
+          "name": "base_skirt_dirt",
+          "parts": [
+            "base_ring"
+          ],
+          "material": "dirt",
+          "mode": "cylinder",
+          "direction": "vertical",
+          "axes": {
+            "n": [1, 0, 0],
+            "v": [0, 0, -1],
+            "u": [0, 1, 0]
+          },
+          "origin": [0, 0.03271, 0],
+          "limits": {
+            "v": [0.3966, 0.496263]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [133, 336, 238, 373]
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [481, 337, 587, 373]
+            },
+            {
+              "view": "Left",
+              "angle": -90,
+              "rect": [861, 336, 964, 371],
+              "exclude": [
+                [893, 335, 924, 370]
+              ]
+            },
+            {
+              "view": "Right",
+              "angle": 90,
+              "rect": [142, 661, 222, 688]
+            }
+          ],
+          "strength": 1.14
+        },
+        {
+          "name": "red_lever_top",
+          "parts": [
+            "lever_red"
+          ],
+          "material": "red",
+          "mode": "plane",
+          "origin": [0, 0, 0],
+          "axes": {
+            "u": [0, 1, 0],
+            "v": [1, 0, 0],
+            "n": [0, 0, 1]
+          },
+          "limits": {
+            "u": [-0.001431, 0.233689],
+            "v": [-0.012458, 0.012458]
+          },
+          "views": [
+            {
+              "view": "Top",
+              "angle": 0,
+              "rect": [520, 475, 684, 519],
+              "exclude": [
+                [556, 485, 629, 512]
+              ]
+            }
+          ]
+        },
+        {
+          "name": "base_feet_dirt",
+          "parts": [
+            "base_lug_0",
+            "base_lug_1",
+            "base_lug_2",
+            "base_lug_3"
+          ],
+          "material": "dirt",
+          "mode": "plane",
+          "origin": [0, 0.03271, 0],
+          "axes": {
+            "u": [0, 1, 0],
+            "v": [-1, 0, 0],
+            "n": [0, 0, -1]
+          },
+          "limits": {
+            "u": [-0.158392, 0.158392],
+            "v": [-0.158392, 0.158392]
+          },
+          "views": [
+            {
+              "view": "Bottom",
+              "angle": 0,
+              "rect": [813, 434, 1019, 643]
+            }
+          ]
+        }
+      ],
+      "review_pitch_degrees": 3
+    }
+  },
+  "coordinate_frame": "normalized-render-mesh"
+}

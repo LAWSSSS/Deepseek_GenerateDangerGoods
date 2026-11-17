@@ -140,6 +140,8 @@ def main():
                 state = states.get(region['id'], {})
                 keys = [region[key] for key in ('package', 'substrate', 'oxide') if key in region]
                 expected = {channel['sha256'] for key in keys for channel in packages[key]['maps'].values()}
+                if projection := region.get('view_projection'):
+                    expected.update(channel['sha256'] for channel in projection['maps'].values())
                 packed = {hashlib.sha256(bytes(node.image.packed_file.data)).hexdigest()
                           for material in materials.values() if material.get('component_pbr_region') == region['id']
                           for node in material.node_tree.nodes if node.get('reference_sha256') and node.image.packed_file}

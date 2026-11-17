@@ -20,9 +20,57 @@ def number(value, low, high, name):
     return float(value)
 
 
+def aligned_maps(maps, base, name):
+    from PIL import Image
+    if set(maps) != set(FILES):
+        raise ValueError(f'Incomplete or unexpected component channels: {name}')
+    shape = None
+    for kind, entry in maps.items():
+        path = Path(entry['path'])
+        if not path.is_absolute():
+            if base is None:
+                raise ValueError('relative component texture has no manifest base')
+            path = Path(base) / path
+        path = path.resolve()
+        if file_hash(path) != entry['sha256']:
+            raise ValueError('component texture hash changed: ' + kind)
+        with Image.open(path) as image:
+            if (image.mode != 'RGB' or min(image.size) < 16 or max(image.size) > 2048
+                    or (shape is not None and shape != image.size)):
+                raise ValueError(f'Misaligned or invalid component channels: {name}')
+            shape = image.size
+        entry.update(path=str(path), color_space=FILES[kind])
+
+
+def observed_projection(record, base):
+    """Validate a registered local texture frame and the two baked maps."""
+    mode = record.get('mode')
+    if mode not in ('cylinder', 'plane'):
+        raise ValueError('Expected a cylindrical or planar reference projection')
+    vectors = [record['axes'][key] for key in ('u', 'v', 'n')]
+    for vector in vectors:
+        if len(vector) != 3 or not math.isclose(math.hypot(*(number(x,-1.,1.,'projection axis') for x in vector)),
+                                                 1., abs_tol=.001):
+            raise ValueError('Reference projection needs unit vectors')
+    pairs = ((vectors[0], vectors[1]), (vectors[0], vectors[2]), (vectors[1], vectors[2]))
+    if any(abs(sum(a*b for a,b in zip(left, right))) > .001 for left,right in pairs):
+        raise ValueError('Reference projection axes must be perpendicular')
+    if len(record['origin']) != 3:
+        raise ValueError('Reference projection needs a local origin')
+    for value in record['origin']:
+        number(value, -1., 1., 'projection origin')
+    for axis in ('v',) if mode == 'cylinder' else ('u', 'v'):
+        low, high = (number(value, -2., 2., f'projection limits {axis}') for value in record['limits'][axis])
+        if high-low < .002:
+            raise ValueError('Reference projection extent is too small')
+    sha = record.get('source_sha256', '')
+    if len(sha) != 64 or any(c not in '0123456789abcdef' for c in sha):
+        raise ValueError('Reference projection needs pinned source image bytes')
+    aligned_maps(record['maps'], base, 'registered view')
+
+
 def validate(reference, base=None):
     """Only aligned, content-addressed material channels enter the renderer."""
-    from PIL import Image
     result = copy.deepcopy(reference)
     if result.get('status') != 'review':
         raise ValueError('component material must be an appearance candidate')
@@ -44,24 +92,7 @@ def validate(reference, base=None):
             number(value, .001, 1., name + ' linear albedo')
         number(pack['albedo_variation'], 0., 1., name + ' albedo variation')
         number(pack['albedo_median_luma'], .001, 1., name + ' albedo normalization')
-        if set(pack['maps']) != set(FILES):
-            raise ValueError(f'Incomplete or unexpected component channels: {name}')
-        shape = None
-        for kind, entry in pack['maps'].items():
-            path = Path(entry['path'])
-            if not path.is_absolute():
-                if base is None:
-                    raise ValueError('relative component texture has no manifest base')
-                path = Path(base) / path
-            path = path.resolve()
-            if file_hash(path) != entry['sha256']:
-                raise ValueError('component texture hash changed: ' + kind)
-            with Image.open(path) as image:
-                if (image.mode != 'RGB' or min(image.size) < 16 or max(image.size) > 2048
-                        or (shape is not None and shape != image.size)):
-                    raise ValueError(f'Misaligned or invalid component channels: {name}')
-                shape = image.size
-            entry.update(path=str(path), color_space=FILES[kind])
+        aligned_maps(pack['maps'], base, name)
     regions = result.get('component_regions')
     if not isinstance(regions, list) or not regions or len(regions) > 64:
         raise ValueError('component material needs 1–64 regions')
@@ -93,6 +124,12 @@ def validate(reference, base=None):
                 number(region[field], lo, hi, field)
         if region.get('oxide_spread', 0.) and not oxidized:
             raise ValueError('Oxide spread requires an audited ferrous oxide layer')
+        if 'view_projection' in region:
+            projection = region['view_projection']
+            role = projection.get('finish')
+            if not ((role == 'oxide' and oxidized) or (role == 'dirt' and main == 'plastic')):
+                raise ValueError('Reference appearance is incompatible with the part material')
+            observed_projection(projection, base)
         if region.get('paint_loss_um', 0.) and not steel:
             raise ValueError('Paint film relief requires a separate underlying steel layer')
         if region.get('scuff_strength', 0.) and not steel:
@@ -116,8 +153,11 @@ def validate(reference, base=None):
 
 
 def texture_records(reference):
-    return [(entry['path'], entry['sha256'], f'{name}.{kind}')
-            for name, pack in reference['packages'].items() for kind, entry in pack['maps'].items()]
+    packs = [(entry['path'], entry['sha256'], f'{name}.{kind}')
+             for name, pack in reference['packages'].items() for kind, entry in pack['maps'].items()]
+    return packs + [(entry['path'], entry['sha256'], f'registered.{region["id"]}.{kind}')
+                    for region in reference['component_regions'] if 'view_projection' in region
+                    for kind, entry in region['view_projection']['maps'].items()]
 
 
 def slot_name(region):

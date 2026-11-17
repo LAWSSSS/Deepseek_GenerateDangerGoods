@@ -100,6 +100,70 @@ def oxide_spread_field(tree, donor_mask, coarse, cavity, coating_wear):
     return spread
 
 
+def dot_field(tree, a, b):
+    node = tree.nodes.new('ShaderNodeVectorMath')
+    node.operation = 'DOT_PRODUCT'
+    assign(tree, a, node.inputs[0])
+    assign(tree, b, node.inputs[1])
+    return node.outputs['Value']
+
+
+def blend_factor(tree, weight, original_value, observed_value):
+    remainder = math_node(tree, 'SUBTRACT', 1., weight)
+    return add(tree, mul(tree, remainder, original_value), mul(tree, weight, observed_value))
+
+
+def projected_fields(tree, coords, projection):
+    """Sample a registered texture in the canonical mesh frame rather than a repeating tile."""
+    offset = tree.nodes.new('ShaderNodeVectorMath')
+    offset.operation = 'SUBTRACT'
+    assign(tree, coords.outputs['Object'], offset.inputs[0])
+    offset.inputs[1].default_value = projection['origin']
+    point = offset.outputs[0]
+    axes, limits = projection['axes'], projection['limits']
+    u = dot_field(tree, point, axes['u'])
+    v = dot_field(tree, point, axes['v'])
+    lo, hi = limits['v']
+    v = mul(tree, math_node(tree, 'SUBTRACT', hi, v), 1. / (hi - lo))
+    cylindrical = projection['mode'] == 'cylinder'
+    if cylindrical:
+        angle = math_node(tree, 'ARCTAN2', u, dot_field(tree, point, axes['n']))
+        u = add(tree, .5, mul(tree, angle, 1. / (2. * math.pi)))
+    else:
+        lo, hi = limits['u']
+        u = mul(tree, math_node(tree, 'SUBTRACT', u, lo), 1. / (hi - lo))
+    uv = tree.nodes.new('ShaderNodeCombineXYZ')
+    assign(tree, u, uv.inputs['X'])
+    assign(tree, bounded(tree, v, .001, .999) if cylindrical else v, uv.inputs['Y'])
+    images = {}
+    for key, entry in projection['maps'].items():
+        name = 'Registered view ' + key
+        if key == 'albedo':
+            image = reference_texture(tree, entry, uv.outputs[0], name, color=True).node
+        else:
+            image = texture(tree, entry['path'], uv.outputs[0], name)
+            image.name = name
+            image['reference_sha256'] = entry['sha256']
+        image.projection = 'FLAT'
+        image.extension = 'REPEAT' if cylindrical else 'CLIP'
+        images[key] = image.outputs['Color']
+    normal = tree.nodes.new('ShaderNodeVectorTransform')
+    normal.vector_type, normal.convert_from, normal.convert_to = 'NORMAL', 'WORLD', 'OBJECT'
+    assign(tree, tree.nodes.new('ShaderNodeNewGeometry').outputs['Normal'], normal.inputs['Vector'])
+    if cylindrical:
+        # Repeat only in longitude. Faces outside the registered axial band stay unobserved.
+        axial_low = ramp(tree, v, -.002, 500.)
+        axial_high = ramp(tree, math_node(tree, 'SUBTRACT', 1., v), -.002, 500.)
+        axial_normal = math_node(tree, 'ABSOLUTE', dot_field(tree, normal.outputs[0], axes['v']), 0.)
+        curved = math_node(tree, 'SUBTRACT', 1., ramp(tree, axial_normal, .60, 2.85))
+        valid = mul(tree, mul(tree, axial_low, axial_high), curved)
+    else:
+        valid = ramp(tree, dot_field(tree, normal.outputs[0], axes['n']), .22, 2.8)
+    oxide, chips, support = channels(tree, images['surface'])
+    return {'colour': images['albedo'], 'oxide': oxide, 'chips': chips, 'support': mul(tree, support, valid),
+            'finish': projection['finish']}
+
+
 def response(tree, tag, fields, spec, size_m, source_normal, controls, *, region=None, film_loss=None,
              scuff=None):
     region = region or {}
@@ -168,6 +232,12 @@ def finish_surface(material, shader, finish, strength):
     offset = tuple(int(mesh_hash[i:i+4], 16) / 65535. + region_id * .13 for i in (0, 4, 8))
     spec = packs[region['package']]
     pack = package_fields(tree, point, spec, offset, 'body')
+    projection = region.get('view_projection')
+    observed = projected_fields(tree, coords, projection) if projection else None
+    if observed and observed['finish'] == 'dirt':
+        stain = mul(tree, observed['oxide'], observed['support'])
+        pack['colour'] = mix(tree, stain, pack['colour'], observed['colour'])
+        pack['rough'] = add(tree, pack['rough'], mul(tree, stain, .16))
     keeps_normal = spec['role'] in ('rubber', 'plastic') or region.get('keep_source_normal', False)
     source_normal = original(shader.inputs['Normal']) if keeps_normal and shader.inputs['Normal'].is_linked else None
 
@@ -189,6 +259,8 @@ def finish_surface(material, shader, finish, strength):
         distribution = ramp(tree, scratches, .28, 2.3)
         paint = mul(tree, ramp(tree, pack['wear'], .38, 2.3), distribution)
         paint = bounded(tree, mul(tree, paint, wear * controls.get('scratch_gain', 1.)), 0., .94)
+        if observed:
+            paint = blend_factor(tree, observed['support'], paint, mul(tree, observed['chips'], .91))
         if scuff_strength := region.get('scuff_strength', 0.):
             # Shallow handling marks change the surviving coating's response.
             # The existing chip threshold still controls full paint loss.
@@ -220,6 +292,8 @@ def finish_surface(material, shader, finish, strength):
     if 'oxide' in region:
         oxidation = packs[region['oxide']]
         oxide_pack = package_fields(tree, point, oxidation, (offset[2] + .41, offset[0], -offset[1]), 'oxide')
+        if observed:
+            oxide_pack['colour'] = mix(tree, observed['support'], oxide_pack['colour'], observed['colour'])
         rust_surface, _, _ = response(tree, 'iron oxide', oxide_pack, oxidation, size_m, None, controls)
         active = ramp(tree, add(tree, coarse, mul(tree, cavity, .24)), .41, 3.5)
         oxide_cue = mul(tree, oxide_pack['wear'], active)
@@ -234,6 +308,8 @@ def finish_surface(material, shader, finish, strength):
             expanded = oxide_spread_field(tree, oxide_pack['wear'], coarse, cavity, coating_wear)
             oxide_cue = math_node(tree, 'MAXIMUM', oxide_cue, mul(tree, expanded, amount))
         rust = bounded(tree, mul(tree, oxide_cue, wear * controls.get('oxide_gain', 1.)), 0., .98)
+        if observed:
+            rust = blend_factor(tree, observed['support'], rust, observed['oxide'])
         surface = layer_mix(tree, 'Component dielectric iron oxide', surface, rust_surface, rust)
         metallic = mul(tree, metallic, math_node(tree, 'SUBTRACT', 1., rust))
 

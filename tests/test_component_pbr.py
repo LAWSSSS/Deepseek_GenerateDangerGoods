@@ -85,6 +85,33 @@ class ComponentPbrTests(unittest.TestCase):
             with self.assertRaisesRegex(ReferenceInputChanged, 'rubber-surface'):
                 verify_snapshot(snapshot)
 
+    def test_registered_textures_are_signed_and_locked_to_ferrous_parts(self):
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            payload = self.fixture(base)
+            channels = {}
+            for name in ('albedo', 'surface'):
+                path = base / f'registered-{name}.png'
+                Image.new('RGB', (32, 16), (90,110,160)).save(path)
+                channels[name] = {'path':path.name, 'sha256':file_hash(path)}
+            projection = {'mode':'cylinder','axes':{'u':[0,1,0],'v':[0,0,-1],'n':[1,0,0]},
+                          'origin':[0,0,0],'limits':{'v':[-.2,.3]},'finish':'oxide',
+                          'maps':channels,'source_sha256':'b'*64}
+            payload['component_regions'][0]['view_projection'] = projection
+            payload['component_regions'][1]['view_projection'] = projection
+            with self.assertRaisesRegex(ValueError, 'incompatible with the part material'):
+                validate(payload, base)
+            payload['component_regions'][1].pop('view_projection')
+            entry = base / 'entry.json'
+            entry.write_text(json.dumps(payload), encoding='utf8')
+            library = base / 'library.json'
+            library.write_text(json.dumps({'version':'reference-material-library-v1','assets':{
+                'a'*64:{'asset_id':'25','reference_path':entry.name,'reference_sha256':file_hash(entry)}}}), encoding='utf8')
+            snapshot = freeze_library(library, {'a'*64:'25'})
+            Image.new('RGB',(32,16),(77,87,97)).save(base/'registered-surface.png')
+            with self.assertRaisesRegex(ReferenceInputChanged, 'registered-surface'):
+                verify_snapshot(snapshot)
+
     def test_print_guard_protects_ink_and_neighbor_without_keeping_rectangle(self):
         image = np.full((80, 128, 3), (160, 20, 22), dtype=np.uint8)
         image[32:37, 60:64] = [200, 188, 172]
