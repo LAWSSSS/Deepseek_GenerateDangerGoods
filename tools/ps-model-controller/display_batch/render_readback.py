@@ -80,11 +80,7 @@ def _factor_domain(tree, layer_name, images):
             'basis':'actual_shader_classification_socket_values; UV_texel_fraction_not_surface_area'}
 
 
-def _reference_response(tree, source):
-    versions=sorted({str(node.get('reference_material_version')) for node in source
-                     if node.get('reference_material_version')})
-    if not versions:
-        return None
+def _surface_nodes(tree):
     output=next((node for node in tree.nodes if node.type=='OUTPUT_MATERIAL' and node.is_active_output),None)
     reachable=set()
     def visit(node):
@@ -95,6 +91,15 @@ def _reference_response(tree, source):
             for link in socket.links:visit(link.from_node)
     if output is not None and output.inputs['Surface'].is_linked:
         visit(output.inputs['Surface'].links[0].from_node)
+    return reachable
+
+
+def _reference_response(tree, source):
+    versions=sorted({str(node.get('reference_material_version')) for node in source
+                     if node.get('reference_material_version')})
+    if not versions:
+        return None
+    reachable = _surface_nodes(tree)
     responses=[];missing=[]
     for role,name in (('known_body','Reference body response'),('scratched_body','Reference scratched response')):
         node=tree.nodes.get(name)
@@ -111,6 +116,28 @@ def _reference_response(tree, source):
             'source_brdf_role':'retained_original_source_shader_not_visible_reference_body',
             'scope':'body_and_scratch_responses_before_oxide_and_dust; not_final_pixel_BRDF',
             'responses':responses}
+
+
+def _component_response(material, tree, source):
+    active = next((node for node in source if node.get('component_pbr_version')), None)
+    if active is None:
+        return None
+    reachable = _surface_nodes(tree)
+    branches = []
+    for node in tree.nodes:
+        if node.type != 'BSDF_PRINCIPLED' or not (role := node.get('component_pbr_role')):
+            continue
+        branches.append({'node': node.name, 'role': role, 'connected_to_surface': node.as_pointer() in reachable,
+                         **{key: socket_state(node.inputs[key], 3)
+                            for key in ('Base Color', 'Metallic', 'Roughness', 'Normal')}})
+    from .component_pbr import VERSION
+    images = {node.name: {'image': node.image.name, 'color_space': node.image.colorspace_settings.name,
+                          'sha256': node['reference_sha256'], 'connected_to_surface': node.as_pointer() in reachable}
+              for node in tree.nodes if node.type == 'TEX_IMAGE' and node.image and 'reference_sha256' in node}
+    return {'version': VERSION, 'region_id': material['component_pbr_region'], 'branches': branches,
+            'textures': images, 'connected': bool(branches and images
+                                             and all(row['connected_to_surface'] for row in branches)
+                                             and all(row['connected_to_surface'] for row in images.values()))}
 
 
 def _compact_socket(record, depth=2):
@@ -143,6 +170,8 @@ def material_state(obj):
              'layer_factors':{},'response_brdf':[],'relief':[]}
         if reference_response is not None:
             row['reference_response']=reference_response
+        if component_response := _component_response(material, tree, source):
+            row['component_response'] = component_response
         for name in ('Physical bounded oxidation','Physical bounded abrasion','Physical one deposition layer','Physical known-region roughness correction'):
             node=tree.nodes.get(name)
             if node:row['layer_factors'][name]=socket_state(node.inputs[0],4)

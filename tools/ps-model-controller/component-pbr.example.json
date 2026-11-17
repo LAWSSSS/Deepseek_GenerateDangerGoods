@@ -1,0 +1,633 @@
+{
+  "version": "component-pbr-trial-spec-v1",
+  "packages": {
+    "cast_steel": {
+      "role": "steel",
+      "source": {
+        "provider": "ambientCG",
+        "url": "https://ambientcg.com/view?id=Metal056A",
+        "download": "https://ambientcg.com/get?file=Metal056A_2K-JPG.zip",
+        "license": "CC0-1.0",
+        "example_material_not_alloy_assay": true
+      },
+      "channels": {
+        "albedo": "source/acg-Metal056A/Metal056A_2K-JPG_Color.jpg",
+        "roughness": "source/acg-Metal056A/Metal056A_2K-JPG_Roughness.jpg",
+        "height": "source/acg-Metal056A/Metal056A_2K-JPG_Displacement.jpg",
+        "metallic": "source/acg-Metal056A/Metal056A_2K-JPG_Metalness.jpg"
+      },
+      "anchor_srgb": [
+        166,
+        165,
+        164
+      ],
+      "tile_m": 0.29,
+      "relief_um": 43,
+      "roughness_range": [
+        0.29,
+        0.63
+      ],
+      "height_band": 0.026,
+      "albedo_variation": 0.64
+    },
+    "machined_steel": {
+      "role": "steel",
+      "source": {
+        "provider": "ambientCG",
+        "url": "https://ambientcg.com/view?id=Metal010",
+        "download": "https://ambientcg.com/get?file=Metal010_2K-JPG.zip",
+        "license": "CC0-1.0",
+        "example_material_not_alloy_assay": true
+      },
+      "channels": {
+        "albedo": "source/Metal010/Metal010_2K-JPG_Color.jpg",
+        "roughness": "source/Metal010/Metal010_2K-JPG_Roughness.jpg",
+        "height": "source/Metal010/Metal010_2K-JPG_Displacement.jpg",
+        "metallic": "source/Metal010/Metal010_2K-JPG_Metalness.jpg"
+      },
+      "anchor_srgb": [
+        200,
+        203,
+        206
+      ],
+      "tile_m": 0.2,
+      "relief_um": 15,
+      "roughness_range": [
+        0.15,
+        0.38
+      ],
+      "height_band": 0.014,
+      "albedo_variation": 0.43
+    },
+    "exposed_steel": {
+      "role": "steel",
+      "source": {
+        "provider": "ambientCG",
+        "url": "https://ambientcg.com/view?id=Metal010",
+        "download": "https://ambientcg.com/get?file=Metal010_2K-JPG.zip",
+        "license": "CC0-1.0",
+        "example_material_not_alloy_assay": true
+      },
+      "channels": {
+        "albedo": "source/Metal010/Metal010_2K-JPG_Color.jpg",
+        "roughness": "source/Metal010/Metal010_2K-JPG_Roughness.jpg",
+        "height": "source/Metal010/Metal010_2K-JPG_Displacement.jpg",
+        "metallic": "source/Metal010/Metal010_2K-JPG_Metalness.jpg"
+      },
+      "anchor_srgb": [
+        154,
+        153,
+        150
+      ],
+      "tile_m": 0.18,
+      "relief_um": 23,
+      "roughness_range": [
+        0.28,
+        0.53
+      ],
+      "height_band": 0.016,
+      "albedo_variation": 0.7
+    },
+    "blue_enamel": {
+      "role": "paint",
+      "source": {
+        "provider": "ambientCG",
+        "url": "https://ambientcg.com/view?id=PaintedMetal002",
+        "download": "https://ambientcg.com/get?file=PaintedMetal002_2K-JPG.zip",
+        "license": "CC0-1.0",
+        "example_material_not_alloy_assay": true
+      },
+      "channels": {
+        "albedo": "source/PaintedMetal002/PaintedMetal002_2K-JPG_Color.jpg",
+        "roughness": "source/PaintedMetal002/PaintedMetal002_2K-JPG_Roughness.jpg",
+        "height": "source/PaintedMetal002/PaintedMetal002_2K-JPG_Displacement.jpg",
+        "metallic": "source/PaintedMetal002/PaintedMetal002_2K-JPG_Metalness.jpg"
+      },
+      "anchor_srgb": [
+        35,
+        59,
+        94
+      ],
+      "tile_m": 0.43,
+      "relief_um": 36,
+      "roughness_range": [
+        0.33,
+        0.55
+      ],
+      "height_band": 0.024,
+      "albedo_variation": 0.66
+    },
+    "red_enamel": {
+      "role": "paint",
+      "source": {
+        "provider": "ambientCG",
+        "url": "https://ambientcg.com/view?id=PaintedMetal004",
+        "download": "https://ambientcg.com/get?file=PaintedMetal004_2K-JPG.zip",
+        "license": "CC0-1.0",
+        "example_material_not_alloy_assay": true
+      },
+      "channels": {
+        "albedo": "source/PaintedMetal004/PaintedMetal004_2K-JPG_Color.jpg",
+        "roughness": "source/PaintedMetal004/PaintedMetal004_2K-JPG_Roughness.jpg",
+        "height": "source/PaintedMetal004/PaintedMetal004_2K-JPG_Displacement.jpg",
+        "metallic": "source/PaintedMetal004/PaintedMetal004_2K-JPG_Metalness.jpg"
+      },
+      "anchor_srgb": [
+        138,
+        24,
+        25
+      ],
+      "tile_m": 0.39,
+      "relief_um": 38,
+      "roughness_range": [
+        0.36,
+        0.55
+      ],
+      "height_band": 0.022,
+      "albedo_variation": 0.68
+    },
+    "iron_oxide": {
+      "role": "oxide",
+      "source": {
+        "provider": "Poly Haven",
+        "url": "https://polyhaven.com/a/rusty_metal_02",
+        "download": "https://api.polyhaven.com/files/rusty_metal_02",
+        "license": "CC0-1.0",
+        "example_material_not_alloy_assay": true
+      },
+      "channels": {
+        "albedo": "source/rusty_metal_02_diff_2k.jpg",
+        "roughness": "source/rusty_metal_02_rough_2k.exr",
+        "height": "source/rusty_metal_02_disp_2k.exr"
+      },
+      "anchor_srgb": [
+        112,
+        74,
+        48
+      ],
+      "tile_m": 0.29,
+      "relief_um": 59,
+      "roughness_range": [
+        0.67,
+        0.9
+      ],
+      "height_band": 0.017,
+      "albedo_variation": 0.7
+    },
+    "black_rubber": {
+      "role": "rubber",
+      "source": {
+        "provider": "ambientCG",
+        "url": "https://ambientcg.com/view?id=Rubber004",
+        "download": "https://ambientcg.com/get?file=Rubber004_1K-JPG.zip",
+        "license": "CC0-1.0",
+        "example_material_not_alloy_assay": true
+      },
+      "channels": {
+        "albedo": "source/Rubber004/Rubber004_1K-JPG_Color.jpg",
+        "roughness": "source/Rubber004/Rubber004_1K-JPG_Roughness.jpg",
+        "height": "source/Rubber004/Rubber004_1K-JPG_Displacement.jpg"
+      },
+      "anchor_srgb": [
+        33,
+        32,
+        31
+      ],
+      "tile_m": 0.14,
+      "relief_um": 19,
+      "roughness_range": [
+        0.54,
+        0.82
+      ],
+      "height_band": 0.007,
+      "albedo_variation": 0.3
+    },
+    "black_plastic": {
+      "role": "plastic",
+      "source": {
+        "provider": "ambientCG",
+        "url": "https://ambientcg.com/view?id=Plastic006",
+        "download": "https://ambientcg.com/get?file=Plastic006_1K-JPG.zip",
+        "license": "CC0-1.0",
+        "example_material_not_alloy_assay": true
+      },
+      "channels": {
+        "albedo": "source/Plastic006/Plastic006_1K-JPG_Color.jpg",
+        "roughness": "source/Plastic006/Plastic006_1K-JPG_Roughness.jpg",
+        "height": "source/Plastic006/Plastic006_1K-JPG_Displacement.jpg"
+      },
+      "anchor_srgb": [
+        28,
+        29,
+        30
+      ],
+      "tile_m": 0.22,
+      "relief_um": 18,
+      "roughness_range": [
+        0.39,
+        0.65
+      ],
+      "height_band": 0.013,
+      "albedo_variation": 0.22
+    },
+    "worn_brass": {
+      "role": "nonferrous",
+      "source": {
+        "provider": "TextureCan",
+        "url": "https://www.texturecan.com/details/497/",
+        "download": "https://www.texturecan.com/downloads/metal_0065/metal_0065_1k_znD6Ra.zip",
+        "license": "CC0-1.0",
+        "example_material_not_alloy_assay": true
+      },
+      "channels": {
+        "albedo": "source/tc-metal0065/metal_0065_color_1k.jpg",
+        "roughness": "source/tc-metal0065/metal_0065_roughness_1k.jpg",
+        "height": "source/tc-metal0065/metal_0065_height_1k.png"
+      },
+      "anchor_srgb": [
+        178,
+        142,
+        77
+      ],
+      "tile_m": 0.17,
+      "relief_um": 14,
+      "roughness_range": [
+        0.32,
+        0.59
+      ],
+      "height_band": 0.018,
+      "albedo_variation": 0.48
+    }
+  },
+  "assets": {
+    "1": {
+      "mesh_sha256": "ab8f217913365186f65eaf04980d93b03dcee077f06cba42883b043b6c158ae5",
+      "regions": [
+        {
+          "parts": [
+            "Lower base neck",
+            "Lower body rim",
+            "Cast valve body",
+            "Rounded cast branch"
+          ],
+          "material": "Observed and inferred PBR atlas",
+          "package": "cast_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.93
+        },
+        {
+          "parts": [
+            "Machined stem sleeve"
+          ],
+          "material": "Observed and inferred PBR atlas",
+          "package": "machined_steel",
+          "parent_roughness": 0.24,
+          "relief_gain": 0.55
+        },
+        {
+          "parts": [
+            "Bottom mounting flange with holes",
+            "Body top flange",
+            "Body top flange lip",
+            "Top flange bolt 01",
+            "Top flange bolt 02",
+            "Top flange bolt 03",
+            "Top flange bolt 04",
+            "Top flange bolt 05",
+            "Top flange bolt 06",
+            "Top flange bolt 07",
+            "Top flange bolt 08",
+            "Top flange bolt 09",
+            "Top flange bolt 10",
+            "Top flange bolt 11",
+            "Top flange bolt 12",
+            "Upper flange lower",
+            "Upper flange upper",
+            "Bonnet bolt 01",
+            "Bonnet bolt 02",
+            "Bonnet bolt 03",
+            "Bonnet bolt 04",
+            "Bonnet bolt 05",
+            "Bonnet bolt 06",
+            "Bonnet bolt 07",
+            "Bonnet bolt 08",
+            "Wheel center cap",
+            "Side flange inner",
+            "Side cover",
+            "Side cover bolt 01",
+            "Side cover bolt 02",
+            "Side cover bolt 03",
+            "Side cover bolt 04",
+            "Side cover bolt 05",
+            "Side cover bolt 06",
+            "Side cover bolt 07",
+            "Side cover bolt 08"
+          ],
+          "material": "Observed and inferred PBR atlas",
+          "package": "cast_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.52,
+          "parent_roughness": 0.43
+        },
+        {
+          "parts": [
+            "Blue stem base",
+            "Blue upper stem collar",
+            "Tapered blue bonnet",
+            "Handwheel hub lower",
+            "Handwheel center hub",
+            "Four-spoke wheel rim",
+            "Handwheel spoke 1",
+            "Handwheel spoke 2",
+            "Handwheel spoke 3",
+            "Handwheel spoke 4"
+          ],
+          "material": "Observed and inferred PBR atlas",
+          "package": "blue_enamel",
+          "substrate": "exposed_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.75,
+          "paint_loss_um": 26
+        }
+      ],
+      "evidence": {
+        "mapping_status": "identity_style_reference",
+        "candidate_asset_ids": [
+          "1"
+        ],
+        "basis": "source photograph, authored GLB node names and material slots, with atlas cells audited; geometry unchanged",
+        "source_authoring_sha256": "81dc3f9040e6938c7663871f0ad1f09348472b59bd0610bf8dc669d69c46b3ba",
+        "protected_named_parts": [
+          "Blue inscription DN350",
+          "Blue inscription 6",
+          "Continuous curved painted underline"
+        ]
+      }
+    },
+    "25": {
+      "mesh_sha256": "9e3cfe9b1b0ddb6487a419bdff5ecc5c574ae51e6b7d799fd14b5a79c69515e0",
+      "regions": [
+        {
+          "parts": [
+            "base_clevis",
+            "base_boss_neg",
+            "base_boss_pos",
+            "rod_clevis",
+            "rod_boss_neg",
+            "rod_boss_pos",
+            "rear_cap",
+            "barrel",
+            "barrel_seam_rear",
+            "barrel_seam_front",
+            "rear_cap_seam",
+            "rear_cap_band",
+            "rod_flange",
+            "flange_outer_rim",
+            "flange_barrel_collar",
+            "flange_bolt_00",
+            "flange_bolt_01",
+            "flange_bolt_02",
+            "flange_bolt_03",
+            "flange_bolt_04",
+            "flange_bolt_05",
+            "flange_bolt_06",
+            "flange_bolt_07",
+            "flange_bolt_08",
+            "flange_bolt_09",
+            "flange_bolt_10",
+            "flange_bolt_11",
+            "flange_bolt_12",
+            "flange_bolt_13",
+            "flange_bolt_14",
+            "flange_bolt_15",
+            "rod_collar",
+            "valve_pad",
+            "valve_block",
+            "valve_bolt_1",
+            "valve_bolt_2",
+            "valve_bolt_3",
+            "valve_bolt_4",
+            "valve_center_plug",
+            "valve_left_fitting",
+            "valve_right_fitting",
+            "pipe_left",
+            "pipe_right",
+            "pipe_weld_0",
+            "pipe_weld_1"
+          ],
+          "material": "Observed blue paint, chrome, steel and bronze PBR atlas",
+          "package": "blue_enamel",
+          "substrate": "exposed_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.94,
+          "paint_loss_um": 26
+        },
+        {
+          "parts": [
+            "rod"
+          ],
+          "material": "Observed blue paint, chrome, steel and bronze PBR atlas",
+          "package": "machined_steel",
+          "parent_roughness": 0.18,
+          "relief_gain": 0.53
+        },
+        {
+          "parts": [
+            "base_bushing",
+            "base_grease_base",
+            "base_grease_stem",
+            "base_grease_tip",
+            "rod_bushing",
+            "rod_grease_base",
+            "rod_grease_stem",
+            "rod_grease_tip",
+            "valve_front_rim_1",
+            "valve_front_rim_2",
+            "valve_left_nipple",
+            "valve_right_nipple",
+            "barrel_plug_hex",
+            "barrel_plug_stem",
+            "barrel_plug_tip"
+          ],
+          "material": "Observed blue paint, chrome, steel and bronze PBR atlas",
+          "package": "machined_steel",
+          "parent_roughness": 0.26,
+          "relief_gain": 0.64
+        },
+        {
+          "parts": [
+            "flange_socket_00",
+            "flange_socket_01",
+            "flange_socket_02",
+            "flange_socket_03",
+            "flange_socket_04",
+            "flange_socket_05",
+            "flange_socket_06",
+            "flange_socket_07",
+            "flange_socket_08",
+            "flange_socket_09",
+            "flange_socket_10",
+            "flange_socket_11",
+            "flange_socket_12",
+            "flange_socket_13",
+            "flange_socket_14",
+            "flange_socket_15",
+            "wiper_ring",
+            "wiper_tooth_00",
+            "wiper_tooth_01",
+            "wiper_tooth_02",
+            "wiper_tooth_03",
+            "wiper_tooth_04",
+            "wiper_tooth_05",
+            "wiper_tooth_06",
+            "wiper_tooth_07",
+            "wiper_tooth_08",
+            "wiper_tooth_09",
+            "wiper_tooth_10",
+            "wiper_tooth_11",
+            "valve_socket_1",
+            "valve_socket_2",
+            "valve_socket_3",
+            "valve_socket_4",
+            "valve_center_socket",
+            "valve_front_socket_1",
+            "valve_front_socket_2"
+          ],
+          "material": "Observed blue paint, chrome, steel and bronze PBR atlas",
+          "package": "cast_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.4,
+          "parent_roughness": 0.49
+        },
+        {
+          "parts": [
+            "gland_ring"
+          ],
+          "material": "Observed blue paint, chrome, steel and bronze PBR atlas",
+          "package": "worn_brass",
+          "parent_roughness": 0.34,
+          "relief_gain": 0.53
+        },
+        {
+          "parts": [
+            "rod_collar_seal"
+          ],
+          "material": "Observed blue paint, chrome, steel and bronze PBR atlas",
+          "package": "black_rubber",
+          "keep_source_normal": true,
+          "relief_gain": 0.64
+        }
+      ],
+      "evidence": {
+        "mapping_status": "identity_style_reference",
+        "candidate_asset_ids": [
+          "25"
+        ],
+        "basis": "source photograph, authored GLB node names and material slots, with atlas cells audited; geometry unchanged",
+        "source_authoring_sha256": "8d7b77992918bd5e792dda47d2ad5d6fbefe2a0018e53630914d073459d3658a",
+        "protected_named_parts": []
+      }
+    },
+    "33": {
+      "mesh_sha256": "5005f43274d9edfe0d99ca9ab8cdba809b914b3c2a0b89988c425a6fadfc5f2f",
+      "regions": [
+        {
+          "parts": [
+            "body"
+          ],
+          "material": "Red painted steel body, observed label and rust, PBR",
+          "package": "red_enamel",
+          "substrate": "exposed_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.84,
+          "preserve_print": "white_on_red",
+          "paint_loss_um": 23
+        },
+        {
+          "parts": [
+            "body_bottom_seam",
+            "body_shoulder_seam",
+            "lever_red"
+          ],
+          "material": "Red painted lever with chipped edges, PBR",
+          "package": "red_enamel",
+          "substrate": "exposed_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.75,
+          "paint_loss_um": 23
+        },
+        {
+          "parts": [
+            "base_ring",
+            "base_center_rim",
+            "base_lug_0",
+            "base_lug_1",
+            "base_lug_2",
+            "base_lug_3",
+            "handle_black",
+            "nozzle"
+          ],
+          "material": "Black polypropylene base and nozzle, PBR dielectric",
+          "package": "black_plastic",
+          "relief_gain": 0.75
+        },
+        {
+          "parts": [
+            "valve_collar",
+            "valve_body",
+            "valve_top_cap",
+            "valve_front_boss",
+            "valve_bottom_nut",
+            "valve_hose_outlet",
+            "lever_pivot_washer",
+            "handle_screw"
+          ],
+          "material": "Brass valve, PBR metal",
+          "package": "worn_brass",
+          "parent_roughness": 0.39
+        },
+        {
+          "parts": [
+            "valve_front_socket"
+          ],
+          "material": "Dark steel recesses, PBR metal",
+          "package": "exposed_steel",
+          "parent_roughness": 0.53
+        },
+        {
+          "parts": [
+            "valve_hose_ferrule",
+            "lever_pivot_pin",
+            "hose_ferrule_top",
+            "hose_band_bottom",
+            "nozzle_band"
+          ],
+          "material": "Steel ferrules and pivot, PBR metal",
+          "package": "machined_steel",
+          "parent_roughness": 0.29,
+          "relief_gain": 0.7
+        },
+        {
+          "parts": [
+            "hose"
+          ],
+          "material": "Ribbed black hose with printed white marking, PBR dielectric",
+          "package": "black_rubber",
+          "preserve_print": "white_on_black",
+          "keep_source_normal": true,
+          "relief_gain": 0.63
+        }
+      ],
+      "evidence": {
+        "mapping_status": "identity_style_reference",
+        "candidate_asset_ids": [
+          "33"
+        ],
+        "basis": "source photograph, authored GLB node names and material slots, with atlas cells audited; geometry unchanged",
+        "source_authoring_sha256": "f7f712ca13d6d473fa9f9d874b402e2ba3b0bffee478129b083ec615e7b1d96d",
+        "protected_named_parts": []
+      }
+    }
+  },
+  "derivation": "Physical A/B v2; linked paint chip relief, separate exposed steel and cavity-dependent oxide. Adjustments are conservative estimates, no full-model greying."
+}

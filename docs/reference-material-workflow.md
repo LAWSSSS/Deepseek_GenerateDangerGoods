@@ -32,6 +32,8 @@
 
 ### 使用材质库做对照
 
+对同一物品的裸钢、漆、橡胶及塑料分别接入材质包时，使用[分件 PBR 材质入口](component-pbr-materials.md)。
+
 `build_blender_material_assets.py` 在 Blender 中将公开 PBR 贴图打包为可追加的材质资产。规格 JSON 为数组，每项包含 `name`、`provider`、`source_url` 以及 `channels` 下的 `base`、`roughness`、`metallic`、`normal`。将输出所在目录添加到 Blender 的 Asset Libraries。
 
 `prepare_library_material_trial.py --spec <json> --baseline-library <json> --output <new-dir>` 将库贴图适配到已有的物品分区。规格另需 `id`、`assets`、`scale_m`、`oxide_value_limit` 及 `channels.height`，可用 `oxide_strength` 衰减估计锈蚀遮罩。每件可在 `only_materials` 中列出允许修改的源材质名。生成的 `library.json` 可直接用于完整模型诊断。独立比较换光下的粗糙度和高光后，再确定全局采用哪套材质。

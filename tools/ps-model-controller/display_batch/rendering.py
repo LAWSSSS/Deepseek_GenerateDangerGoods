@@ -129,6 +129,8 @@ def part_keys(request, device, dependencies, *, include_detail=True):
                                          for name in ('physical_layers.py','physical_material.py'))))
             if finish.get('reference') is not None:
                 surface=(*surface,finish['reference'],file_hash(HERE/'display_batch/reference_shader.py'))
+                if 'packages' in finish['reference']:
+                    surface=(*surface,file_hash(HERE/'display_batch/component_shader.py'))
         reference = environment.get('nearby_weathered_steel', {})
         if reference.get('applied'):
             surface=(*surface,reference['pigment_linear'])
@@ -228,6 +230,9 @@ class RenderCache:
                 object_passes += (AMBER_PASS,)
             if finish.get('version')=='physical-layers-v1':
                 object_passes += ('physical-regions0001.exr',)
+            if 'packages' in finish.get('reference', {}):
+                from .component_pbr import AOV
+                object_passes += (AOV.replace('_', '-') + '0001.exr',)
         entries={};cache={};missing={};folders={};imports=0;worker_detail={}
         for part,key in keys.items():
             folder=self.root/part/key

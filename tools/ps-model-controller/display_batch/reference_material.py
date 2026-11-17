@@ -38,6 +38,12 @@ def load_library(path):
 
 
 def validate_reference(reference, base=None):
+    from .component_pbr import VERSION as COMPONENT_VERSION, validate as validate_components
+    if reference.get('version') == COMPONENT_VERSION:
+        result = validate_components(reference, base)
+        result.pop('binding_signature', None)
+        result['binding_signature'] = signature(VERSION, result, file_hash(__file__))
+        return result
     result = copy.deepcopy(reference)
     if result.get('version') != 'reference-pbr-v1' or result.get('status') not in ('ready', 'estimated', 'review'):
         raise ValueError('reference material is missing estimated PBR evidence')
@@ -107,7 +113,11 @@ def freeze_library(path, selected):
         if not entry_path.is_absolute():entry_path = Path(library['manifest']).parent / entry_path
         entry_path = str(entry_path.resolve())
         records = [(entry_path, row['reference_sha256'], 'entry')]
-        records += [(entry['path'], entry['sha256'], kind) for kind, entry in reference['maps'].items()]
+        if 'packages' in reference:
+            from .component_pbr import texture_records
+            records += texture_records(reference)
+        else:
+            records += [(entry['path'], entry['sha256'], kind) for kind, entry in reference['maps'].items()]
         for filename, digest, role in records:
             if filename in files and files[filename]['sha256'] != digest:
                 raise ValueError('selected references disagree on shared input bytes')

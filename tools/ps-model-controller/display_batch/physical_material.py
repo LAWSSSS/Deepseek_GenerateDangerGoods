@@ -64,6 +64,22 @@ def prepare_finish(asset_or_mesh, cache, pack, size_m, profile=None, reference=N
     asset['mesh_hash'] = actual_hash
     if profile and profile.get('source_mesh_hash') != actual_hash:
         raise ValueError('asset profile is bound to a different source mesh')
+    if reference is not None and 'packages' in reference:
+        from . import component_pbr
+        from .reference_material import validate_reference
+        reference = validate_reference(reference)
+        if reference.get('source_mesh_hash') != actual_hash:
+            raise ValueError('component recipe bound to another source mesh')
+        regions = component_pbr.prepare(asset, reference, cache)
+        audit = [{'material': name, 'eligible': row['eligible'], 'components': row['components'],
+                  'skip_reason': row['skip_reason']} for name, row in regions['materials'].items()]
+        identity = signature(VERSION, actual_hash, size, regions, reference,
+                             file_hash(component_pbr.__file__))
+        return {'version': VERSION, 'signature': identity, 'source_mesh_hash': actual_hash,
+                'maps': {}, 'regions': regions, 'reference': reference, 'size_m': size,
+                'recipe': {'version': component_pbr.VERSION}, 'layer_stage': 'full', 'asset_profile': profile,
+                'material_audit': audit, 'geometry_modified': False,
+                'basis': 'independent_PBR_packages_assigned_to_authored_parts'}
     asset.setdefault('semantic', {'material_classes': []})
     classes = asset['semantic'].get('material_classes', [])
     source = load_pack(pack) if not isinstance(pack, dict) else pack

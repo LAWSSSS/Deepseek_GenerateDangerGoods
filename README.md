@@ -43,3 +43,5 @@ npm ci --prefix tools/ps-model-controller/placement-web
 逐件模型修复、结构化摄影诊断和 Photoshop 实际回读见[写实工作流](docs/model-realism-workflow.md)。`component_v1` 为独立候选试验；先检查模型，再确认是否进入场景测试。
 
 用户六视图的材质参考、资产绑定、保护区域及完整模型对照入口见[六视图参考材质](docs/reference-material-workflow.md)。新材质仍为候选，不替换源模型和批量默认。
+
+按金属、漆、锈、橡胶和塑料独立复用库贴图，见[分件 PBR 材质](docs/component-pbr-materials.md)及其中的三件试验配置。

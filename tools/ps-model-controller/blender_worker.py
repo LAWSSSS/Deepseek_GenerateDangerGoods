@@ -77,11 +77,13 @@ def setup_scene(render_device="CPU", resolution=512):
     return scene
 
 
-def load_mesh(path):
+def load_mesh(path, *, before_join=None):
     bpy.ops.import_scene.gltf(filepath=str(path))
     objects = [obj for obj in bpy.context.selected_objects if obj.type == "MESH"]
     if not objects:
         raise ValueError("GLB contains no mesh")
+    if before_join is not None:
+        before_join(objects)
     bpy.ops.object.select_all(action="DESELECT")
     for obj in objects:
         obj.select_set(True)

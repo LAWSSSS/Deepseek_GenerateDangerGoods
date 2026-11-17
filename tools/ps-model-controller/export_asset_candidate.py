@@ -50,18 +50,48 @@ def compact_readback(baseline,actual):
 
 def main():
     request=json.loads(Path(sys.argv[sys.argv.index('--')+1]).read_text(encoding='utf8'))
+    finish = request['generated_finish']
+    is_component = 'packages' in finish.get('reference', {})
     destination=Path(request.pop('candidate_path')).resolve()
     if destination.suffix!='.blend' or destination.name!='candidate.blend':
         raise ValueError('only a separately named candidate.blend may be written')
     bpy.ops.import_scene.gltf(filepath=request['mesh'])
     baseline=source_inputs()
+    def mesh_fingerprint(mesh):
+        import numpy as np
+        digest = hashlib.sha256()
+        for data, key, width, dtype in ((mesh.vertices, 'co', 3, 'f'),
+                                       (mesh.loops, 'vertex_index', 1, 'i'),
+                                       (mesh.corner_normals, 'vector', 3, 'f'),
+                                       (mesh.polygons, 'loop_total', 1, 'i'),
+                                       (mesh.polygons, 'use_smooth', 1, '?')):
+            values = np.empty(len(data) * width, dtype=dtype)
+            data.foreach_get(key, values)
+            digest.update(values.tobytes())
+        for layer in mesh.uv_layers:
+            values = np.empty(len(mesh.loops) * 2, dtype='f')
+            layer.data.foreach_get('uv', values)
+            digest.update(layer.name.encode())
+            digest.update(values.tobytes())
+        return digest.hexdigest()
+
+    geometry_before = None
+    if is_component:
+        from blender_display_worker import canonicalize_mesh, legacy
+        geometry_before = mesh_fingerprint(canonicalize_mesh(legacy.load_mesh(request['mesh'])).data)
     render_parts(request)  # Empty parts: setup only, zero renders.
+    if is_component:
+        # Exactly the same canonical source topology, vertices, smoothing and UVs.
+        from blender_display_worker import LIVE_RENDER
+        if mesh_fingerprint(LIVE_RENDER['asset'].data) != geometry_before:
+            raise ValueError('component materials changed source geometry or UVs')
     actual=source_inputs()
     (destination.parent/'candidate-material-readback.json').write_text(json.dumps({
         'source_mesh_hash':request['mesh_hash'],'source_inputs':baseline,'actual_inputs':actual,
         'recipe':request['generated_finish']['recipe'],'controls':request['generated_finish'].get('controls',{}),
         'regions':request['generated_finish']['regions'],'binding':'actual Blender input graphs before export'},ensure_ascii=False,indent=2),encoding='utf8')
-    protected={name:baseline.get(name)==actual.get(name) for name,entry in request['generated_finish']['regions']['materials'].items() if not entry.get('eligible')}
+    protected={name:baseline.get(name)==actual.get(name) for name,entry in finish['regions']['materials'].items()
+               if not entry.get('eligible') or (is_component and name in actual)}
     if not all(protected.values()):raise ValueError('protected source material input graph changed')
     scene=bpy.context.scene
     for obj in scene.objects:
@@ -72,19 +102,24 @@ def main():
     scene.view_settings.view_transform='AgX'
     scene.render.image_settings.file_format='PNG'
     scene.render.image_settings.color_mode='RGBA'
+    if is_component:
+        scene.cycles.samples = 96
+        scene.cycles.use_denoising = True
     scene['asset_profile']=json.dumps(request['generated_finish'].get('asset_profile'),ensure_ascii=False)
     scene['material_signature']=request['generated_finish']['signature']
     scene['source_mesh_hash']=request['mesh_hash']
     scene['acceptance']='candidate_only_user_review_required'
     objects=[o for o in scene.objects if o.type=='MESH']
-    counts={'mesh_objects':len(objects),'vertices':sum(len(o.data.vertices) for o in objects),
-            'faces':sum(len(o.data.polygons) for o in objects),'materials':len(bpy.data.materials)}
+    def mesh_counts(scene_objects):
+        return {'mesh_objects': len(scene_objects), 'vertices': sum(len(o.data.vertices) for o in scene_objects),
+                'faces': sum(len(o.data.polygons) for o in scene_objects),
+                'materials': len({mat.name for obj in scene_objects for mat in obj.data.materials if mat})}
+    counts=mesh_counts(objects)
     bpy.ops.file.pack_all()
     bpy.ops.wm.save_as_mainfile(filepath=str(destination),check_existing=False)
     bpy.ops.wm.open_mainfile(filepath=str(destination))
     objects=[o for o in bpy.context.scene.objects if o.type=='MESH']
-    reopened={'mesh_objects':len(objects),'vertices':sum(len(o.data.vertices) for o in objects),
-              'faces':sum(len(o.data.polygons) for o in objects),'materials':len(bpy.data.materials)}
+    reopened=mesh_counts(objects)
     if reopened!=counts:raise ValueError('candidate reopen geometry/material count mismatch')
     images=[image for image in bpy.data.images if image.source=='FILE']
     if any(not image.packed_file for image in images):raise ValueError('unpacked candidate dependency')
@@ -94,7 +129,27 @@ def main():
     materials={m.name:m for obj in objects for m in obj.data.materials if m and m.name!='neutral receiver'}
     reopened_state=material_state(SimpleNamespace(data=SimpleNamespace(materials=list(materials.values()))))
     reference_checks={}
-    if request['generated_finish'].get('reference'):
+    component_checks={}
+    if is_component:
+        states = {row['component_response']['region_id']: row['component_response']
+                  for row in reopened_state['materials'] if 'component_response' in row}
+        packages = finish['reference']['packages']
+        for entry in finish['regions']['materials'].values():
+            for region in entry['components']:
+                state = states.get(region['id'], {})
+                keys = [region[key] for key in ('package', 'substrate', 'oxide') if key in region]
+                expected = {channel['sha256'] for key in keys for channel in packages[key]['maps'].values()}
+                packed = {hashlib.sha256(bytes(node.image.packed_file.data)).hexdigest()
+                          for material in materials.values() if material.get('component_pbr_region') == region['id']
+                          for node in material.node_tree.nodes if node.get('reference_sha256') and node.image.packed_file}
+                component_checks[region['slot']] = bool(
+                    state.get('connected') and expected == packed
+                    and all((1. if row['role'] in ('steel', 'nonferrous') else 0.) == row['Metallic']['value']
+                            for row in state['branches']))
+        asset = next(obj for obj in objects if not any(m and m.name == 'neutral receiver' for m in obj.data.materials))
+        if not component_checks or not all(component_checks.values()) or mesh_fingerprint(asset.data) != geometry_before:
+            raise ValueError('reopened candidate lost a material channel, correct metalness or source geometry')
+    elif finish.get('reference'):
         states={re.sub(r'\.\d{3}$','',row['material']):row for row in reopened_state['materials']}
         for name,entry in request['generated_finish']['regions']['materials'].items():
             if not entry.get('eligible'):continue
@@ -114,6 +169,7 @@ def main():
         'reopened_material_readback_path':'candidate-reopened-materials.json',
         'reopened_material_state_sha256':reopened_state['state_sha256'],
         'reference_response_connected':reference_checks,
+        **({'component_response_checks': component_checks, 'geometry_uv_sha256': geometry_before} if is_component else {}),
         'reference_response_scope':'actual_reopened_candidate_output_connections_not_visual_quality',
         'protected_material_graphs_equal':protected,
         'changed_source_inputs':{name:[key for key in baseline.get(name,{}) if baseline[name][key]!=actual.get(name,{}).get(key)] for name in actual if name in baseline}},indent=2),encoding='utf8')

@@ -234,6 +234,9 @@ async def prepare_missing_geometry(args):
 def freeze(args):
     from display_batch.reference_material import load_library, lookup_reference
     source, cache = resolve(args.source), resolve(args.cache)
+    surface_dust = getattr(args, 'surface_dust', .5)
+    if not 0 <= surface_dust <= .5:
+        raise ValueError('Surface powder must be within 0–0.5')
     library_path = resolve(args.reference_manifest)
     library = load_library(library_path)
     catalog = load_catalog()
@@ -275,6 +278,7 @@ def freeze(args):
             'source': str(source), 'source_results_sha256': file_hash(records_path) if records_path.is_file() else None,
             'reference_manifest': str(library_path), 'reference_manifest_sha256': file_hash(library_path),
             'pack_signature': pack['signature'], 'resolution': args.resolution, 'pose_mode': args.pose_mode,
+            'surface_dust': surface_dust,
             'catalog_mesh_hashes': {aid: row['mesh_hash'] for aid, row in catalog.items()},
             'selected_asset_ids': [aid for aid, _, _ in selected],
             'cases': cases, 'failures': failures, 'variants': [row[0] for row in variants],
@@ -374,7 +378,7 @@ async def run(args):
                     candidate['yaw'] = float(candidate['yaw']) + turn
                     candidate['camera'] = fitted_camera(asset, candidate)
                     params = {'material': 'original', 'light': 'scene', 'dust': 'auto',
-                              'surface_dust': .5, 'integration_mode': 'coherent', 'render_detail': 'standard',
+                              'surface_dust': frozen['surface_dust'], 'integration_mode': 'coherent', 'render_detail': 'standard',
                               'asset_diagnostic': mode, 'asset_refinement': 'component_v1',
                               'oxide_gain': 1., 'scratch_gain': 1., 'relief_gain': 1., 'roughness_shift': 0.}
                     finish = case['finish'] if mode == 'physical' else None
@@ -391,10 +395,19 @@ async def run(args):
                     if not np.any(alpha > .5):
                         raise ValueError('empty diagnostic model')
                     paths[tag] = folder
+                    material_checks = coverage_stats(folder, alpha)
+                    if (domain_path := folder / 'component-domains0001.exr').is_file():
+                        core = alpha > .98
+                        domain = exr(domain_path)[core]
+                        wear = exr(folder / 'generated-finish0001.exr')[core]
+                        material_checks['component_domains'] = dict(zip(('rubber', 'plastic', 'source_print'),
+                                                                        domain.mean(axis=0).tolist()))
+                        material_checks['mean_layer_weights'] = dict(zip(('oxide', 'exposed_steel', 'powder'),
+                                                                         wear.mean(axis=0).tolist()))
                     renders.append({'tag': tag, 'image': image.relative_to(out).as_posix(),
                         'sha256': file_hash(image), 'cache_hit': hit, 'render_cache': meta['render_cache'],
                         'render_timings': meta.get('render_timings'),
-                        'source_regions': coverage_stats(folder, alpha),
+                        'source_regions': material_checks,
                         'material_readback': meta.get('material_readback'),
                         'lighting_readback': meta.get('lighting_readback'),
                         'material_metadata': meta.get('generated_finish'),
@@ -438,6 +451,17 @@ async def run(args):
     # Reload catalog to verify every original model, including unrendered ones.
     current = load_catalog()
     unchanged = {aid: current[aid]['mesh_hash'] == sha for aid, sha in frozen['catalog_mesh_hashes'].items()}
+    references = [case['finish']['reference'] for case in frozen['cases']]
+    known_limits = [
+        'Albedo separation and roughness/micro-relief are estimates, not measured material properties.',
+        'Unknown material regions retain their source appearance; report coverage instead of forcing rust.',
+        'Inspection pose and cached category dimensions do not establish scene contact or true scale.',
+        'Numeric differences and highlight response do not prove photorealistic quality.',
+    ]
+    if any('packages' in reference for reference in references):
+        known_limits.insert(0, 'Library surfaces provide donor textures. Exact alloy, coating and wear are unverified.')
+    if any('packages' not in reference for reference in references):
+        known_limits.insert(0, 'AI six views provide appearance motifs, not calibrated PBR or hidden geometry truth.')
     summary = {'version': VERSION, 'state': 'complete' if not failures else 'completed_with_failures',
                'selected_assets': len(frozen['selected_asset_ids']), 'completed_assets': len(results),
                'plates': sum(len(row['renders']) for row in results), 'failures': failures,
@@ -447,11 +471,7 @@ async def run(args):
                'render_timings': dict(renderer.timings), 'api_calls': 0, 'tokens': 0, 'api_cost': 0,
                'local_compute_cost': 'unknown', 'catalog_hash_checks': unchanged,
                'visual_status': 'unreviewed', 'production_default_changed': False,
-               'known_limits': ['AI six views provide appearance motifs, not calibrated PBR or hidden geometry truth.',
-                   'Albedo separation and roughness/micro-relief are estimates, not measured material properties.',
-                   'Unknown material regions retain their source appearance; report coverage instead of forcing rust.',
-                   'Inspection pose and cached category dimensions do not establish scene contact or true scale.',
-                   'Numeric differences and highlight response do not prove photorealistic quality.']}
+               'known_limits': known_limits}
     atomic_json(out / 'summary.json', summary)
     write_report(out, frozen, results, summary)
     print(json.dumps(summary, ensure_ascii=False))
@@ -466,6 +486,7 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument('--resolution', type=int, choices=(512, 1024, 2048), default=1024)
     parser.add_argument('--device', choices=('OPTIX', 'CPU'), default='OPTIX')
+    parser.add_argument('--surface-dust', type=float, default=.5, help='Added surface powder strength, 0–0.5')
     parser.add_argument('--freeze-only', action='store_true')
     parser.add_argument('--pose-mode', choices=('historical', 'inspection'), default='historical',
                         help='inspection uses a fixed principal-axis side view; neither mode validates scene physics')

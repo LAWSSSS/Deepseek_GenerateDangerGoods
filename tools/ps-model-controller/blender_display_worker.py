@@ -57,19 +57,25 @@ def reset(device='CPU', resolution=512):
     return scene
 
 
-def normalized_mesh(path):
+def canonicalize_mesh(obj):
+    points = np.asarray([list(point) for point in legacy.world_vertices(obj)])
+    low, high = points.min(axis=0), points.max(axis=0)
+    span = float(max(high - low))
+    center = (low + high) / 2
+    matrix = Matrix.Scale(1 / span, 4) @ Matrix.Translation(Vector(-center)) @ obj.matrix_world
+    obj.data.transform(matrix)
+    obj.matrix_world = Matrix.Identity(4)
+    return obj
+
+
+def normalized_mesh(path, *, before_join=None):
     global BASE, BASE_PATH, BASE_ROUGHNESS
     if BASE is None or BASE_PATH!=path:
         if BASE is not None:
             BASE.use_fake_user=False
             # Remove unused textures/materials before loading another large asset.
             bpy.data.orphans_purge(do_recursive=True)
-        obj=legacy.load_mesh(path)
-        points=np.asarray([list(p) for p in legacy.world_vertices(obj)])
-        low,high=points.min(axis=0),points.max(axis=0)
-        span=float(max(high-low)); center=(low+high)/2
-        mat=Matrix.Scale(1/span,4) @ Matrix.Translation(Vector(-center)) @ obj.matrix_world
-        obj.data.transform(mat);obj.matrix_world=Matrix.Identity(4)
+        obj=canonicalize_mesh(legacy.load_mesh(path, before_join=before_join))
         BASE=obj.data;BASE.use_fake_user=True;BASE_PATH=path
         BASE_ROUGHNESS={}
         for material in BASE.materials:
@@ -545,7 +551,7 @@ def fine_render_mesh(obj,request):
 
 
 def pass_outputs(scene, folder, generated_finish=False, hydraulic_finish=False, corrosion_finish=False,
-                 handling_finish=False, amber_film=False, physical_regions=False):
+                 handling_finish=False, amber_film=False, physical_regions=False, component_domains=False):
     layer=scene.view_layers[0]
     layer.use_pass_diffuse_direct=True;layer.use_pass_diffuse_indirect=True;layer.use_pass_diffuse_color=True
     layer.use_pass_glossy_direct=True;layer.use_pass_glossy_indirect=True;layer.use_pass_glossy_color=True
@@ -558,6 +564,10 @@ def pass_outputs(scene, folder, generated_finish=False, hydraulic_finish=False, 
     if physical_regions:
         passes.append(('physical-regions','physical_regions'))
         aovs['physical_regions']='COLOR'
+    if component_domains:
+        from display_batch.component_pbr import AOV
+        passes.append((AOV.replace('_', '-'), AOV))
+        aovs[AOV] = 'COLOR'
     if generated_finish:
         passes.append(('generated-finish', 'generated_finish'))
         aovs['generated_finish'] = 'COLOR'
@@ -1061,7 +1071,11 @@ def render_parts(request):
             BASE.use_fake_user=False
             BASE=BASE_PATH=None
             bpy.data.orphans_purge(do_recursive=True)
-        asset=normalized_mesh(request['mesh'])
+        before_join = None
+        if finish and 'packages' in finish.get('reference', {}) and finish.get('layer_stage') != 'source':
+            from display_batch.component_shader import assign_slots
+            before_join = lambda objects: assign_slots(objects, finish)
+        asset=normalized_mesh(request['mesh'], before_join=before_join)
         state.update(asset=asset,arrays=arrays(asset),mesh_key=mesh_key)
         formed = finish and ('cylinder' in finish['maps'] or finish['version'] == 'generated-pbr-v3')
         state['weld_detail'] = shape_weld_beads(asset.data, finish) if formed else None
@@ -1131,7 +1145,8 @@ def render_parts(request):
                          hydraulic_finish=bool(finish and 'hydraulic' in finish['maps']),
                          corrosion_finish=bool(finish and finish.get('corrosion')),
                          handling_finish=bool(finish and 'handling' in finish['maps']),
-                         amber_film=bool(finish and finish.get('amber_age')))
+                         amber_film=bool(finish and finish.get('amber_age')),
+                         component_domains=bool(finish and 'packages' in finish.get('reference', {})))
             legacy.render(scene,folder/'object.png')
         else:
             scene.use_nodes=False

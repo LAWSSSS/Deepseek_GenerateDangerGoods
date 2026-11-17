@@ -1,6 +1,8 @@
 # DeepSeek Harness 项目交接
 
-**2026-11-17 最新：六视图参考材质仍为模型候选。** [完整交付](outputs/六视图参考重贴-14件-20261117/delivery.html)、[维护](docs/reference-material-workflow.md)、[实际记录](docs/history/DISPLAY_REFERENCE_MATERIAL.md)。14 件输出 56 张完整模型图，9 件有材质修改，13/16/17/18/36 五件保护未重贴；蓝缸对应25，非31。44 个源模型及批量默认不变。01/33 千问定向复核仍认为磨损层次不足，未宣称写实通过；模型确认前不进入场景。新 `effects.reference_material_manifest` 显式绑定 `physical_layers`，材质库及地图哈希参与续跑校验；输入变化暂停，不自动混用旧新版本。本轮内置生图3次、交互千问1次7614token，金额未知。桌面ZIP仅根目录70张PNG。
+**2026-11-17 分件 PBR 材质候选。** 01、25、33 使用 8 套公开材质素材，按部件接入漆层、金属底材、锈、橡胶、塑料和黄铜。[完整画面对照](outputs/分件PBR材质-分层磨损-20261117/review.html) · [复现与教程](docs/component-pbr-materials.md)。三份候选 `.blend` 重开通过，44 个源模型散列一致。千问首版诊断 1 次、6,357 token，费用未知。当前评价范围为模型材料，批量使用现有默认。
+
+**2026-11-17 六视图参考材质候选。** [完整交付](outputs/六视图参考重贴-14件-20261117/delivery.html)、[维护](docs/reference-material-workflow.md)、[实际记录](docs/history/DISPLAY_REFERENCE_MATERIAL.md)。14 件输出 56 张完整模型图，9 件有材质修改，13/16/17/18/36 五件保护未重贴；蓝缸对应25，非31。44 个源模型及批量默认不变。01/33 千问定向复核仍认为磨损层次不足，未宣称写实通过；模型确认前不进入场景。新 `effects.reference_material_manifest` 显式绑定 `physical_layers`，材质库及地图哈希参与续跑校验；输入变化暂停，不自动混用旧新版本。本轮内置生图3次、交互千问1次7614token，金额未知。桌面ZIP仅根目录70张PNG。
 
 **2026-11-17 模型检查点：暂不进入场景测试。** [四件资产与可测量执行记录](docs/history/DISPLAY_ASSET_CHECKPOINT.md)；[维护与入口](docs/model-realism-workflow.md)。新增 v3 摄影诊断、实际 Photoshop/Blender 读回、受限材质／照明操作及部件档案。五件共 36 张完整模型图已交付，四件写实尚未达标；13 几乎不变却被视觉模型判断退化，比较结果单列不可信。44 源模型不变、生产默认不变。当前对话诊断共 12 请求／131,004 token，金额未知。用户确认模型前不得启动 12 场景小样，Token Plan 仍不用于无人值守批处理。
 
