@@ -23,6 +23,14 @@
 
 涉用贴图为 CC0。材质清单记录来源、原通道及派生图的 SHA-256。 [ambientCG 许可](https://docs.ambientcg.com/license/) · [Poly Haven 许可](https://polyhaven.com/license/) · [TextureCan 许可](https://www.texturecan.com/terms/)
 
+## 局部光泽与加工方向
+
+- `scuff_strength` 的范围为 0–1，应用于已经确认钢基底的涂层。使用供体磨损图的低强度线索增加存留漆层的粗糙度，局部减弱涂层反射。露钢、锈和粉尘沿用原分布。
+- `machining` 只应用于已确认的金属部件。`axis` 为模型导入和归一化后的单位轴，按部件顶点核对。`anisotropy` 范围为 0–0.45，曲面切线随零件变换，在端面逐渐恢复各向均匀的反光。01 阀杆套和 25 活塞杆分别使用测得的 Y 和 Z 轴，强度是外观估计。 [Blender Principled 各向异性说明](https://docs.blender.org/manual/id/4.4/render/shader_nodes/shader/principled.html)
+- `source_roughness_mix` 范围为 0–0.75，为橡胶和塑料引入原有 UV 粗糙度。25 密封圈、33 软管和塑料底座使用各自的值。贴图细纹与原法线可以同时作用，印字继续由原 UV 保护。
+
+省略这些可选字段时，已有配方使用原有材质响应。Blender 候选的 `component_detail_checks` 记录重开后各新增分支是否仍连接到实际输出。
+
 ## 复现或增加模型
 
 1. 按 [试验配置](../tools/ps-model-controller/component-pbr.example.json) 中的 `source` 获取贴图，将各通道放在 `channels` 对应的路径。`--source-root` 指定这些相对路径的起点，省略时以配置目录为起点。`assets` 使用仓库图册 ID，01 写作 `1`。

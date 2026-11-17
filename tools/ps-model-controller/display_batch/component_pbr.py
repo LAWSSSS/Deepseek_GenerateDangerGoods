@@ -87,11 +87,27 @@ def validate(reference, base=None):
             raise ValueError('ferrous oxidation cannot be assigned to a nonferrous or polymer surface')
         number(region.get('wear', 1.), 0., 1., 'wear')
         for field, lo, hi in (('parent_roughness', .08, .95), ('relief_gain', 0., 1.),
-                              ('paint_loss_um', 0., 40.)):
+                              ('paint_loss_um', 0., 40.), ('scuff_strength', 0., 1.),
+                              ('source_roughness_mix', 0., .75)):
             if field in region:
                 number(region[field], lo, hi, field)
         if region.get('paint_loss_um', 0.) and not steel:
             raise ValueError('Paint film relief requires a separate underlying steel layer')
+        if region.get('scuff_strength', 0.) and not steel:
+            raise ValueError('Coating scuffs require an audited paint stack')
+        if region.get('source_roughness_mix', 0.) and main not in ('rubber', 'plastic'):
+            raise ValueError('Source roughness blending is limited to opaque polymers')
+        if 'machining' in region:
+            profile = region['machining']
+            if main not in ('steel', 'nonferrous') or not isinstance(profile, dict):
+                raise ValueError('Directional machining requires a metal part and an audited axis')
+            axis = profile.get('axis')
+            if not isinstance(axis, list) or len(axis) != 3:
+                raise ValueError('Machining axis must contain three object-space components')
+            length = math.hypot(*(number(v, -1., 1., 'machining axis') for v in axis))
+            if not math.isclose(length, 1., abs_tol=.001):
+                raise ValueError('Machining axis must be a unit vector')
+            number(profile.get('anisotropy'), 0., .45, 'machining anisotropy')
         if 'preserve_print' in region and region['preserve_print'] not in ('white_on_red', 'white_on_black'):
             raise ValueError('unrecognized authored print mask')
     return result

@@ -273,7 +273,8 @@
           "material": "Observed and inferred PBR atlas",
           "package": "cast_steel",
           "oxide": "iron_oxide",
-          "wear": 0.93
+          "wear": 0.93,
+          "relief_gain": 0.73
         },
         {
           "parts": [
@@ -282,7 +283,15 @@
           "material": "Observed and inferred PBR atlas",
           "package": "machined_steel",
           "parent_roughness": 0.24,
-          "relief_gain": 0.55
+          "relief_gain": 0.37,
+          "machining": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "anisotropy": 0.31
+          }
         },
         {
           "parts": [
@@ -327,7 +336,8 @@
           "package": "cast_steel",
           "oxide": "iron_oxide",
           "wear": 0.52,
-          "parent_roughness": 0.43
+          "parent_roughness": 0.43,
+          "relief_gain": 0.77
         },
         {
           "parts": [
@@ -347,7 +357,8 @@
           "substrate": "exposed_steel",
           "oxide": "iron_oxide",
           "wear": 0.75,
-          "paint_loss_um": 26
+          "paint_loss_um": 26,
+          "scuff_strength": 0.66
         }
       ],
       "evidence": {
@@ -361,7 +372,8 @@
           "Blue inscription DN350",
           "Blue inscription 6",
           "Continuous curved painted underline"
-        ]
+        ],
+        "finish_detail_basis": "Cylinder axis measured in canonical Blender coordinates. Anisotropy and scuff strength are appearance estimates."
       }
     },
     "25": {
@@ -420,7 +432,8 @@
           "substrate": "exposed_steel",
           "oxide": "iron_oxide",
           "wear": 0.94,
-          "paint_loss_um": 26
+          "paint_loss_um": 26,
+          "scuff_strength": 0.77
         },
         {
           "parts": [
@@ -429,7 +442,15 @@
           "material": "Observed blue paint, chrome, steel and bronze PBR atlas",
           "package": "machined_steel",
           "parent_roughness": 0.18,
-          "relief_gain": 0.53
+          "relief_gain": 0.32,
+          "machining": {
+            "axis": [
+              0,
+              0,
+              1
+            ],
+            "anisotropy": 0.34
+          }
         },
         {
           "parts": [
@@ -515,7 +536,8 @@
           "material": "Observed blue paint, chrome, steel and bronze PBR atlas",
           "package": "black_rubber",
           "keep_source_normal": true,
-          "relief_gain": 0.64
+          "relief_gain": 0.64,
+          "source_roughness_mix": 0.34
         }
       ],
       "evidence": {
@@ -525,7 +547,8 @@
         ],
         "basis": "source photograph, authored GLB node names and material slots, with atlas cells audited; geometry unchanged",
         "source_authoring_sha256": "8d7b77992918bd5e792dda47d2ad5d6fbefe2a0018e53630914d073459d3658a",
-        "protected_named_parts": []
+        "protected_named_parts": [],
+        "finish_detail_basis": "Cylinder axis measured in canonical Blender coordinates. Anisotropy and scuff strength are appearance estimates."
       }
     },
     "33": {
@@ -541,7 +564,8 @@
           "oxide": "iron_oxide",
           "wear": 0.84,
           "preserve_print": "white_on_red",
-          "paint_loss_um": 23
+          "paint_loss_um": 23,
+          "scuff_strength": 0.81
         },
         {
           "parts": [
@@ -554,7 +578,8 @@
           "substrate": "exposed_steel",
           "oxide": "iron_oxide",
           "wear": 0.75,
-          "paint_loss_um": 23
+          "paint_loss_um": 23,
+          "scuff_strength": 0.64
         },
         {
           "parts": [
@@ -569,7 +594,8 @@
           ],
           "material": "Black polypropylene base and nozzle, PBR dielectric",
           "package": "black_plastic",
-          "relief_gain": 0.75
+          "relief_gain": 0.59,
+          "source_roughness_mix": 0.52
         },
         {
           "parts": [
@@ -615,7 +641,8 @@
           "package": "black_rubber",
           "preserve_print": "white_on_black",
           "keep_source_normal": true,
-          "relief_gain": 0.63
+          "relief_gain": 0.63,
+          "source_roughness_mix": 0.57
         }
       ],
       "evidence": {
@@ -625,7 +652,8 @@
         ],
         "basis": "source photograph, authored GLB node names and material slots, with atlas cells audited; geometry unchanged",
         "source_authoring_sha256": "f7f712ca13d6d473fa9f9d874b402e2ba3b0bffee478129b083ec615e7b1d96d",
-        "protected_named_parts": []
+        "protected_named_parts": [],
+        "finish_detail_basis": "Source roughness texture preserves the hose and molded polymer response. Coating scuff strength is estimated."
       }
     }
   },

@@ -64,7 +64,31 @@ def package_fields(tree, coordinate, spec, seed, tag):
     return {'colour': colour, 'rough': roughness, 'height': height, 'wear': wear}
 
 
-def response(tree, tag, fields, spec, size_m, source_normal, controls, *, region=None, film_loss=None):
+def machining_highlights(tree, principled, profile):
+    """Align conductive reflection with the part. Taper to isotropic on end caps."""
+    transform = tree.nodes.new('ShaderNodeVectorTransform')
+    transform.name = 'Component machining axis'
+    transform.vector_type, transform.convert_from, transform.convert_to = 'VECTOR', 'OBJECT', 'WORLD'
+    transform.inputs['Vector'].default_value = profile['axis']
+    axis = tree.nodes.new('ShaderNodeVectorMath')
+    axis.operation = 'NORMALIZE'
+    assign(tree, transform.outputs[0], axis.inputs[0])
+    geometry = tree.nodes.new('ShaderNodeNewGeometry')
+    tangent = tree.nodes.new('ShaderNodeVectorMath')
+    tangent.name = 'Component circumferential tangent'
+    tangent.operation = 'CROSS_PRODUCT'
+    assign(tree, axis.outputs[0], tangent.inputs[0])
+    assign(tree, geometry.outputs['Normal'], tangent.inputs[1])
+    length = tree.nodes.new('ShaderNodeVectorMath')
+    length.operation = 'LENGTH'
+    assign(tree, tangent.outputs[0], length.inputs[0])
+    taper = ramp(tree, length.outputs['Value'], .12, 3.)
+    assign(tree, mul(tree, taper, profile['anisotropy']), principled.inputs['Anisotropic'])
+    assign(tree, tangent.outputs[0], principled.inputs['Tangent'])
+
+
+def response(tree, tag, fields, spec, size_m, source_normal, controls, *, region=None, film_loss=None,
+             scuff=None):
     region = region or {}
     name = f'Component PBR {tag}'
     principled = tree.nodes.new('ShaderNodeBsdfPrincipled')
@@ -89,9 +113,13 @@ def response(tree, tag, fields, spec, size_m, source_normal, controls, *, region
     assign(tree, normal, principled.inputs['Normal'])
     principled.inputs['IOR'].default_value = {'paint': 1.49, 'rubber': 1.48, 'plastic': 1.47, 'oxide': 1.48}.get(spec['role'], 1.5)
     if spec['role'] == 'paint':
-        principled.inputs['Coat Weight'].default_value = .055
+        coat = .055 if scuff is None else mul(tree, .055, math_node(tree, 'SUBTRACT', 1., mul(tree, scuff, .68)))
+        assign(tree, coat, principled.inputs['Coat Weight'])
         assign(tree, bounded(tree, add(tree, roughness, .04), .22, .8), principled.inputs['Coat Roughness'])
         assign(tree, normal, principled.inputs['Coat Normal'])
+    if profile := region.get('machining'):
+        if profile['anisotropy'] > 0.:
+            machining_highlights(tree, principled, profile)
     return principled.outputs[0], metallic, normal
 
 
@@ -142,11 +170,20 @@ def finish_surface(material, shader, finish, strength):
         ao.samples = 4
         ao.inputs['Distance'].default_value = .008 / size_m
         cavity = math_node(tree, 'SUBTRACT', 1., ao.outputs['AO'])
-    film = None
+    film, scuff = None, None
     if 'substrate' in region:
         scratches = surface_noise(tree, point, 34., 2.)
-        paint = mul(tree, ramp(tree, pack['wear'], .38, 2.3), ramp(tree, scratches, .28, 2.3))
+        distribution = ramp(tree, scratches, .28, 2.3)
+        paint = mul(tree, ramp(tree, pack['wear'], .38, 2.3), distribution)
         paint = bounded(tree, mul(tree, paint, wear * controls.get('scratch_gain', 1.)), 0., .94)
+        if scuff_strength := region.get('scuff_strength', 0.):
+            # Shallow handling marks change the surviving coating's response.
+            # The existing chip threshold still controls full paint loss.
+            trace = mul(tree, ramp(tree, pack['wear'], .025, 3.1), distribution)
+            coating = math_node(tree, 'SUBTRACT', 1., paint)
+            scuff = mul(tree, mul(tree, trace, coating), scuff_strength)
+            scuff.node.name = 'Component shallow paint scuff'
+            pack['rough'] = add(tree, pack['rough'], mul(tree, scuff, .26))
         if region.get('paint_loss_um', 0.):
             film = (math_node(tree, 'SUBTRACT', 1., paint), region['paint_loss_um'])
     if spec['role'] in ('paint', 'rubber', 'plastic'):
@@ -154,8 +191,12 @@ def finish_surface(material, shader, finish, strength):
         # than the fine donor grain. Only specular roughness is varied here.
         change = mul(tree, math_node(tree, 'SUBTRACT', coarse, .5), .15)
         pack['rough'] = add(tree, pack['rough'], change)
+    if source_mix := region.get('source_roughness_mix', 0.):
+        authored = bounded(tree, original(shader.inputs['Roughness']), .39, .86)
+        pack['rough'] = add(tree, mul(tree, pack['rough'], 1. - source_mix), mul(tree, authored, source_mix))
+        pack['rough'].node.name = 'Component source polymer roughness blend'
     surface, metallic, normal = response(tree, spec['role'], pack, spec, size_m, source_normal, controls,
-                                         region=region, film_loss=film)
+                                         region=region, film_loss=film, scuff=scuff)
     if 'substrate' in region:
         underneath = packs[region['substrate']]
         under_pack = package_fields(tree, point, underneath, offset, 'substrate')

@@ -79,6 +79,34 @@ class ComponentPbrTests(unittest.TestCase):
         self.assertEqual(mask[24, 55], 0)
         self.assertEqual(mask[60, 100], 0)
 
+    def test_surface_details_stay_on_their_audited_material_roles(self):
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            payload = self.fixture(base)
+            paint, seal = payload['component_regions']
+            rod = {'parts': ['rod'], 'material': 'metal and paint atlas', 'package': 'steel',
+                   'machining': {'axis': [0, 0, 1], 'anisotropy': .34}}
+            payload['component_regions'].append(rod)
+            paint['scuff_strength'] = .7
+            seal['source_roughness_mix'] = .5
+            self.assertEqual(len(validate(payload, base)['component_regions']), 3)
+            for region, field, invalid, message in (
+                (seal, 'scuff_strength', .7, 'audited paint stack'),
+                (paint, 'source_roughness_mix', .5, 'opaque polymers'),
+                (paint, 'machining', rod['machining'], 'requires a metal part'),
+                (rod, 'machining', {'axis': [0, 0, 0], 'anisotropy': .34}, 'unit vector'),
+                (rod, 'machining', {'axis': [0, 0, 1], 'anisotropy': .8}, 'anisotropy'),
+            ):
+                with self.subTest(field=field, invalid=invalid):
+                    original = region.get(field)
+                    region[field] = invalid
+                    with self.assertRaisesRegex(ValueError, message):
+                        validate(payload, base)
+                    if original is None:
+                        region.pop(field)
+                    else:
+                        region[field] = original
+
 
 if __name__ == '__main__':
     unittest.main()

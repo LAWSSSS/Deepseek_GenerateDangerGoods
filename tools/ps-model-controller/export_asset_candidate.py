@@ -130,6 +130,7 @@ def main():
     reopened_state=material_state(SimpleNamespace(data=SimpleNamespace(materials=list(materials.values()))))
     reference_checks={}
     component_checks={}
+    component_details={}
     if is_component:
         states = {row['component_response']['region_id']: row['component_response']
                   for row in reopened_state['materials'] if 'component_response' in row}
@@ -142,6 +143,11 @@ def main():
                 packed = {hashlib.sha256(bytes(node.image.packed_file.data)).hexdigest()
                           for material in materials.values() if material.get('component_pbr_region') == region['id']
                           for node in material.node_tree.nodes if node.get('reference_sha256') and node.image.packed_file}
+                requested_details = {key: True for key in ('scuff_strength', 'source_roughness_mix') if region.get(key)}
+                if region.get('machining', {}).get('anisotropy'):
+                    requested_details['machining'] = True
+                if requested_details:
+                    component_details[region['slot']] = state.get('detail_connections') == requested_details
                 component_checks[region['slot']] = bool(
                     state.get('connected') and expected == packed
                     and all((1. if row['role'] in ('steel', 'nonferrous') else 0.) == row['Metallic']['value']
@@ -149,6 +155,8 @@ def main():
         asset = next(obj for obj in objects if not any(m and m.name == 'neutral receiver' for m in obj.data.materials))
         if not component_checks or not all(component_checks.values()) or mesh_fingerprint(asset.data) != geometry_before:
             raise ValueError('reopened candidate lost a material channel, correct metalness or source geometry')
+        if not all(component_details.values()):
+            raise ValueError('reopened candidate lost a component surface detail connection')
     elif finish.get('reference'):
         states={re.sub(r'\.\d{3}$','',row['material']):row for row in reopened_state['materials']}
         for name,entry in request['generated_finish']['regions']['materials'].items():
@@ -169,7 +177,8 @@ def main():
         'reopened_material_readback_path':'candidate-reopened-materials.json',
         'reopened_material_state_sha256':reopened_state['state_sha256'],
         'reference_response_connected':reference_checks,
-        **({'component_response_checks': component_checks, 'geometry_uv_sha256': geometry_before} if is_component else {}),
+        **({'component_response_checks': component_checks, 'component_detail_checks': component_details,
+            'geometry_uv_sha256': geometry_before} if is_component else {}),
         'reference_response_scope':'actual_reopened_candidate_output_connections_not_visual_quality',
         'protected_material_graphs_equal':protected,
         'changed_source_inputs':{name:[key for key in baseline.get(name,{}) if baseline[name][key]!=actual.get(name,{}).get(key)] for name in actual if name in baseline}},indent=2),encoding='utf8')

@@ -127,15 +127,21 @@ def _component_response(material, tree, source):
     for node in tree.nodes:
         if node.type != 'BSDF_PRINCIPLED' or not (role := node.get('component_pbr_role')):
             continue
+        sockets = ['Base Color', 'Metallic', 'Roughness', 'Normal']
+        sockets.extend(key for key in ('Coat Weight', 'Anisotropic', 'Tangent') if node.inputs[key].is_linked)
         branches.append({'node': node.name, 'role': role, 'connected_to_surface': node.as_pointer() in reachable,
-                         **{key: socket_state(node.inputs[key], 3)
-                            for key in ('Base Color', 'Metallic', 'Roughness', 'Normal')}})
+                         **{key: socket_state(node.inputs[key], 3) for key in sockets}})
     from .component_pbr import VERSION
     images = {node.name: {'image': node.image.name, 'color_space': node.image.colorspace_settings.name,
                           'sha256': node['reference_sha256'], 'connected_to_surface': node.as_pointer() in reachable}
               for node in tree.nodes if node.type == 'TEX_IMAGE' and node.image and 'reference_sha256' in node}
+    details = {field: node.as_pointer() in reachable for field, name in (
+        ('scuff_strength', 'Component shallow paint scuff'),
+        ('machining', 'Component circumferential tangent'),
+        ('source_roughness_mix', 'Component source polymer roughness blend'),
+    ) if (node := tree.nodes.get(name)) is not None}
     return {'version': VERSION, 'region_id': material['component_pbr_region'], 'branches': branches,
-            'textures': images, 'connected': bool(branches and images
+            'textures': images, 'detail_connections': details, 'connected': bool(branches and images
                                              and all(row['connected_to_surface'] for row in branches)
                                              and all(row['connected_to_surface'] for row in images.values()))}
 
