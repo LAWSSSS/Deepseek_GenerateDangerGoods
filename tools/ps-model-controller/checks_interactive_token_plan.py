@@ -63,6 +63,20 @@ class InteractiveTokenPlanTests(unittest.IsolatedAsyncioTestCase):
     def ledger(self):
         return json.loads((self.output/'usage.json').read_text(encoding='utf8'))
 
+    async def test_cross_drive_reference_report_does_not_repeat_paid_request(self):
+        sent = []
+        def handler(request):
+            sent.append(request)
+            return httpx.Response(200, json=response())
+        with patch.object(tool.os.path, 'relpath', side_effect=ValueError('different drives')):
+            result = await self.invoke(handler)
+        self.assertEqual(result['status'], 'completed')
+        self.assertEqual(len(sent), 1)
+        self.assertIn(self.image.resolve().as_uri(), (self.output/'index.html').read_text('utf8'))
+        cached = await self.invoke(lambda request: self.fail('completed diagnosis must be reused'))
+        self.assertTrue(cached['cache_hit'])
+        self.assertEqual(cached['new_api_requests'], 0)
+
     async def test_one_explicit_image_json_success_and_unknown_credit_cost(self):
         sent = []
         def handler(request):

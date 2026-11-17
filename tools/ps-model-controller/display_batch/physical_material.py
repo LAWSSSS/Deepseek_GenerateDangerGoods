@@ -48,7 +48,7 @@ def metal_family(name, classes, authored):
     return 'unknown'
 
 
-def prepare_finish(asset_or_mesh, cache, pack, size_m, profile=None):
+def prepare_finish(asset_or_mesh, cache, pack, size_m, profile=None, reference=None):
     """Return the worker payload; changing the background cannot change its hash.
 
     ``asset_or_mesh`` should be the prepared asset dict (mesh, mesh_hash,
@@ -92,9 +92,18 @@ def prepare_finish(asset_or_mesh, cache, pack, size_m, profile=None):
         entry['skip_reason'] = ('protected_source_material' if protected else
                                 'unknown_source_region' if not entry['eligible'] else None)
         materials[name] = entry
-    if profile:
+    if profile and reference is None:
         from .source_detail import prepare_source_detail
         materials=prepare_source_detail(asset,materials,Path(cache)/'source-detail-variants',profile)
+    if reference is not None:
+        from .reference_material import identity_colours, validate_reference
+        from .reference_profiles import apply_reference_regions
+        reference = validate_reference(reference)
+        if reference.get('source_mesh_hash') != actual_hash:
+            raise ValueError('reference material bound to another source mesh')
+        materials, reference_regions = apply_reference_regions(asset, materials, Path(cache) / 'reference-regions')
+        reference['source_region_audit'] = reference_regions
+        materials = identity_colours(asset, materials)
     regions = {**raw, 'materials': materials, 'signature': signature(VERSION, materials)}
     audit = [{'material': name, 'eligible': row['eligible'], 'coverage': row.get('coverage'),
               'metal_family': row['metal_family'], 'basis': row.get('basis'),
@@ -104,13 +113,14 @@ def prepare_finish(asset_or_mesh, cache, pack, size_m, profile=None):
         recipe.update(detail_mode='evidence_layers_v2',oxide_threshold=.13,
                       scratch_threshold=.025,oxide_max=.45,abrasion_max=.48,
                       oxide_period_m=.065,scratch_period_m=.045,dust_period_m=.055)
-    identity = signature(VERSION, actual_hash, size, recipe, regions, profile,
+    identity = signature(VERSION, actual_hash, size, recipe, regions, profile, reference,
                          {name: entry['sha256'] for name, entry in maps.items()},
                          file_hash(__file__), file_hash(Path(__file__).with_name('physical_layers.py')))
     return {'version': VERSION, 'signature': identity, 'source_mesh_hash': actual_hash,
             'manifest': source.get('manifest'), 'maps': maps, 'regions': regions,
             'size_m': size, 'recipe': recipe, 'layer_stage': 'full',
             'asset_profile': profile,
+            **({'reference': reference} if reference is not None else {}),
             'material_audit': audit, 'geometry_modified': False,
             'basis': 'source_material_and_metric_estimated_wear; no_background_material_fit'}
 

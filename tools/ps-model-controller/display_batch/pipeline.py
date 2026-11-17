@@ -33,6 +33,7 @@ from .atmosphere import Atmospheres
 from .costs import cumulative, estimate, tariff, label as cost_label
 from .policy import asset_id, resize_candidate
 from .effects import parameters as effect_parameters, render_identity
+from .reference_material import ReferenceInputChanged
 
 COMPOSE_VERSION='scrap-gray-pile-v6-window'
 
@@ -189,6 +190,7 @@ class Pipeline:
         self.config=config;self.out=resolve(config.output);self.out.mkdir(parents=True,exist_ok=True)
         self.cache=resolve(config.cache);self.cache.mkdir(parents=True,exist_ok=True)
         self.surface_pack = None
+        self.reference_snapshot = None
         if config.effects and config.effects.surface_finish in ('generated_pbr', 'physical_layers'):
             from .generated_material import load_pack
             self.surface_pack = load_pack(resolve(config.effects.surface_finish_manifest))
@@ -208,6 +210,23 @@ class Pipeline:
         self.structure_locks={}
         review_path=self.out/'model-review.json'
         if review_path.is_file():self.model_review=json.loads(review_path.read_text(encoding='utf8'))
+
+    def prepare_reference_inputs(self, jobs):
+        manifest = self.config.effects.reference_material_manifest if self.config.effects else None
+        if manifest is None:
+            return None
+        from .reference_material import freeze_library
+        selected = {job['mesh_hash']:job['asset_id'] for job in jobs}
+        if any(selected[job['mesh_hash']] != job['asset_id'] for job in jobs):
+            raise ValueError('selected asset IDs share an ambiguous reference mesh')
+        self.reference_snapshot = freeze_library(resolve(manifest), selected)
+        return self.reference_snapshot
+
+    def assert_reference_inputs(self):
+        snapshot = getattr(self, 'reference_snapshot', None)
+        if snapshot is not None:
+            from .reference_material import verify_snapshot
+            verify_snapshot(snapshot)
 
     async def prepare_asset(self,k):
         async with self.prepare_lock:
@@ -318,7 +337,12 @@ class Pipeline:
                     if size is None:
                         lo,hi=asset['semantic']['major_mm'];size=math.sqrt(lo*hi)
                     profile=load_profile(asset['mesh_hash']) if params.get('asset_refinement') == 'component_v1' else None
-                    extras['generated_finish']=await asyncio.to_thread(prepare_finish,asset,self.cache,pack,size/1000,profile=profile)
+                    reference = None
+                    if params.get('reference_material_manifest'):
+                        from .reference_material import frozen_reference
+                        reference = await asyncio.to_thread(frozen_reference,getattr(self,'reference_snapshot',None),
+                                                            asset['mesh_hash'],resolve(params['reference_material_manifest']))
+                    extras['generated_finish']=await asyncio.to_thread(prepare_finish,asset,self.cache,pack,size/1000,profile=profile,reference=reference)
                     regions=extras['generated_finish']['regions']
                 else:
                     regions = await asyncio.to_thread(finish_regions, asset, pack, self.cache)
@@ -344,6 +368,8 @@ class Pipeline:
             resolution=min(2048,64*math.ceil(2*resolution/64))
         folder,meta,hit=await self.renders.get(asset,render_candidate,params,render_environment,scene['size'],resolution,
                                              appearance=style,shadow_reference=shadow_reference,**extras)
+        if getattr(self,'reference_snapshot',None) is not None:
+            await asyncio.to_thread(self.assert_reference_inputs)
         if params.get('effects_enabled'):
             if params.get('realism_version') == 'realism-v1':
                 from .realism_light import receiver_calibration
@@ -631,6 +657,8 @@ class Pipeline:
         if payload.get('background_hash'):result['background_hash']=payload['background_hash']
         best=None;draft=None
         try:
+            if getattr(self,'reference_snapshot',None) is not None:
+                await asyncio.to_thread(self.assert_reference_inputs)
             held=getattr(self,'model_review',{}).get(payload['asset_id'])
             if held and held.get('independent_confirmation') and held.get('mesh_hash')==payload.get('mesh_hash'):
                 result.update(reason='asset_structure_requires_review',model_review=held);return result
@@ -733,6 +761,8 @@ class Pipeline:
                         seen.add(signature(params))
                         render_options['sampled']=sampled
                     rkey=render_identity(params,self.render_style)
+                    if getattr(self,'reference_snapshot',None) is not None:
+                        await asyncio.to_thread(self.assert_reference_inputs)
                     if rkey not in rendered_parts:
                         before=time.monotonic()
                         rendered=await self.render(asset,scene,candidate,params,final_resolution(candidate),**render_options)
@@ -892,13 +922,15 @@ class Pipeline:
                         reason='repeated_parameters' if actions and all(a['disposition']=='repeated_parameters' for a in actions) else 'no_effective_action'
                     break
                 params=updated;iteration+=1
+            if getattr(self,'reference_snapshot',None) is not None:
+                await asyncio.to_thread(self.assert_reference_inputs)
             if best:
                 self.finish_image(self.out,ident,result,best)
             elif self.config.contact_mode=='strict':
                 result.update(status='failed',evidence_status='fail')
             result['reason']=reason
             return result
-        except (ProviderUnavailable,RenderUnavailable):
+        except (ProviderUnavailable,RenderUnavailable,ReferenceInputChanged):
             raise
         except Exception as error:
             result.update(status='failed',reason=f'{type(error).__name__}: {str(error)[:260]}')
@@ -943,6 +975,12 @@ class Pipeline:
         source_evidence=source/'dimension-reference-signature.json'
         if source_evidence.is_file() and json.loads(source_evidence.read_text(encoding='utf8'))!=self.dimension_reference_signature():
             raise ValueError('pilot dimension/reference evidence has changed')
+        if getattr(self,'reference_snapshot',None) is not None:
+            from .reference_material import compatible_snapshot
+            snapshot_path=source/'reference-material-snapshot.json'
+            if not snapshot_path.is_file() or not compatible_snapshot(
+                    self.reference_snapshot,json.loads(snapshot_path.read_text(encoding='utf8'))):
+                raise ValueError('pilot reference materials have changed')
         if source_vision['signature']!=signature(self.vision.endpoint.model_dump()) or signature(source_manifest)!=signature(implementation) or {
             k:v for k,v in source_config.items() if k not in exclude
         }!=self.config.model_dump(exclude=exclude):
@@ -975,6 +1013,7 @@ class Pipeline:
     async def run(self,*,reuse_from=None):
         started=time.monotonic();state='complete';error=None
         jobs=make_jobs(self.config,self.catalog)
+        reference_snapshot=await asyncio.to_thread(self.prepare_reference_inputs,jobs)
         implementation=implementation_manifest()
         inputs = (VERSION,self.config.model_dump(exclude={'offline'}),jobs,
                                     RENDER_VERSION,COMPOSE_VERSION,implementation,self.vision.endpoint.model_dump(),
@@ -982,6 +1021,8 @@ class Pipeline:
                                     self.dimension_reference_signature())
         if self.surface_pack is not None:
             inputs = (*inputs, self.surface_pack['signature'])
+        if reference_snapshot is not None:
+            inputs = (*inputs, ('reference-material-snapshot', reference_snapshot['signature']))
         config_signature=signature(*inputs)
         with batch_lock(self.out):
             self.store.initialize(config_signature,jobs);self.store.recover()
@@ -991,6 +1032,8 @@ class Pipeline:
             atomic_json(self.out/'implementation.json',implementation)
             atomic_json(self.out/'vision-signature.json',{'signature':signature(self.vision.endpoint.model_dump())})
             atomic_json(self.out/'dimension-reference-signature.json',self.dimension_reference_signature())
+            if reference_snapshot is not None:
+                atomic_json(self.out/'reference-material-snapshot.json',reference_snapshot)
             try:
                 if reuse_from:self.reuse_completed(reuse_from,implementation)
                 if not self.config.offline and self.store.counts().get('queued'):
@@ -1008,8 +1051,10 @@ class Pipeline:
                         if not job:return
                         print(json.dumps({'event':'start','job':job['id'],'asset':job['payload']['asset_id']},ensure_ascii=False),flush=True)
                         try:result=await self.job(job)
-                        except (ProviderUnavailable,RenderUnavailable) as failure:
-                            self.store.pause(job['id']);state='paused_provider' if isinstance(failure,ProviderUnavailable) else 'paused_renderer'
+                        except (ProviderUnavailable,RenderUnavailable,ReferenceInputChanged) as failure:
+                            self.store.pause(job['id'])
+                            state=('paused_inputs' if isinstance(failure,ReferenceInputChanged) else
+                                   'paused_provider' if isinstance(failure,ProviderUnavailable) else 'paused_renderer')
                             error=str(failure);stop.set();return
                         self.store.finish(job['id'],result['status'],result)
                         progress=write_summary(self.out,self.store,self.vision.usage(),{'id':self.run_id,'state':'running'})

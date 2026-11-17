@@ -127,6 +127,8 @@ def part_keys(request, device, dependencies, *, include_detail=True):
         if finish.get('version')=='physical-layers-v1':
             surface=(*surface,signature(*(file_hash(HERE/'display_batch'/name)
                                          for name in ('physical_layers.py','physical_material.py'))))
+            if finish.get('reference') is not None:
+                surface=(*surface,finish['reference'],file_hash(HERE/'display_batch/reference_shader.py'))
         reference = environment.get('nearby_weathered_steel', {})
         if reference.get('applied'):
             surface=(*surface,reference['pigment_linear'])

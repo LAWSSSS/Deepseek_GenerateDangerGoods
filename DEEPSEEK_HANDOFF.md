@@ -1,5 +1,7 @@
 # DeepSeek Harness 项目交接
 
+**2026-11-17 最新：六视图参考材质仍为模型候选。** [完整交付](outputs/六视图参考重贴-14件-20261117/delivery.html)、[维护](docs/reference-material-workflow.md)、[实际记录](docs/history/DISPLAY_REFERENCE_MATERIAL.md)。14 件输出 56 张完整模型图，9 件有材质修改，13/16/17/18/36 五件保护未重贴；蓝缸对应25，非31。44 个源模型及批量默认不变。01/33 千问定向复核仍认为磨损层次不足，未宣称写实通过；模型确认前不进入场景。新 `effects.reference_material_manifest` 显式绑定 `physical_layers`，材质库及地图哈希参与续跑校验；输入变化暂停，不自动混用旧新版本。本轮内置生图3次、交互千问1次7614token，金额未知。桌面ZIP仅根目录70张PNG。
+
 **2026-11-17 模型检查点：暂不进入场景测试。** [四件资产与可测量执行记录](docs/history/DISPLAY_ASSET_CHECKPOINT.md)；[维护与入口](docs/model-realism-workflow.md)。新增 v3 摄影诊断、实际 Photoshop/Blender 读回、受限材质／照明操作及部件档案。五件共 36 张完整模型图已交付，四件写实尚未达标；13 几乎不变却被视觉模型判断退化，比较结果单列不可信。44 源模型不变、生产默认不变。当前对话诊断共 12 请求／131,004 token，金额未知。用户确认模型前不得启动 12 场景小样，Token Plan 仍不用于无人值守批处理。
 
 **本轮已实现证据流程。** 使用 `workflow=evidence_v1` 开启凹处选位和结构化模型执行，独立 Photoshop 入口读取程序导出的合成清单。实景留出 12 项在车宽对应不足处停止；实际 Photoshop 三操作夹具和 qwen 结构化协议验证通过。参数库收录 273 条记录，批准规则为 0。完整运行方式、失败原因和用量见 [结构化执行记录](docs/history/DISPLAY_EVIDENCE_WORKFLOW.md)。

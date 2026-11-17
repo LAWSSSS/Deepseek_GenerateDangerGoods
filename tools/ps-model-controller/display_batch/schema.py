@@ -36,10 +36,13 @@ class EffectSettings(Strict):
     surface_finish: Literal['existing', 'generated_pbr', 'physical_layers'] = 'existing'
     surface_finish_manifest: str | None = Field(default=None, min_length=1)
     asset_refinement: Literal['existing', 'component_v1'] = 'existing'
+    reference_material_manifest: str | None = Field(default=None, min_length=1)
     render_controls: dict[str, float | str] = Field(default_factory=dict)
 
     @model_validator(mode='after')
     def preserve_limits(self):
+        if self.reference_material_manifest is not None and self.surface_finish != 'physical_layers':
+            raise ValueError('reference materials require physical_layers')
         from scrap_composite.render_controls import validated
         self.render_controls = validated(self.render_controls)
         if (self.asset_refinement != 'existing' or self.render_controls) and self.surface_finish != 'physical_layers':

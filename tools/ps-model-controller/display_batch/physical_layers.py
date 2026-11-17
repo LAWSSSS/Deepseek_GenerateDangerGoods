@@ -36,6 +36,10 @@ def clone_source(tree, shader):
 
 
 def finish_surface(material, shader, finish, environment, strength):
+    if finish.get('reference') is not None:
+        # A reference rebuild is exclusive: never append it over historic wear.
+        from .reference_shader import finish_surface as reference_surface
+        return reference_surface(material, shader, finish, strength)
     if finish.get('version') != VERSION:
         raise ValueError('unsupported physical layers version')
     if not math.isfinite(float(strength)) or not 0 <= float(strength) <= .5:

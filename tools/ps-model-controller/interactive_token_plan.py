@@ -133,7 +133,12 @@ def write_report(out, manifest, result):
           '<p>模型 '+html.escape(result['model'])+'；请求 '+str(result['new_api_requests'])+
           ' 次，已报告 '+str(result['new_reported_tokens'])+' token。Credits 与现金费用未由接口返回，以套餐控制台为准。</p>']
     for i,item in enumerate(manifest['images'],1):
-        link=html.escape(Path(os.path.relpath(item['path'],out)).as_posix(),quote=True)
+        path=Path(item['path']).resolve()
+        try:
+            uri=Path(os.path.relpath(path,out)).as_posix()
+        except ValueError:  # Reference files can reside on a different Windows drive.
+            uri=path.as_uri()
+        link=html.escape(uri,quote=True)
         body.append('<h2>完整画面 '+str(i)+'</h2><a href="'+link+'"><img src="'+link+'" alt="原尺寸完整画面"></a>')
         for finding in diagnosis.get('findings',[]):
             if finding.get('image',1)==i:

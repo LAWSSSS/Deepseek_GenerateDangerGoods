@@ -26,6 +26,8 @@ def parameters(settings):
         from scrap_composite.render_controls import validated, VERSION as CONTROL_VERSION
         result.update(asset_refinement=settings.asset_refinement, render_controls_version=CONTROL_VERSION,
                       **validated(settings.render_controls, require_all=True))
+    if settings.reference_material_manifest is not None:
+        result['reference_material_manifest'] = settings.reference_material_manifest
     return result
 
 
@@ -110,4 +112,11 @@ def render_identity(params, style):
     fields.extend(('render_detail','rust_spots','rust_pattern','rust_relief','rust_relief_strength'))
     if params.get('surface_finish') in ('generated_pbr', 'physical_layers'):
         fields.extend(('surface_finish', 'surface_finish_manifest'))
-    return tuple(params.get(k) for k in fields)
+    if params.get('reference_material_manifest'):
+        fields.append('reference_material_manifest')
+    result = tuple(params.get(k) for k in fields)
+    if params.get('asset_refinement') == 'component_v1':
+        from scrap_composite.render_controls import RENDER_CONTROLS, VERSION as CONTROL_VERSION, validated
+        controls = validated({key:params[key] for key in RENDER_CONTROLS if key in params}, require_all=True)
+        result += ('component_v1', CONTROL_VERSION, tuple(sorted(controls.items())))
+    return result

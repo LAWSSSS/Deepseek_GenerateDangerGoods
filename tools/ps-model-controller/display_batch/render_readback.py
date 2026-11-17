@@ -80,6 +80,47 @@ def _factor_domain(tree, layer_name, images):
             'basis':'actual_shader_classification_socket_values; UV_texel_fraction_not_surface_area'}
 
 
+def _reference_response(tree, source):
+    versions=sorted({str(node.get('reference_material_version')) for node in source
+                     if node.get('reference_material_version')})
+    if not versions:
+        return None
+    output=next((node for node in tree.nodes if node.type=='OUTPUT_MATERIAL' and node.is_active_output),None)
+    reachable=set()
+    def visit(node):
+        pointer=node.as_pointer()
+        if pointer in reachable:return
+        reachable.add(pointer)
+        for socket in node.inputs:
+            for link in socket.links:visit(link.from_node)
+    if output is not None and output.inputs['Surface'].is_linked:
+        visit(output.inputs['Surface'].links[0].from_node)
+    responses=[];missing=[]
+    for role,name in (('known_body','Reference body response'),('scratched_body','Reference scratched response')):
+        node=tree.nodes.get(name)
+        if node is None or node.type!='BSDF_PRINCIPLED':
+            missing.append(name);continue
+        connected=node.as_pointer() in reachable
+        if not connected:missing.append(name+':disconnected')
+        responses.append({'role':role,'node':name,'connected_to_surface':connected,
+                          **{key:socket_state(node.inputs[key],4)
+                             for key in ('Base Color','Metallic','Roughness','Normal')}})
+    return {'version':'reference-response-readback-v1','shader_versions':versions,
+            'status':'measured' if not missing else 'incomplete','missing_or_disconnected':missing,
+            'basis':'actual_connected_Blender_Principled_sockets',
+            'source_brdf_role':'retained_original_source_shader_not_visible_reference_body',
+            'scope':'body_and_scratch_responses_before_oxide_and_dust; not_final_pixel_BRDF',
+            'responses':responses}
+
+
+def _compact_socket(record, depth=2):
+    """Keep actual constants and field identities; never invent a scalar BRDF."""
+    result={key:value for key,value in record.items() if key!='inputs'}
+    if depth>0 and 'inputs' in record:
+        result['inputs']=[_compact_socket(item,depth-1) for item in record['inputs']]
+    return result
+
+
 def material_state(obj):
     rows=[];domains={key:False for key in ('oxide_gain','scratch_gain','roughness_shift','relief_gain')}
     images={}
@@ -92,11 +133,16 @@ def material_state(obj):
         ferrous=_factor_domain(tree,'Physical bounded oxidation',images) if applied else None
         targets={key:bool(known and known['nonzero_fraction']>0) for key in domains}
         targets['oxide_gain']=bool(ferrous and ferrous['nonzero_fraction']>0)
+        reference_response=_reference_response(tree,source)
+        if reference_response and reference_response['status']!='measured':
+            targets={key:False for key in targets}
         for key,value in targets.items():domains[key] |= value
         row={'material':material.name,'physical_layers_applied':applied,'known_domain':known,'oxidizable_domain':ferrous,
              'control_domains':targets,'source_brdf':[{ 'node':node.name,
                  **{key:socket_state(node.inputs[key],1) for key in ('Base Color','Metallic','Roughness','Normal')}} for node in source],
              'layer_factors':{},'response_brdf':[],'relief':[]}
+        if reference_response is not None:
+            row['reference_response']=reference_response
         for name in ('Physical bounded oxidation','Physical bounded abrasion','Physical one deposition layer','Physical known-region roughness correction'):
             node=tree.nodes.get(name)
             if node:row['layer_factors'][name]=socket_state(node.inputs[0],4)
@@ -156,6 +202,14 @@ def compact_readback(record):
                                   {'kind':'field','node':node['Roughness']['node']}}
                              for node in row['response_brdf']]}
             for row in record['materials']]
+        for row,compact in zip(record['materials'],summary['materials']):
+            if 'reference_response' in row:
+                reference=row['reference_response']
+                compact['reference_response']={key:value for key,value in reference.items() if key!='responses'}
+                compact['reference_response']['responses']=[{
+                    **{key:node[key] for key in ('role','node','connected_to_surface')},
+                    **{key:_compact_socket(node[key]) for key in ('Base Color','Metallic','Roughness','Normal')}}
+                    for node in reference['responses']]
     else:
         summary.update(lights=record['lights'],world=record['world'])
     return summary

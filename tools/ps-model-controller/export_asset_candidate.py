@@ -4,11 +4,13 @@ import sys
 import hashlib
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import bpy
 
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from blender_display_worker import render_parts
+from display_batch.render_readback import material_state
 
 
 def source_inputs():
@@ -86,11 +88,33 @@ def main():
     if reopened!=counts:raise ValueError('candidate reopen geometry/material count mismatch')
     images=[image for image in bpy.data.images if image.source=='FILE']
     if any(not image.packed_file for image in images):raise ValueError('unpacked candidate dependency')
+    # The original Principled branch is deliberately retained. Its unchanged
+    # inputs cannot prove that the new response survived save/reopen: inspect
+    # the actual output-connected branch on the reopened candidate instead.
+    materials={m.name:m for obj in objects for m in obj.data.materials if m and m.name!='neutral receiver'}
+    reopened_state=material_state(SimpleNamespace(data=SimpleNamespace(materials=list(materials.values()))))
+    reference_checks={}
+    if request['generated_finish'].get('reference'):
+        states={re.sub(r'\.\d{3}$','',row['material']):row for row in reopened_state['materials']}
+        for name,entry in request['generated_finish']['regions']['materials'].items():
+            if not entry.get('eligible'):continue
+            row=states.get(name,{})
+            response=row.get('reference_response',{})
+            reference_checks[name]=bool(row.get('physical_layers_applied') and response.get('status')=='measured'
+                                       and all(r.get('connected_to_surface') for r in response.get('responses',[]))
+                                       and len(response.get('responses',[]))==2)
+        if not all(reference_checks.values()):raise ValueError('reopened candidate lost connected reference response')
+    (destination.parent/'candidate-reopened-materials.json').write_text(
+        json.dumps(reopened_state,ensure_ascii=False,indent=2),encoding='utf8')
     (destination.parent/'candidate-check.json').write_text(json.dumps({
         'status':'pass','path':str(destination),'reopened':True,'counts':counts,'packed_images':len(images),
         'blender':bpy.app.version_string,'render_calls':0,'source_mesh_hash':request['mesh_hash'],
         'material_signature':request['generated_finish']['signature'],'geometry_modified':False,
         'material_readback':compact_readback(baseline,actual),
+        'reopened_material_readback_path':'candidate-reopened-materials.json',
+        'reopened_material_state_sha256':reopened_state['state_sha256'],
+        'reference_response_connected':reference_checks,
+        'reference_response_scope':'actual_reopened_candidate_output_connections_not_visual_quality',
         'protected_material_graphs_equal':protected,
         'changed_source_inputs':{name:[key for key in baseline.get(name,{}) if baseline[name][key]!=actual.get(name,{}).get(key)] for name in actual if name in baseline}},indent=2),encoding='utf8')
 
