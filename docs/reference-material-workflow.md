@@ -30,6 +30,12 @@
 
 ## 检查与边界
 
+### 使用材质库做对照
+
+`build_blender_material_assets.py` 在 Blender 中将公开 PBR 贴图打包为可追加的材质资产。规格 JSON 为数组，每项包含 `name`、`provider`、`source_url` 以及 `channels` 下的 `base`、`roughness`、`metallic`、`normal`。将输出所在目录添加到 Blender 的 Asset Libraries。
+
+`prepare_library_material_trial.py --spec <json> --baseline-library <json> --output <new-dir>` 将库贴图适配到已有的物品分区。规格另需 `id`、`assets`、`scale_m`、`oxide_value_limit` 及 `channels.height`，可用 `oxide_strength` 衰减估计锈蚀遮罩。每件可在 `only_materials` 中列出允许修改的源材质名。生成的 `library.json` 可直接用于完整模型诊断。独立比较换光下的粗糙度和高光后，再确定全局采用哪套材质。
+
 独立入口按冻结清单输出原材质、新材质、换光、转向四张完整模型图。先行预检可以用 `--asset-ids 1 33 --variants source-left new-left --resolution 512`，但正式检查使用新目录。程序核对源散列、原/新轮廓、尺寸、候选文件重新打开及材质通道；缺少缓存时仅导出诊断几何，不启动重建、落稳或 AI。
 
 没有可修改区域的资产必须显示“保留原貌／无有效修改”，不能计为成功重贴。诊断视角不证明真实支撑，模型图不施加现场薄雾、调色或相机模糊；用户确认模型效果后才进入场景测试。

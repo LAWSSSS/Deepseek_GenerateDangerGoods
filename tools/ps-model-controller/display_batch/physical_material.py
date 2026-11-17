@@ -102,6 +102,15 @@ def prepare_finish(asset_or_mesh, cache, pack, size_m, profile=None, reference=N
         if reference.get('source_mesh_hash') != actual_hash:
             raise ValueError('reference material bound to another source mesh')
         materials, reference_regions = apply_reference_regions(asset, materials, Path(cache) / 'reference-regions')
+        allowed = reference.get('identity_evidence', {}).get('only_source_materials')
+        if allowed is not None:
+            if (not isinstance(allowed, list) or not allowed
+                    or not all(isinstance(name, str) and name in materials for name in allowed)):
+                raise ValueError('Reference material scope differs from the audited source materials')
+            for name, entry in materials.items():
+                if name not in allowed:
+                    entry.update(eligible=False, protected=True, skip_reason='outside_reference_material_scope')
+            reference_regions['only_source_materials'] = allowed
         reference['source_region_audit'] = reference_regions
         materials = identity_colours(asset, materials)
     regions = {**raw, 'materials': materials, 'signature': signature(VERSION, materials)}
