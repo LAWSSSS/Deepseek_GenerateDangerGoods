@@ -23,9 +23,21 @@ def _steps(factor, control, current, values, strength, stage, effect):
             for direction, (_, value) in nearest.items()]
 
 
-def composite_changes(params, allowed, photo, *, tone_profiles):
+def composite_changes(params, allowed, photo, *, tone_profiles, light_profiles=None):
     """Map only effects available in the current composition and measured rendering path."""
     changes = []
+    realism = params.get('realism_version') == 'realism-v1'
+    if realism:
+        allowed={key:values for key,values in allowed.items()
+                 if key not in ('chroma','contrast','dust','haze','pool_kernel','material')}
+        # The existing renderer changes direct key+fill energy relative to its
+        # fixed broad environment. It does NOT rotate a light or widen highlights.
+        if ('light' in allowed and light_profiles and
+                (photo.get('lighting_basis') == 'bounded-broad-light-v1' or
+                 (photo.get('calibration') or {}).get('version') == 'bounded-broad-light-v1')):
+            changes.extend(_steps('light_ratio','light',params['light'],allowed['light'],
+                lambda value:light_profiles[value],'render',
+                {'increase':'增加主补光相对环境光的能量','decrease':'减小主补光相对环境光的能量'}))
     if 'tone' in allowed and not photo.get('exposure_limited'):
         # A tone preset controls both axes. A temperature preset must not reset
         # active exposure, and an exposure preset must not reset active warmth.
@@ -51,7 +63,10 @@ def composite_changes(params, allowed, photo, *, tone_profiles):
                 # opposite to apparent sharpness.
                 return -amount if control == 'sharpness' and amount is not None else amount
 
-            changes.extend(_steps(factor, control, params[control], allowed[control], strength, 'composite', effect))
+            steps=_steps(factor, control, params[control], allowed[control], strength, 'composite', effect)
+            if control == 'sharpness' and photo.get('blur_sigma') is not None and photo['blur_sigma'] <= .18:
+                steps=[step for step in steps if step.direction != 'increase']
+            changes.extend(steps)
 
     effects = photo.get('effects', {})
     if 'fog_gain' in allowed and photo.get('atmosphere', {}).get('confidence') == 'estimated':
@@ -59,7 +74,7 @@ def composite_changes(params, allowed, photo, *, tone_profiles):
         median = effects.get('fog_total_median', photo.get('haze'))
         if median is not None and 0 < median < .55 and float(current) > 0:
             def veil(value):
-                return min(.55, 1 - (1 - median) ** (float(value) / float(current)))
+                return min(.50 if realism else .55, 1 - (1 - median) ** (float(value) / float(current)))
 
             changes.extend(_steps('haze_amount', 'fog_gain', current, allowed['fog_gain'], veil, 'composite',
                                   {'increase': '增大局部空气雾幕', 'decrease': '减小局部空气雾幕'}))

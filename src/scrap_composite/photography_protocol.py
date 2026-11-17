@@ -9,10 +9,11 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
-from .contracts import (DefectCode, Digest, Finding, PHYSICAL_CUES, PhysicalCue,
+from .contracts import (DefectCode, Digest, Finding, PHYSICAL_CUES, PhysicalCue, ObservedState, ReferenceRole,
                         Scores, Strict, Unit, VisualReport)
+from .photo_evidence import contradiction, identity_reference, physical_evidence_issue, studio_reference
 
-BRIEF_VERSION = 'photo-brief-v1'
+BRIEF_VERSION = 'photo-brief-v2'
 PLAN_VERSION = 'photo-plan-v1'
 SCOPE_VERSION = 'photo-options-v1'
 MIN_ACTION_CONFIDENCE = .7
@@ -25,7 +26,7 @@ PHOTO_JOB_ID = ContextVar('photo_job_id', default=None)
 FACTORS = {
     'contact_shadow': ('shadow', 'lighting', 'receiver', '接触暗部的位置、强度或软硬与接触斑不符'),
     'key_direction': ('light_direction', 'lighting', 'lighting', '同层投影与亮面的主光方向不一致'),
-    'light_ratio': ('lighting', 'lighting', 'lighting', '同朝向漫反射面的主光与补光比例不一致'),
+    'light_ratio': ('lighting', 'lighting', 'lighting', '同朝向表面的主补光相对环境光的能量比例不一致'),
     'specular_width': ('material', 'material', 'lighting_material', '反光带的宽度或边界与同类金属不符'),
     'specular_shape': ('material', 'material', 'lighting_material', '高光未随曲面、视角或周围遮蔽变化'),
     'dust_coverage': ('surface_dust_heavy', 'material', 'material', '物体表面的附着浮灰分布偏差'),
@@ -49,7 +50,7 @@ FACTORS = {
 }
 GEOMETRY = {'upright': 'support', 'floating': 'support', 'penetration': 'support',
             'occlusion': 'occlusion', 'scale': 'support', 'camera': 'support', 'structure': 'structure'}
-DIRECTED = {'dust_coverage', 'haze_amount', 'exposure', 'tonal_contrast', 'warmth', 'chroma', 'sharpness'}
+DIRECTED = {'light_ratio', 'dust_coverage', 'haze_amount', 'exposure', 'tonal_contrast', 'warmth', 'chroma', 'sharpness'}
 MAX_FINDINGS = 5
 Factor = Literal[tuple((*FACTORS, *GEOMETRY))]
 Direction = Literal['increase', 'decrease', 'unknown']
@@ -59,7 +60,7 @@ OptionID = Annotated[str, Field(pattern=r'^a[1-3]$')]
 EvidenceID = Annotated[str, Field(pattern=r'^f[1-5]$')]
 _FRAME_REGION = (0., 0., 1., 1.)
 
-_GAP_WORDS = re.compile(r'缝隙|间隙|空隙|空档|透出背景|visible gap|air gap|daylight', re.IGNORECASE)
+_GAP_WORDS = re.compile(r'缝隙|间隙|空隙|空档|透空|透出背景|visible gap|air gap|clear air below|daylight', re.IGNORECASE)
 _SHADOW_WORDS = re.compile(r'阴影|投影|压痕|暗部|shadow', re.IGNORECASE)
 _NEGATED_GAP = re.compile(r'(?:无|没有|未见|看不到)(?:明显|可见|任何)?(?:的)?(?:空气)?(?:缝隙|间隙|空隙|空档)'
                           r'|no (?:visible )?(?:air )?gap', re.IGNORECASE)
@@ -89,6 +90,9 @@ class PhotoFinding(Strict):
     cue: ShortText
     reference: ShortText | None
     physical_cue: PhysicalCue | None = None
+    observed_state: ObservedState | None = None
+    reference_role: ReferenceRole | None = None
+    reference_region: Region | None = None
 
     @model_validator(mode='after')
     def valid_cue(self):
@@ -98,6 +102,10 @@ class PhotoFinding(Strict):
                 raise ValueError('empty finding region')
         if not self.cue.strip():
             raise ValueError('missing observed cue')
+        if self.reference_region is not None:
+            l, t, r, b = self.reference_region
+            if l >= r or t >= b:
+                raise ValueError('empty reference region')
         return self
 
     @property
@@ -125,8 +133,63 @@ class PhotoBrief(Strict):
     findings: list[PhotoFinding] = Field(max_length=MAX_FINDINGS)
 
 
+class PhotoFindingV2(PhotoFinding):
+    """New provider output; PhotoFinding still reads historical replies."""
+    observed_state: ObservedState
+    reference_role: ReferenceRole
+    reference_region: Region | None
+
+    @model_validator(mode='after')
+    def valid_semantics(self):
+        desired = {'too_high':'decrease', 'too_low':'increase', 'mismatch':'unknown', 'unknown':'unknown'}
+        if self.direction != desired[self.observed_state]:
+            raise ValueError('direction must oppose observed_state; mismatch/unknown require unknown')
+        if self.visibility != 'visible':
+            if self.observed_state != 'unknown' or self.physical_cue is not None:
+                raise ValueError('unassessable findings cannot claim a state or physical cue')
+            return self
+        if self.observed_state == 'unknown' or self.reference_role == 'unknown':
+            raise ValueError('unknown evidence must be unassessable, not visible')
+        if self.region in (None, _FRAME_REGION) or not self.reference:
+            raise ValueError('visible findings need local current-frame evidence and a reference')
+        if self.factor in DIRECTED and self.observed_state not in ('too_high', 'too_low'):
+            raise ValueError('numeric photographic factors require too_high or too_low')
+        if self.reference_role == 'identity':
+            if self.factor not in ('identity', 'structure'):
+                raise ValueError('identity reference cannot judge scene photography, pose or occlusion')
+        elif self.reference_region in (None, _FRAME_REGION):
+            raise ValueError('scene comparison needs localized reference_region in first image')
+        elif identity_reference(self.reference) or studio_reference(self.reference):
+            raise ValueError('scene comparison cannot use source/studio reference')
+        issue = contradiction(self.factor, self.direction, self.cue, self.reference)
+        if issue:
+            raise ValueError(issue)
+        expected = PHYSICAL_CUES.get(self.factor)
+        if self.physical_cue != expected:
+            raise ValueError('physical_cue must match visible geometry; photography requires null')
+        issue = physical_evidence_issue(self.factor, self.cue, self.reference,
+                                        self.physical_cue, self.reference_role)
+        if issue:
+            raise ValueError(issue)
+        return self
+
+
+class PhotoBriefV2(PhotoBrief):
+    findings: list[PhotoFindingV2] = Field(max_length=MAX_FINDINGS)
+
+
+def validate_brief_context(brief, context):
+    for finding in brief.findings:
+        if finding.visibility != 'visible':
+            continue
+        if finding.reference_role == 'identity' and 'asset' not in context.images:
+            raise ValueError('identity reference was not supplied')
+        if not in_target_neighbourhood(finding.region, context.target_region):
+            raise ValueError('finding does not belong to current target')
+
+
 class PhotoReport(PhotoBrief):
-    version: Literal['photo-brief-v1'] = BRIEF_VERSION
+    version: Literal['photo-brief-v1', 'photo-brief-v2'] = 'photo-brief-v1'
     image_sha256: Digest
     target: Annotated[str, Field(pattern=r'^[^\x00-\x1f]{1,80}$')]
     context: PhotoContext
@@ -154,11 +217,15 @@ class PhotoReport(PhotoBrief):
             trace = 'uncertain'
         if trace != brief.trace:
             corrections.add('trace')
-        return cls(image_sha256=image_sha256, target=target, context=context, trace=trace,
+        return cls(version=BRIEF_VERSION if isinstance(brief, PhotoBriefV2) else 'photo-brief-v1',
+                   image_sha256=image_sha256, target=target, context=context, trace=trace,
                    scores=Scores(**scores), findings=findings, reconciled=sorted(corrections))
 
     @model_validator(mode='after')
     def coherent_report(self):
+        if self.version == BRIEF_VERSION:
+            typed = PhotoBriefV2.model_validate(self.model_dump(include={'trace','scores','findings'}))
+            validate_brief_context(typed, self.context)
         visible = [finding for finding in self.findings if finding.visibility == 'visible']
         if bool(visible) != (self.trace == 'visible') or self.trace == 'none' and (
                 self.findings or any(score < 3 for _, score in self.scores)):
@@ -178,6 +245,8 @@ class PhotoReport(PhotoBrief):
             Finding(id=f'f{index}', target='object', code=f.code, region=f.region,
                     severity=f.severity, visibility=f.visibility, scope='image', confidence=f.confidence,
                     direction=f.direction, physical_cue=f.physical_cue,
+                    observed_state=f.observed_state, reference_role=f.reference_role,
+                    reference_region=f.reference_region,
                     evidence='。'.join(filter(None, (f.cue, f.reference))))
             for index, f in enumerate(self.findings, 1)])
 

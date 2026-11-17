@@ -57,12 +57,17 @@ class FindingDetails(Strict):
 PHYSICAL_CUES = {'floating':'visible_air_gap', 'penetration':'surface_intersection',
                  'occlusion':'reversed_overlap', 'upright':'standing_on_end'}
 PhysicalCue = Literal['visible_air_gap', 'surface_intersection', 'reversed_overlap', 'standing_on_end']
+ObservedState = Literal['too_high', 'too_low', 'mismatch', 'unknown']
+ReferenceRole = Literal['scene', 'identity', 'unknown']
 
 
 class Finding(FindingDetails):
     id: Identifier
     target: Identifier
     physical_cue: PhysicalCue | None = None
+    observed_state: ObservedState | None = None
+    reference_role: ReferenceRole | None = None
+    reference_region: tuple[Unit, Unit, Unit, Unit] | None = None
 
 
 class FrameFinding(FindingDetails):

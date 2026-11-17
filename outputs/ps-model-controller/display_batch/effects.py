@@ -19,7 +19,7 @@ def parameters(settings):
             'rust_spots':format(settings.rust_spots,'g'), 'rust_pattern':settings.rust_pattern, 'rust_relief':settings.rust_relief,
             'rust_relief_strength':settings.rust_relief_strength,
             'contrast_matching':settings.contrast_matching}
-    if settings.surface_finish == 'generated_pbr':
+    if settings.surface_finish in ('generated_pbr', 'physical_layers'):
         result.update(surface_finish=settings.surface_finish,
                       surface_finish_manifest=settings.surface_finish_manifest)
     return result
@@ -104,6 +104,6 @@ def render_identity(params, style):
         fields.extend(('effects_version', 'surface_dust', 'effects_lighting'))
         fields.extend(('weathering','shadow_mode'))
     fields.extend(('render_detail','rust_spots','rust_pattern','rust_relief','rust_relief_strength'))
-    if params.get('surface_finish') == 'generated_pbr':
+    if params.get('surface_finish') in ('generated_pbr', 'physical_layers'):
         fields.extend(('surface_finish', 'surface_finish_manifest'))
     return tuple(params.get(k) for k in fields)

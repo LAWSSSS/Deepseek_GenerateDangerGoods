@@ -33,7 +33,7 @@ class EffectSettings(Strict):
     rust_relief: bool = False
     rust_relief_strength: float = Field(default=1., ge=1., le=3., strict=True)
     contrast_matching: Literal['legacy', 'local'] = 'legacy'
-    surface_finish: Literal['existing', 'generated_pbr'] = 'existing'
+    surface_finish: Literal['existing', 'generated_pbr', 'physical_layers'] = 'existing'
     surface_finish_manifest: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode='after')
@@ -44,7 +44,7 @@ class EffectSettings(Strict):
             raise ValueError('rust_relief requires rust_pattern=photo')
         if self.rust_relief_strength != 1. and not self.rust_relief:
             raise ValueError('rust_relief_strength requires rust_relief')
-        if self.surface_finish == 'generated_pbr':
+        if self.surface_finish in ('generated_pbr', 'physical_layers'):
             if not self.surface_finish_manifest:
                 raise ValueError('generated_pbr requires a manifest')
             if self.rust_spots or self.rust_relief:
@@ -55,10 +55,11 @@ class EffectSettings(Strict):
 
 
 def bounded_surface_dust(params):
-    return params.get('weathering') == 'preserve_source' or params.get('surface_finish') == 'generated_pbr'
+    return params.get('weathering') == 'preserve_source' or params.get('surface_finish') in ('generated_pbr', 'physical_layers')
 
 
 class BatchConfig(Strict):
+    preset: Literal['existing', 'realism_v1'] = 'existing'
     backgrounds: str
     output: str
     assets: list[str] = Field(default_factory=list)
@@ -104,6 +105,14 @@ class BatchConfig(Strict):
     prepare_photoshop: bool = False
     _requested: dict = PrivateAttr(default_factory=dict)
     _resolution_notes: dict = PrivateAttr(default_factory=dict)
+
+    @model_validator(mode='before')
+    @classmethod
+    def resolve_preset(cls, values):
+        if isinstance(values, dict) and values.get('preset') == 'realism_v1':
+            from .realism import preset_values
+            return preset_values(values)
+        return values
 
     @model_validator(mode='after')
     def dust_uses_neighbourhood(self):
@@ -258,6 +267,10 @@ class Defect(Strict):
     evidence: str = Field(max_length=160)
     scope: Literal['image','asset'] = 'image'
     visibility: Literal['visible','occluded','unassessable'] = 'visible'
+    physical_cue: Literal['visible_air_gap','surface_intersection','reversed_overlap','standing_on_end'] | None = None
+    reference_role: Literal['scene','identity','unknown'] | None = None
+    reference_region: tuple[Unit, Unit, Unit, Unit] | None = None
+    observed_state: Literal['too_high','too_low','mismatch','unknown'] | None = None
 
 
 class Action(Strict):

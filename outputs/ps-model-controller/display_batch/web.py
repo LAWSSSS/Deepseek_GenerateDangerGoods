@@ -74,6 +74,7 @@ async def create(request):
         atomic_json(DATA/(ident+'.json'),config.model_dump())
         launch(ident)
         return JSONResponse({'id':ident,'output':config.output,
+            'preset':config.preset,
             'geometry_preset':config.geometry_preset,'vehicle_reference':config.vehicle_reference,
             'integration_mode':config.integration_mode,
             'workflow':config.workflow,
@@ -97,6 +98,7 @@ async def status(request):
         result['integration_mode']=config.integration_mode
         result['workflow']=config.workflow
         result['review_profile']=config.review_profile
+        result['preset']=config.preset
         result['vehicle_reference']=config.vehicle_reference
         from .collision import VERSION as collision_version
         from .vehicle_scale import VERSION as scale_version
@@ -140,6 +142,7 @@ async def artifact(request):
 
 async def effect_options(request):
     return JSONResponse({'version':'online-effects-v3','defaults':EffectSettings().model_dump(),
+        'presets':['existing','realism_v1'],
         'integration_modes':{'default':'legacy','options':[
             {'value':'legacy','label':'原融合流程'},
             {'value':'coherent','label':'局部受光与反射协同（小样）'}],

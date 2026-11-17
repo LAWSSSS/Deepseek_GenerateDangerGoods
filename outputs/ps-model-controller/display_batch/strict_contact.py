@@ -8,15 +8,29 @@ import numpy as np
 from .common import signature, atomic_json, file_hash
 from .metric_physics import VERSION, tolerances
 from .geometry import project
+from scrap_composite.photo_evidence import contradiction, physical_evidence_issue
 
 
 def retryable(pose):
     return set(pose.get('failure_codes',[]))=={'not_converged'}
 
 
+def review_evidence_issue(defect):
+    """Audit legacy assertions without converting an invalid finding to a pass."""
+    pieces=re.split(r'(?:[。，；,;]\s*|\bbut the )(?=(?:参考图|识别参考|源图|原图|图[234]|reference|source))',
+                    defect.evidence,maxsplit=1,flags=re.I)
+    cue=pieces[0];reference=pieces[1] if len(pieces)>1 else ''
+    factor,direction={'too_sharp':('sharpness','decrease'),'too_blurry':('sharpness','increase'),
+        'haze_clear':('haze_amount','increase'),'haze_heavy':('haze_amount','decrease'),
+        'identity_loss':('identity','unknown')}.get(defect.code,(defect.code,'unknown'))
+    return (contradiction(factor,direction,cue,reference) or
+        physical_evidence_issue(defect.code,cue,reference,getattr(defect,'physical_cue',None),
+                                getattr(defect,'reference_role',None)))
+
+
 def visual_veto(review):
     return [d.model_dump() for d in review.defects if d.code in ('floating','penetration','occlusion','upright')
-            and d.visibility=='visible']
+            and d.visibility=='visible' and review_evidence_issue(d) is None]
 
 
 def pose_review_context(checks):
@@ -37,6 +51,23 @@ def reconcile_pose_evidence(review,checks):
     lies on its side, but calls that an upright defect because the source photo
     is upright. A plausible upright cue, or any contact defect, still vetoes.
     """
+    unresolved=[];safe=[]
+    for defect in review.defects:
+        issue=review_evidence_issue(defect) if defect.visibility=='visible' else None
+        if issue:
+            unresolved.append({'reason':issue,'original_defect':defect.model_dump()})
+            safe.append(defect.model_copy(update={'visibility':'unassessable','physical_cue':None}))
+        else:safe.append(defect)
+    if unresolved:
+        checks['review_evidence_consistency']={'status':'unknown','reason':'unsupported_or_contradictory_review',
+            'observations':unresolved,'policy':'preserve_scores_and_severity; no_automatic_acceptance'}
+        review=review.model_copy(update={'defects':safe})
+        pose_errors=[item['original_defect'] for item in unresolved
+                     if item['reason']=='reference_pose_does_not_establish_standing']
+        if pose_errors:
+            checks['review_pose_consistency']={'status':'unknown',
+                'reason':'reference_pose_conflicts_with_required_lying_pose',
+                'original_defects':pose_errors,'policy':'preserve_scores_and_severity; no_automatic_acceptance'}
     context=pose_review_context(checks)
     angle=context['measured_axis_angle_deg']
     if context['measurement_status']!='pass' or angle is None or not 0<=angle<=15:

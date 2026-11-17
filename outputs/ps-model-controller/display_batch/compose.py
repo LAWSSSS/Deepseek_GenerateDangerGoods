@@ -212,6 +212,22 @@ def match_rgb(rgb, alpha, background_pixels, specular_weight, tone, seed):
                            'before_luma':before*255,'target_luma':target*255}
 
 
+def imaging_measurement(rgb, alpha):
+    """Diagnostic only; compare stages on the same opaque interior pixels."""
+    core=cv2.erode((alpha>.98).astype(np.uint8),np.ones((3,3),np.uint8))>0
+    if int(core.sum())<16:
+        return {'status':'unknown','reason':'insufficient_opaque_interior'}
+    rgb=np.clip(rgb,0,1).astype(np.float32)
+    gray=rgb@np.float32([.2126,.7152,.0722])
+    q10,q50,q90,q95=np.percentile(gray[core],[10,50,90,95])
+    lab=cv2.cvtColor(rgb,cv2.COLOR_RGB2LAB)
+    gradient=cv2.magnitude(cv2.Sobel(gray,cv2.CV_32F,1,0),cv2.Sobel(gray,cv2.CV_32F,0,1))
+    return {'status':'measured','pixels':int(core.sum()),'median_luma':float(q50),
+            'luma_span_p90_p10':float(q90-q10),'highlight_span_p95_p50':float(q95-q50),
+            'median_chroma':float(np.median(np.linalg.norm(lab[:,:,1:][core],axis=1))),
+            'edge_p80':float(np.percentile(gradient[core],80))}
+
+
 def compose(scene,candidate,render_dir,render_meta,environment,samples,params,seed,out,
             *,dust_overlay=False,capture_local=False,fixed_tone=None,layer_output=None):
     render_dir=Path(render_dir)
@@ -264,12 +280,27 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
                                ('scanned_materials', 'matte_profile', 'generated_finish')),
                            fixed_tone=fixed_tone,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
+    stage_measurements={}
+    if params.get('realism_version') == 'realism-v1':
+        from .photography import display
+        stage_measurements['render_reference_display']=imaging_measurement(display(raw),alpha)
+        stage_measurements['exposure_white_balance_display']=imaging_measurement(rgb,alpha)
     chroma_limits=chroma_groups=None
     if params.get('chroma_mode') in ('local_budget','global_mean'):
         from .chroma_budget import masks, budget, compress, measure
         from .photography import display
         chroma_limits=budget(reference_pixels,environment.get('local_context',{}).get('confidence','unknown'))
         chroma_groups=masks(display(raw),alpha,channels.get('metallic'),candidate.get('material_classes',[]))
+        if params.get('surface_finish') == 'physical_layers':
+            regions_path=render_dir/'physical-regions0001.exr'
+            chroma_groups={}
+            if not regions_path.is_file():
+                raise ValueError('missing_physical_material_regions; invalidate_object_render_cache')
+            if regions_path.is_file():
+                regions=cv2.imread(str(regions_path),cv2.IMREAD_UNCHANGED)[:,:,:3][:,:,::-1]
+                regions=warp(regions,full,offset,bounds,window=window)/np.maximum(color_alpha[...,None],1e-6)
+                chroma_groups={'metal':(regions[:,:,0]>.95)&(alpha>.95),
+                               'paint':(regions[:,:,1]>.95)&(alpha>.95)}
         # This budget owns the FINAL sensor-space colour, with no retention floor.
         # Applying it after the camera residual prevents colour changes leaking into
         # background pixels through the camera PSF, while retaining legacy replay.
@@ -298,7 +329,10 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         chroma_groups={k:v&(visible_alpha>.95) for k,v in chroma_groups.items()}
     local_atmospheric=None
     if local and params.get('fog_mode')=='local_auto':
-        from .local_atmosphere import fields_for
+        if params.get('realism_version') == 'realism-v1':
+            from .scene_atmosphere import fields_for
+        else:
+            from .local_atmosphere import fields_for
         object_t,background_t,airlight,air_summary=fields_for(environment['atmospheric_context'],bounds,
             object_z,order,candidate,scene,float(params.get('fog_gain',1)),params.get('atmosphere')!='off')
         rgb=srgb(fogged_radiance(linear(clear_rgb),object_t,airlight))
@@ -311,6 +345,8 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
                      atmosphere={**air_summary,'mode':params.get('atmosphere'),'transmission_range':
                          np.percentile(object_t[core],[5,50,95]).tolist() if core.any() else [1.,1.,1.]})
     occlusion_fraction=float(1-visible_alpha.sum()/max(alpha.sum(),1e-6))
+    if stage_measurements:
+        stage_measurements['local_air']=imaging_measurement(rgb,visible_alpha)
     foot=np.zeros((b-y,r-x),np.uint8)
     for poly in render_meta['contact_polygons']:
         coords=(np.asarray(poly)*full+offset-[x,y])*16
@@ -444,17 +480,27 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         for label,value in PHOTO_CONTROLS['sharpness'].items():
             photo['effective_controls'][label]['sharpness']=math.sqrt(max(environment['camera_psf']['sigma_px']**2-.38**2,0))/value
     finish_version = (render_meta.get('generated_finish') or {}).get('version')
-    local_weather = finish_version in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10',
+    # Fixed-geometry A/B diagnostic only: B changes the shader but keeps A's
+    # v15 image-space matching. Production physical_layers never sets this flag.
+    diagnostic_context = params.get('diagnostic_surface_context') == 'v15'
+    context_version = 'generated-pbr-v15' if diagnostic_context else finish_version
+    local_weather = context_version in ('generated-pbr-v8', 'generated-pbr-v9', 'generated-pbr-v10',
                                      'generated-pbr-v11', 'generated-pbr-v12', 'generated-pbr-v13',
                                      'generated-pbr-v14', 'generated-pbr-v15')
-    if local_weather:
+    if local_weather and params.get('realism_version') != 'realism-v1':
         from .surface_context import match_surface_context
         result,photo['surface_context']=match_surface_context(result,visible_alpha,reference_pixels,
             environment.get('local_context',{}),
-            deep_grime=finish_version in ('generated-pbr-v9', 'generated-pbr-v10'),
-            caked_dirt=finish_version in ('generated-pbr-v11', 'generated-pbr-v12', 'generated-pbr-v13',
+            deep_grime=context_version in ('generated-pbr-v9', 'generated-pbr-v10'),
+            caked_dirt=context_version in ('generated-pbr-v11', 'generated-pbr-v12', 'generated-pbr-v13',
                                          'generated-pbr-v14', 'generated-pbr-v15'),
             weathered_reference=environment.get('nearby_weathered_steel'))
+        if diagnostic_context:photo['surface_context']['diagnostic_only']='v15_matching_for_material_ablation'
+    if params.get('realism_version') == 'realism-v1':
+        photo['realism_version']='realism-v1'
+        photo['surface_context']={'applied':False,'reason':'material_and_atmosphere_not_matched_to_ground'}
+        photo['color_pipeline']='scene_linear_EXR_exposure_WB_AgX_once_scene_air_shadow_occlusion_single_camera'
+        stage_measurements['occlusion_and_camera']=imaging_measurement(result,visible_alpha)
     if chroma_groups is not None:
         exported_preview=np.rint(np.clip(result,0,1)*255).astype(np.float32)/255
         initial_final=measure(exported_preview,chroma_groups,chroma_limits)
@@ -471,6 +517,10 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         result,photo['global_saturation'],saturation_mask=apply_global_saturation(
             result,visible_alpha,scene['global_saturation_statistics'])
     crop_out=np.uint8(np.rint(np.clip(result,0,1)*255))
+    if stage_measurements:
+        stage_measurements['export_rgb']=imaging_measurement(crop_out.astype(np.float32)/255,visible_alpha)
+        photo['stage_measurements']=stage_measurements
+        photo['denoising_basis']='denoised_combined_beauty; diffuse_specular_used_only_as_smooth_guides'
     original=base_rgb[y:b,x:r].copy()
     base_rgb[y:b,x:r][edited]=crop_out[edited]
     Image.fromarray(base_rgb).save(out)

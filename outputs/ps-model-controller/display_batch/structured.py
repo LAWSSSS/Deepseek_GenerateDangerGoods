@@ -59,7 +59,9 @@ async def inspect_frame(client, asset, comp, image_hash, *, profile='legacy'):
 def _review(report, checks):
     defects = [{'code': f.code, 'severity': f.severity, 'region': f.region or (0., 0., 1., 1.),
                 'scope': f.scope if f.code=='structure' else 'image',
-                'visibility': f.visibility, 'evidence': f.evidence[:160]}
+                'visibility': f.visibility, 'evidence': f.evidence[:160],
+                'physical_cue': f.physical_cue, 'observed_state': f.observed_state,
+                'reference_role': f.reference_role, 'reference_region': f.reference_region}
                for f in report.findings]
     review = EffectsReview(scores=report.scores.model_dump(), trace=report.trace,
                            defects=defects, actions=[], evidence=report.summary)
@@ -130,7 +132,8 @@ async def plan_frame(client, report, review, comp, params, allowed, ids, seen, *
     if isinstance(report, PhotoReport):
         from .common import file_hash
         try:
-            changes = composite_changes(params, allowed, comp['photo'], tone_profiles=TONE_PROFILES)
+            changes = composite_changes(params, allowed, comp['photo'], tone_profiles=TONE_PROFILES,
+                                        light_profiles=LIGHT_PROFILES)
             changes = [change for change in changes if not seen({**params, change.control: change.value})]
             decision = await run_photography(client, report.context, file_hash(comp['image']),
                 target=report.target, changes=changes, plan=True, report=report, parameters=params)

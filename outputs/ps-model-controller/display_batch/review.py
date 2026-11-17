@@ -112,6 +112,11 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
             if photo.get('local_context',{}).get('confidence','estimated')!='estimated':
                 options.pop('fog_extra',None);options.pop('pool_kernel',None)
                 options.pop('fog_gain',None)
+    if params.get('realism_version') == 'realism-v1':
+        # Source appearance belongs to the classified shader. Air and camera
+        # use their dedicated controls; old screen-weathering knobs do nothing.
+        for name in ('chroma','contrast','dust','haze','pool_kernel','material'):
+            options.pop(name,None)
     controls=photo.get('effective_controls',{})
     for kind,values in list(options.items()):
         current=params[kind]

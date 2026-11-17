@@ -38,32 +38,43 @@ class PoseReviewTests(unittest.TestCase):
         self.assertEqual(audit['review_pose_consistency']['status'],'unknown')
         self.assertEqual(audit['review_pose_consistency']['original_defects'][0]['evidence'],BAD_EVIDENCE)
 
-    def test_reference_orientation_without_current_lying_evidence_still_vetoes(self):
+    def test_current_standing_evidence_still_vetoes(self):
         for text in ('物体竖立，参考图为直立圆柱',
                      'The object is upright; source image is upright.',
-                     '参考图为直立圆柱，物体过于竖直',
-                     '物体并非横躺，参考图为直立圆柱',
-                     '物体应该平躺，参考图为直立圆柱',
-                     'The object is not lying flat; reference image is upright.'):
+                     '物体以端部站立，参考图为直立圆柱'):
             value=reconcile_pose_evidence(review(text),checks())
             self.assertEqual(len(visual_veto(value)),1)
+        for text in ('物体并非横躺，参考图为直立圆柱',
+                     '物体应该平躺，参考图为直立圆柱',
+                     'The object is not lying flat; reference image is upright.'):
+            # A recommendation/negative lying statement is not a positive
+            # standing-on-end observation. Keep the low-quality review unknown.
+            value=reconcile_pose_evidence(review(text),checks())
+            self.assertEqual(visual_veto(value),[])
+            self.assertFalse(value.passes())
 
-    def test_missing_or_nonlying_geometry_cannot_clear_veto(self):
+    def test_reference_only_conflict_remains_unknown_independent_of_geometry(self):
         for audit in ({},checks(None),checks(30),checks(float('nan')),
                       {'lying':{'status':'unknown','measurement_deg':7}}):
-            self.assertEqual(len(visual_veto(reconcile_pose_evidence(review(),audit))),1)
+            value=reconcile_pose_evidence(review(),audit)
+            self.assertEqual(visual_veto(value),[])
+            self.assertFalse(value.passes())
+            self.assertEqual(len(visual_veto(reconcile_pose_evidence(review('物体以端部站立'),audit))),1)
 
     def test_real_contact_defects_survive_measured_lying(self):
-        for code in ('floating','penetration','occlusion'):
-            self.assertEqual(len(visual_veto(reconcile_pose_evidence(review(BAD_EVIDENCE,code),checks()))),1)
+        for code,evidence in [('floating','底部与钢板之间可见空气间隙'),
+                              ('penetration','活塞杆穿透钢板实体'),
+                              ('occlusion','同一钢板连续边缘前后次序错误')]:
+            self.assertEqual(len(visual_veto(reconcile_pose_evidence(review(evidence,code),checks()))),1)
         mixed=review()
         mixed.defects.append(review('底部存在明显悬空间隙','floating').defects[0])
         answer=reconcile_pose_evidence(mixed,checks())
         self.assertEqual([d['code'] for d in visual_veto(answer)],['floating'])
         self.assertFalse(answer.passes())
-        # Never reconcile a complaint that also reports physical separation.
+        # An unsupported upright label does not replace explicit gap evidence;
+        # the independently reported floating observation above remains a veto.
         answer=reconcile_pose_evidence(review(BAD_EVIDENCE+'，底部悬空'),checks())
-        self.assertEqual(len(visual_veto(answer)),1)
+        self.assertFalse(answer.passes())
 
     def test_english_reference_contradiction(self):
         answer=reconcile_pose_evidence(review('The can is lying on its side but the reference image is upright.'),checks())

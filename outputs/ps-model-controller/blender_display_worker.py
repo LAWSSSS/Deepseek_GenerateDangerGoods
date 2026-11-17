@@ -545,7 +545,7 @@ def fine_render_mesh(obj,request):
 
 
 def pass_outputs(scene, folder, generated_finish=False, hydraulic_finish=False, corrosion_finish=False,
-                 handling_finish=False, amber_film=False):
+                 handling_finish=False, amber_film=False, physical_regions=False):
     layer=scene.view_layers[0]
     layer.use_pass_diffuse_direct=True;layer.use_pass_diffuse_indirect=True;layer.use_pass_diffuse_color=True
     layer.use_pass_glossy_direct=True;layer.use_pass_glossy_indirect=True;layer.use_pass_glossy_color=True
@@ -555,6 +555,9 @@ def pass_outputs(scene, folder, generated_finish=False, hydraulic_finish=False, 
     layer.use_pass_z=True
     passes = [('combined','Image'),('depth','Depth'),('metallic','metallic'),('upward','upward')]
     aovs = {'metallic': 'VALUE', 'upward': 'VALUE'}
+    if physical_regions:
+        passes.append(('physical-regions','physical_regions'))
+        aovs['physical_regions']='COLOR'
     if generated_finish:
         passes.append(('generated-finish', 'generated_finish'))
         aovs['generated_finish'] = 'COLOR'
@@ -609,6 +612,14 @@ def configure_materials(obj,request,reference=True):
             if node.get('display_deposit'):continue
             if node.type=='BSDF_PRINCIPLED':
                 tree=material.node_tree
+                diagnostic=request.get('asset_diagnostic')
+                if diagnostic=='clay':
+                    for socket in ('Base Color','Metallic','Roughness','Normal','Coat Weight'):
+                        for link in list(node.inputs[socket].links):tree.links.remove(link)
+                    node.inputs['Base Color'].default_value=(.18,.18,.18,1)
+                    node.inputs['Metallic'].default_value=0.
+                    node.inputs['Roughness'].default_value=.65
+                    node.inputs['Coat Weight'].default_value=0.
                 if not tree.nodes.get('batch_metallic_aov'):
                     aov=tree.nodes.new('ShaderNodeOutputAOV');aov.name='batch_metallic_aov';aov.aov_name='metallic'
                     if node.inputs['Metallic'].is_linked:tree.links.new(node.inputs['Metallic'].links[0].from_socket,aov.inputs['Value'])
@@ -618,10 +629,14 @@ def configure_materials(obj,request,reference=True):
                     tree.links.new(geometry.outputs['Normal'],dot.inputs[0])
                     upward=tree.nodes.new('ShaderNodeOutputAOV');upward.aov_name='upward';tree.links.new(dot.outputs['Value'],upward.inputs['Value'])
                 if finish is not None:
-                    if obj.data.uv_layers.active and finish_surface(material,node,finish,request['environment'],
+                    apply_finish=finish_surface
+                    if finish['version']=='physical-layers-v1':
+                        from display_batch.physical_layers import finish_surface as apply_finish
+                    if (obj.data.uv_layers.active or finish['version']=='physical-layers-v1') and apply_finish(material,node,finish,request['environment'],
                             request.get('surface_dust',0.)):
                         adapted.add(material.name)
                     continue
+                if diagnostic in ('clay','source'):continue
                 if scans is not None:
                     if obj.data.uv_layers.active and scanned_surface(material,node,scans,request['environment']['dust_color']):
                         adapted.add(material.name)
@@ -907,7 +922,10 @@ def scene_lighting(state, camera, environment, gain, reference, hdri=None):
     color=np.asarray(environment['world_color'])
     probe=environment.get('reflection_probe')
     if local_light:
-        from display_batch.local_light import light_rig
+        if environment.get('realism_light'):
+            from display_batch.realism_light import light_rig
+        else:
+            from display_batch.local_light import light_rig
         sky, lights = light_rig(environment, camera, gain, (128,256))
         target=Vector(camera['target'])
     elif reference:
@@ -1033,6 +1051,7 @@ def render_parts(request):
               request.get('rust_scan',{}).get('sha256'),request.get('rust_scan',{}).get('roughness_sha256'),
               request.get('rust_scan',{}).get('height_sha256'),request.get('rust_scan',{}).get('detail_sha256'),
               request.get('rust_scan',{}).get('relief_strength',1.))
+    mesh_key=(*mesh_key,request.get('asset_diagnostic'))
     if finish is not None:
         mesh_key=(*mesh_key,finish['signature'],finish['regions']['signature'])
     if state.get('mesh_key')!=mesh_key:
@@ -1105,6 +1124,7 @@ def render_parts(request):
             scene.render.image_settings.color_depth='8'
             scene.view_settings.view_transform='AgX'
             pass_outputs(scene,folder,generated_finish=finish is not None,
+                         physical_regions=bool(finish and finish['version']=='physical-layers-v1'),
                          hydraulic_finish=bool(finish and 'hydraulic' in finish['maps']),
                          corrosion_finish=bool(finish and finish.get('corrosion')),
                          handling_finish=bool(finish and 'handling' in finish['maps']),

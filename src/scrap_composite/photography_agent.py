@@ -6,11 +6,12 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Protocol
+from .photo_evidence import contradiction, studio_reference
 
 from .photography_protocol import (BRIEF_VERSION, DIRECTED, FACTORS, GEOMETRY, MIN_ACTION_CONFIDENCE, PHOTO_JOB_ID,
                                   PLAN_TOKENS, PLAN_VERSION, SCOPE_VERSION, VISION_TOKENS, ControlChange,
-                                  PhotoBrief, PhotoChoice, PhotoContext, PhotoOption, PhotoPlan, PhotoReport,
-                                  compact_schema, digest)
+                                  PhotoBriefV2, PhotoChoice, PhotoContext, PhotoOption, PhotoPlan, PhotoReport,
+                                  compact_schema, digest, validate_brief_context)
 
 _SEVERITY = {'minor': 0, 'major': 1, 'fatal': 2}
 _STAGE_ORDER = {stage: i for i, stage in enumerate(
@@ -83,6 +84,10 @@ def scope_plan(report, context, changes, *, plan=True, parameters=None):
     if 'fail' in context.checks.values():
         return stop('program_check')
     visible = [(i, f) for i, f in enumerate(report.findings, 1) if f.visibility == 'visible']
+    if any(contradiction(f.factor, f.direction, f.cue, f.reference or '') or
+           (f.factor not in ('identity', 'structure') and
+            (f.reference_role == 'identity' or studio_reference(f.reference))) for _, f in visible):
+        return stop('uncertain')
     if 'geometry_cue' in report.reconciled or any(f.factor in GEOMETRY for _, f in visible):
         return stop('geometry')
     if not visible:
@@ -157,7 +162,8 @@ def _graph():
             index = int(scope.options[0].evidence_id[1:]) - 1
             finding = scope.report.findings[index]
             payload = {'protocol': PLAN_VERSION,
-                       'finding': finding.model_dump(mode='json', include={'factor', 'direction', 'cue', 'reference'}),
+                       'finding': finding.model_dump(mode='json', include={'factor', 'direction', 'cue', 'reference',
+                           'observed_state', 'reference_role', 'reference_region'}),
                        'options': [o.model_dump(mode='json', exclude={'evidence_id', 'stage'}) for o in scope.options]}
             measured = scope.report.context.measurements.model_dump(
                 mode='json', include=_PLAN_METRICS.get(finding.factor, set()), exclude_none=True)
@@ -176,9 +182,13 @@ def _graph():
 
             report = task.report
             if report is None:
-                brief = await ctx.deps.ask('photo-vision', PhotoBrief, role_prompt('observer'),
-                    {'protocol': BRIEF_VERSION, **task.context.model_dump(mode='json', exclude_none=True)},
+                brief = await ctx.deps.ask('photo-vision', PhotoBriefV2, role_prompt('observer'),
+                    {'protocol': BRIEF_VERSION, **task.context.model_dump(mode='json', exclude_none=True),
+                     'reference_roles': [{'image': i, 'role':'identity' if kind == 'asset' else 'scene',
+                                          'coordinates':'first_frame_normalized'}
+                                         for i, kind in enumerate(task.context.images, 1)]},
                     task.images, plain_json=True, compact=True, max_output_tokens=VISION_TOKENS,
+                    validate=lambda answer: validate_brief_context(answer, task.context),
                     image_limits=tuple((768, 512) if kind == 'asset' else (1024, 768) for kind in task.context.images))
                 report = PhotoReport.bind(brief, task.image_sha256, task.target, task.context)
             elif report.image_sha256 != task.image_sha256 or report.target != task.target:
@@ -216,6 +226,6 @@ def interface():
             'output_token_limits': {'visual': VISION_TOKENS, 'execution': PLAN_TOKENS},
             'context_schema': PhotoContext.model_json_schema(), 'diagnosis_schema': PhotoReport.model_json_schema(),
             'plan_schema': PhotoPlan.model_json_schema(),
-            'provider_responses': {'visual': compact_schema(PhotoBrief), 'execution': compact_schema(PhotoChoice)},
+            'provider_responses': {'visual': compact_schema(PhotoBriefV2), 'execution': compact_schema(PhotoChoice)},
             'factors': {name: {'score': score, 'stage': stage, 'cue': meaning}
                         for name, (_, score, stage, meaning) in FACTORS.items()}}

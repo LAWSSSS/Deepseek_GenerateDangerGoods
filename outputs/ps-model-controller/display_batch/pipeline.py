@@ -189,7 +189,7 @@ class Pipeline:
         self.config=config;self.out=resolve(config.output);self.out.mkdir(parents=True,exist_ok=True)
         self.cache=resolve(config.cache);self.cache.mkdir(parents=True,exist_ok=True)
         self.surface_pack = None
-        if config.effects and config.effects.surface_finish == 'generated_pbr':
+        if config.effects and config.effects.surface_finish in ('generated_pbr', 'physical_layers'):
             from .generated_material import load_pack
             self.surface_pack = load_pack(resolve(config.effects.surface_finish_manifest))
         self.run_id=time.strftime('%Y%m%d-%H%M%S')+f'-{os.getpid()}'
@@ -289,23 +289,39 @@ class Pipeline:
         environment={**environment,'integration_mode':params.get('integration_mode','legacy')}
         extras={}
         if params.get('fog_mode')=='local_auto':
-            from .local_atmosphere import prepare as prepare_local_atmosphere
-            context=await asyncio.to_thread(prepare_local_atmosphere,scene,candidate,environment,self.cache)
+            if params.get('realism_version') == 'realism-v1':
+                from .scene_atmosphere import prepare
+                context=await asyncio.to_thread(prepare,scene,self.cache)
+            else:
+                from .local_atmosphere import prepare as prepare_local_atmosphere
+                context=await asyncio.to_thread(prepare_local_atmosphere,scene,candidate,environment,self.cache)
             environment={**environment,'atmospheric_context':context}
         if params.get('effects_enabled'):
             from .effects import dust_profile, lighting_for
             from .surface_maps import prepare_uv_masks
-            environment=await asyncio.to_thread(lighting_for,scene,candidate,environment,params['effects_lighting'],
-                                               preserve=params.get('weathering')=='preserve_source')
-            if params.get('surface_finish') == 'generated_pbr':
+            if params.get('realism_version') == 'realism-v1':
+                from .realism_light import estimate_local_light
+                environment,_=await asyncio.to_thread(estimate_local_light,scene,candidate,environment)
+            else:
+                environment=await asyncio.to_thread(lighting_for,scene,candidate,environment,params['effects_lighting'],
+                                                   preserve=params.get('weathering')=='preserve_source')
+            if params.get('surface_finish') in ('generated_pbr', 'physical_layers'):
                 from .generated_material import WEATHERED_STEEL_VERSION, finish_regions, load_pack
                 path = resolve(params['surface_finish_manifest'])
                 pack = self.surface_pack
                 if pack is None or Path(pack['manifest']) != path:
                     pack = await asyncio.to_thread(load_pack, path)
-                regions = await asyncio.to_thread(finish_regions, asset, pack, self.cache)
-                extras['generated_finish'] = {**pack, 'regions': regions}
-                if pack['version'] == WEATHERED_STEEL_VERSION and any(
+                if params.get('surface_finish') == 'physical_layers':
+                    from .physical_material import prepare_finish
+                    size = asset.get('physical_size',{}).get('nominal_mm')
+                    if size is None:
+                        lo,hi=asset['semantic']['major_mm'];size=math.sqrt(lo*hi)
+                    extras['generated_finish']=await asyncio.to_thread(prepare_finish,asset,self.cache,pack,size/1000)
+                    regions=extras['generated_finish']['regions']
+                else:
+                    regions = await asyncio.to_thread(finish_regions, asset, pack, self.cache)
+                    extras['generated_finish'] = {**pack, 'regions': regions}
+                if params.get('surface_finish') == 'generated_pbr' and pack['version'] == WEATHERED_STEEL_VERSION and any(
                         item.get('authored_atlas') and item['coverage'][2] > 0
                         for item in regions['materials'].values()):
                     from .surface_context import nearby_weathered_steel
@@ -327,7 +343,10 @@ class Pipeline:
         folder,meta,hit=await self.renders.get(asset,render_candidate,params,render_environment,scene['size'],resolution,
                                              appearance=style,shadow_reference=shadow_reference,**extras)
         if params.get('effects_enabled'):
-            from .local_light import receiver_calibration
+            if params.get('realism_version') == 'realism-v1':
+                from .realism_light import receiver_calibration
+            else:
+                from .local_light import receiver_calibration
             calibration=await asyncio.to_thread(receiver_calibration,folder,meta,environment)
             environment={**environment,'calibration':calibration}
         return folder,meta,environment,samples,hit
@@ -562,6 +581,7 @@ class Pipeline:
                 'chroma_mode':self.config.chroma_mode,
                 'integration_mode':self.config.integration_mode,
                 'camera_pipeline':self.config.camera_pipeline,
+                **({'realism_version':'realism-v1'} if self.config.preset=='realism_v1' else {}),
                 **({'workflow':self.config.workflow} if self.config.workflow!='legacy' else {}),
                 **({'review_profile':'photographer'} if getattr(self.config,'review_profile','legacy')=='photographer' else {}),
                 **{k:'auto' for k in PHOTO_CONTROLS},**effect_parameters(self.config.effects)}
@@ -569,6 +589,11 @@ class Pipeline:
     @staticmethod
     def finish_image(out,ident,result,best):
         if best.get('deliverable') is False:raise ValueError('physical_failure_is_not_deliverable')
+        unreviewed=best.get('review_status')=='unknown' and best.get('review') is None
+        if unreviewed:
+            if evidence_status(best['checks'])=='fail':
+                raise ValueError('program_failure_is_not_deliverable')
+            result.update(status='review',unreviewed_draft=True,review_status='unknown')
         estimated=(best['checks'].get('scale',{}).get('evidence',{}).get('version')=='reference-projection-v1'
                    and best['checks']['scale']['status']!='pass')
         dest=out/('estimated' if estimated else 'accepted' if result['status']=='accepted_display' else 'review')
@@ -576,17 +601,19 @@ class Pipeline:
         dest.mkdir(parents=True,exist_ok=True)
         final=dest/(ident+'.png');shutil.copy2(best['image'],final)
         crop=dest/(ident+'.crop.jpg');shutil.copy2(best['crop'],crop)
-        review_type=EffectsReview if best['params'].get('effects_enabled') else FusionReview if 'trace' in best['review'] else Review
-        review=review_type.model_validate(best['review'])
+        review=None
+        if not unreviewed:
+            review_type=EffectsReview if best['params'].get('effects_enabled') else FusionReview if 'trace' in best['review'] else Review
+            review=review_type.model_validate(best['review'])
         result.update(image=str(final),crop=str(crop),best_iteration=best['iteration'],
-                      checks=best['checks'],scores=best['review']['scores'],
+                      checks=best['checks'],scores=best['review']['scores'] if review is not None else None,
                       measured_major_px=best['measured_major_px'],
                       placement=best.get('placement','surface'),support_ids=best.get('support_ids',[]),
                       occlusion_fraction=best.get('occlusion_fraction'),photo=best.get('photo'),
                       evidence_confidence=best.get('evidence_confidence','unknown'),
                       evidence_status=evidence_status(best['checks']),
-                      photo_status='pass' if review.photo_passes() else 'fail',
-                      visual_status='pass' if review.passes() else 'fail')
+                      photo_status=('pass' if review.photo_passes() else 'fail') if review is not None else 'unknown',
+                      visual_status=('pass' if review.passes() else 'fail') if review is not None else 'unknown')
         if isinstance(review,(FusionReview,EffectsReview)):result['insertion_trace']=review.trace
 
     async def job(self,job):
@@ -873,6 +900,9 @@ class Pipeline:
             raise
         except Exception as error:
             result.update(status='failed',reason=f'{type(error).__name__}: {str(error)[:260]}')
+            if type(error).__name__ == 'InvalidStructuredReply':
+                result.update(status='review',visual_status='unknown',photo_status='unknown',
+                              reason='review_invalid_after_one_repair')
             if best:
                 if self.config.contact_mode=='strict':result['status']='review'
                 self.finish_image(self.out,ident,result,best)
@@ -880,6 +910,14 @@ class Pipeline:
                 result.update(checks=draft['checks'],draft_record=str(folder/f"draft-{draft['iteration']}.json"),
                     unreviewed_draft=True,measured_major_px=draft['measured_major_px'],
                     evidence_status=evidence_status(draft['checks']))
+                if (type(error).__name__=='InvalidStructuredReply' and self.config.preset=='realism_v1'
+                        and self.config.uncertain_policy=='render_review'
+                        and evidence_status(draft['checks'])!='fail'):
+                    entry={**draft,'review':None,'review_status':'unknown','unreviewed_draft':True,
+                           'review_error':'invalid_after_one_repair','deliverable':True}
+                    result['iterations'].append(entry)
+                    atomic_json(folder/f"iteration-{draft['iteration']}.json",entry)
+                    self.finish_image(self.out,ident,result,entry)
             return result
         finally:
             result['seconds']=round(time.monotonic()-start,3)

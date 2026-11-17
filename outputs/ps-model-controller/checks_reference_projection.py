@@ -270,7 +270,7 @@ class StrictLoopTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_only_valid_backup_can_be_selected(self):
         from checks_display_batch import review
-        bad=review(4,defects=[Defect(code='penetration',severity='major',region=[0,0,1,1],evidence='crosses steel')])
+        bad=review(4,defects=[Defect(code='penetration',severity='major',region=[0,0,1,1],evidence='intersects steel surface')])
         result,calls=await self.loop([bad,review(3)])
         self.assertEqual(calls,2);self.assertEqual(result['best_iteration'],1)
         self.assertEqual(result['status'],'accepted_display')

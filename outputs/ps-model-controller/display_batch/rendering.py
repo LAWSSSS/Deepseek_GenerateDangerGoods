@@ -46,6 +46,8 @@ def render_request(asset,candidate,params,environment):
     request['render_detail']=params.get('render_detail','standard')
     request['rust_spots']=float(params.get('rust_spots',0.))
     request['surface_dust']=float(params.get('surface_dust',0.))
+    if params.get('asset_diagnostic'):
+        request['asset_diagnostic']=params['asset_diagnostic']
     if params.get('rust_pattern','procedural')=='photo' and request['rust_spots']:
         path=ROOT/'work/render-materials/polyhaven/rusty_metal_03/rusty_metal_03_diff_2k.jpg'
         if not path.is_file():raise FileNotFoundError('photo rust texture missing: '+str(path))
@@ -91,20 +93,24 @@ def finish_dependencies():
 
 def part_keys(request, device, dependencies, *, include_detail=True):
     windows=request['windows']
-    fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe','local_irradiance','integration_mode')
+    fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe','local_irradiance','integration_mode','realism_light')
     environment=request['environment']
     light={k:environment[k] for k in fields if k in environment}
     light['calibrated']=bool(environment.get('calibration'))
     shared=(RENDER_VERSION,dependencies,device,request['appearance'],request['camera'],
             request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'],request.get('integration_mode','legacy'))
+    if environment.get('realism_light'):
+        shared=(*shared,file_hash(HERE/'display_batch/realism_light.py'))
     if include_detail:
         shared=(*shared,request.get('render_detail','standard'))
     if request.get('contact_band'):shared=(*shared,request['contact_band'])
+    physical=request.get('generated_finish',{}).get('version')=='physical-layers-v1'
     surface=(request['mesh_hash'],request['matrix'],request['yaw'],request['roughness_delta'],
              request['dust_gain'],request['dust_control'],request.get('surface_dust',0.),request['material_classes'],
              request.get('rust_spots',0.),request.get('rust_scan'),
-             environment.get('dust_color'),environment.get('haze') if request['appearance']!='native' else None,
-             environment.get('local_context',{}).get('surface_texture_rms'))
+             None if physical else environment.get('dust_color'),
+             None if physical or request['appearance']=='native' else environment.get('haze'),
+             None if physical else environment.get('local_context',{}).get('surface_texture_rms'))
     if request.get('scanned_hdri'):
         shared=(*shared,request['scanned_hdri'])
     if request.get('surface_scans'):
@@ -115,9 +121,14 @@ def part_keys(request, device, dependencies, *, include_detail=True):
         surface=(*surface,request['matte_profile'])
     if finish := request.get('generated_finish'):
         surface=(*surface, finish['signature'], finish['regions']['signature'], finish_dependencies())
+        if finish.get('version')=='physical-layers-v1':
+            surface=(*surface,signature(*(file_hash(HERE/'display_batch'/name)
+                                         for name in ('physical_layers.py','physical_material.py'))))
         reference = environment.get('nearby_weathered_steel', {})
         if reference.get('applied'):
             surface=(*surface,reference['pigment_linear'])
+    if request.get('asset_diagnostic'):
+        surface=(*surface,request['asset_diagnostic'])
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),
@@ -206,6 +217,8 @@ class RenderCache:
                 object_passes += (HANDLING_PASS,)
             if finish.get('amber_age'):
                 object_passes += (AMBER_PASS,)
+            if finish.get('version')=='physical-layers-v1':
+                object_passes += ('physical-regions0001.exr',)
         entries={};cache={};missing={};folders={};imports=0;worker_detail={}
         for part,key in keys.items():
             folder=self.root/part/key

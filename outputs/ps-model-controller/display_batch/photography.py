@@ -114,6 +114,9 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         # object-median brightness correction; only the extra photographic action
         # is limited to half a stop. Legacy replay keeps its original clipping.
         ev=float(base_ev+np.clip(extra_ev,-.5,.5)) if coherent and calibration else float(np.clip(ev,-.5,.5))
+    if params.get('realism_version') == 'realism-v1':
+        # Receiver calibration and a planner correction share one half-stop budget.
+        ev=float(np.clip(ev,-.5,.5))
     exposure_error=float(np.median(display(sample*2**ev)@LUMA)-goal)
     exposure_limited=bool(abs(exposure_error)>.035 and (ev>1.99 or ev<-1.49))
     if calibration:
@@ -149,6 +152,8 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         if polymer:gain=max(.75,gain)
     if fixed_tone is not None:
         gain=fixed_tone['chroma_gain']
+    if params.get('realism_version') == 'realism-v1':
+        gain=1.  # The final, classified material budget owns excess chroma.
     # Low-frequency color is altered; original small-scale luminance detail survives.
     sigma=max(1.5,min(alpha.shape)*.018)
     smooth=normalized_blur(lab,alpha,sigma)
@@ -169,6 +174,8 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         if context.get('sample_pixels',0)>=64:
             base_contrast=float(np.clip(scene_iqr/max(luma_iqr,1),.65,1.15))
     contrast=1+(base_contrast-1)*control(params,'contrast')
+    if params.get('realism_version') == 'realism-v1':
+        contrast=1.  # Ground reflectance is not the object's tonal range.
     if fixed_tone is not None:
         contrast=fixed_tone['contrast_gain']
     med_l=float(np.median(low_l[surface]))
@@ -247,6 +254,10 @@ def match_linear(raw,alpha,pixels,specular_weight,params,seed,environment,metall
         effective[label]={'haze':float(np.clip(haze_base*value,0,haze_limit)),
             'chroma':float(np.clip(base_gain/value,chroma_floor,chroma_ceiling)) if chroma_mask[core].max()>.01 else 1.,
             'contrast':1+(base_contrast-1)*value,'sharpness':blur if blur>.05 else 0.}
+        if params.get('realism_version') == 'realism-v1':
+            # These controls are bypassed above. Report the applied values, not
+            # hypothetical legacy changes that would trigger another paid review.
+            effective[label].update(chroma=gain,contrast=contrast)
     return rgb,{'version':environment.get('local_context',{}).get('version') or (REFERENCE_VERSION if reference else VERSION),
         'color_pipeline':'scene_linear_EXR_calibration_AgX_once_camera_linear_atmosphere' if calibration else 'scene_linear_EXR_exposure_WB_haze_then_OCIO_AgX_once',
         'calibration':calibration,

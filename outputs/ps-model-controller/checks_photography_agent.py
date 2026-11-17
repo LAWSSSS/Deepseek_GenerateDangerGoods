@@ -123,9 +123,10 @@ class PhotographyTests(unittest.IsolatedAsyncioTestCase):
             payload = json.loads(content[0]['text'] if isinstance(content, list) else content)
             schema = payload['response_JSON_schema']
             self.assertNotIn('title', schema)
-            if payload['protocol'] == 'photo-brief-v1':
+            if payload['protocol'] == 'photo-brief-v2':
                 self.assertEqual(len(content), 3)
-                reply = brief(finding()).model_dump(mode='json')
+                reply = brief(finding(observed_state='too_low', reference_role='scene',
+                    reference_region=[.1,.35,.27,.67])).model_dump(mode='json')
             else:
                 self.assertIsInstance(content, str)
                 self.assertEqual(len(payload['options']), 1)

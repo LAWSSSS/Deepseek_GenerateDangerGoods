@@ -304,7 +304,7 @@ class KnowledgeBase:
         context = context_from_result(record)
         features = record.get("features", context["features"])
         versions = record.get("algorithm_versions", context["versions"])
-        review = record.get("review", {})
+        review = record.get("review") or {}
         image = record.get("image", record.get("after_full"))
         background = record.get("background", record.get("group", ""))
         group = record.get("background_group") or record.get("group")

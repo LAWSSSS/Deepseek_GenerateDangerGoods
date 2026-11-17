@@ -106,7 +106,7 @@ class InteractiveTokenPlanTests(unittest.IsolatedAsyncioTestCase):
         result = await self.invoke(handler, report_format='photographer')
         self.assertEqual(result['new_api_requests'], 1)
         self.assertEqual(result['diagnosis']['image_sha256'], tool.file_hash(self.image))
-        self.assertEqual(result['diagnosis']['version'], 'photo-brief-v1')
+        self.assertEqual(result['diagnosis']['version'], 'photo-brief-v2')
         self.assertEqual(result['diagnosis']['context']['images'], ['frame'])
 
     async def test_503_gets_exactly_one_retry_and_both_attempts_are_accounted(self):

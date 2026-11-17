@@ -29,6 +29,7 @@ def main():
     run=sub.add_parser('run');run.add_argument('--config',type=Path,required=True)
     diagnostic=sub.add_parser('diagnose');diagnostic.add_argument('--config',type=Path,required=True)
     for command in (run,diagnostic):
+        command.add_argument('--preset', choices=('existing','realism_v1'), default=None)
         command.add_argument('--integration-mode',choices=('legacy','coherent'),default=None,
             help='覆盖配置中的融合路径：legacy 复现原流程；coherent 使用局部受光与反射协同小样策略')
         command.add_argument('--workflow',choices=('legacy','evidence_v1'),default=None)
@@ -39,6 +40,7 @@ def main():
     if args.command=='evaluation-manifests':
         print(evaluation_manifests(args.backgrounds,args.out));return
     raw=json.loads(args.config.read_text(encoding='utf8'))
+    if args.preset is not None:raw['preset']=args.preset
     if args.integration_mode is not None:raw['integration_mode']=args.integration_mode
     if args.workflow is not None:raw['workflow']=args.workflow
     if args.review_profile is not None:raw['review_profile']=args.review_profile
