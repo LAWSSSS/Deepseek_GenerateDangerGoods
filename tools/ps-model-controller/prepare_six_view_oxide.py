@@ -117,10 +117,20 @@ def bake(sheet, spec, coordinate_size):
     if meaningful.any():
         gain = np.clip(np.median(luma[meaningful]) / np.maximum(.05, reduced), .64, 1.42) ** .38
         observed *= gain[...,None]
-    observed = np.clip(observed * .86, .023, .68)
     strength = spec.get('strength', 1.)
-    values = np.stack([np.clip(strength * oxide / np.maximum(1e-6,total),0.,.98),
-                       np.clip(chips / np.maximum(1e-6,total),0.,1.), support],axis=-1)
+    coverage = np.clip(strength * oxide / np.maximum(1e-6,total), 0., .98)
+    deeper_oxide = spec.get('oxide_profile') == 'layered'
+    if deeper_oxide:
+        # Concentrate oxide in the observed patch cores. Preserve soft,
+        # partial coverage along their perimeter and use a darker pigment
+        # where the reference carries a dense brown oxide signal.
+        core = smooth(coverage, .16, .76)
+        coverage = np.clip(.62 * coverage + .38 * core, 0., .98)
+        observed *= (.87 - .13 * core)[...,None]
+    else:
+        observed *= .86
+    observed = np.clip(observed, .023, .68)
+    values = np.stack([coverage, np.clip(chips / np.maximum(1e-6,total),0.,1.), support],axis=-1)
     return observed, values
 
 
@@ -167,9 +177,10 @@ def run(spec_path, references, source_library, output):
             sheet = np.float32(image.convert('RGB')) / 255.
         reference = lookup_reference(source, digest)
         regions = reference['component_regions']
-        # Sparse library oxidation fills evidence gaps in this candidate.
-        for region in regions:
-            region.pop('oxide_spread', None)
+        # Use sparse library oxidation in areas without registered evidence by default.
+        if settings.get('sparse_fallback_oxide', True):
+            for region in regions:
+                region.pop('oxide_spread', None)
         for registration in settings['surfaces']:
             name = registration['name']
             if not name.isidentifier():

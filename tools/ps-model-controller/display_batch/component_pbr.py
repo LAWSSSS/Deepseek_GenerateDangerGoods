@@ -119,11 +119,14 @@ def validate(reference, base=None):
         number(region.get('wear', 1.), 0., 1., 'wear')
         for field, lo, hi in (('parent_roughness', .08, .95), ('relief_gain', 0., 1.),
                               ('paint_loss_um', 0., 40.), ('scuff_strength', 0., 1.),
-                              ('source_roughness_mix', 0., .75), ('oxide_spread', 0., 1.)):
+                              ('source_roughness_mix', 0., .75), ('oxide_spread', 0., 1.),
+                              ('oxide_grain_mix', 0., 1.), ('steel_patina', 0., .48)):
             if field in region:
                 number(region[field], lo, hi, field)
-        if region.get('oxide_spread', 0.) and not oxidized:
-            raise ValueError('Oxide spread requires an audited ferrous oxide layer')
+        if (region.get('oxide_spread', 0.) or region.get('oxide_grain_mix', 0.)) and not oxidized:
+            raise ValueError('Oxide detail requires an audited ferrous oxide layer')
+        if region.get('steel_patina', 0.) and main != 'steel':
+            raise ValueError('Steel patina requires a ferrous material')
         if 'view_projection' in region:
             projection = region['view_projection']
             role = projection.get('finish')

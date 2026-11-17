@@ -62,11 +62,13 @@ $controller = 'tools/ps-model-controller'
 
 ### 02 DN200 球阀逐件精修
 
-02 的身份按原照与铸字核对。使用 [02 锈迹配准](../tools/ps-model-controller/valve02-oxide.example.json) 单独绑定手轮、齿轮箱、铸体、接管、法兰、支脚及环带。环形孔口从参考取样中屏蔽。侧面朝向按手轮相对阀体的位置校正。
+02 的身份按原照与铸字核对。使用 [02 锈迹配准](../tools/ps-model-controller/valve02-oxide.example.json) 将手轮、齿轮箱、铸体、法兰平面、支脚及环带的腐蚀位置配准到网格。两侧取样分别屏蔽中心孔和八个螺栓孔。接管侧壁的参考窄幅易拉伸，使用物体空间的实拍锈蚀纹样给这部分和法兰侧壁补锈。侧面朝向按手轮相对阀体的位置校正。
 
 [02 局部网格配置](../tools/ps-model-controller/valve02-mesh.example.json)规定两个凸起加工面的原孔径、外缘、厚度和目标轴向位置。负向凸台移到外端，阀体铸耳的轴向深度按壳体曲面逐点贴合。程序检查两个中心孔及十六个螺栓孔。正面前后图使用相同相机，法兰另有固定近景。
 
-使用同章材质和网格命令复跑。材质包改用 `component-pbr.example.json` 里的 02 分件配置，配准使用 `valve02-oxide.example.json`，诊断入口选择 `--asset-ids 2 --pose-mode inspection --surface-dust .21`。最后以 `valve02-mesh.example.json` 完成网格和正、背、左、右四张原尺寸审核图。
+使用同章材质和网格命令复跑。材质包改用 `component-pbr.example.json` 里的 02 分件配置，配准使用 `valve02-oxide.example.json`，诊断入口选择 `--asset-ids 2 --pose-mode inspection --surface-dust .13`。最后以 `valve02-mesh.example.json` 完成网格和正、背、左、右四张原尺寸审核图。附加 `--relight` 在相同正面机位镜像主光、辅光和侧面反射光，可对照锈斑位置及反射变化。旧几何已审批的 02 候选用 `--baseline` 按相同机位和灯光重拍。
+
+`oxide_profile=layered` 让参考支持区内的锈核变深，扫描纹样只补粗糙层次、边缘和细凹坑。`oxide_grain_mix` 仅用于有铁基氧化层依据的材质，`steel_patina` 仅用于钢材。露钢作为导电基底，铁锈是独立高粗糙度层。局部钢面在当前部件配置启用加工纹方向的反射。其他配置沿用原有参数。参考图提供锈斑位置与外观，微高度和反射参数为估计。[Blender Principled 材质说明](https://docs.blender.org/manual/en/4.5/render/shader_nodes/shader/principled.html)
 
 ## 准备与绑定
 

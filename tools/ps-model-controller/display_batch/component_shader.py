@@ -280,6 +280,13 @@ def finish_surface(material, shader, finish, strength):
         authored = bounded(tree, original(shader.inputs['Roughness']), .39, .86)
         pack['rough'] = add(tree, mul(tree, pack['rough'], 1. - source_mix), mul(tree, authored, source_mix))
         pack['rough'].node.name = 'Component source polymer roughness blend'
+    if patina := region.get('steel_patina', 0.):
+        # A mottled surface film modulates the intensity and width of the
+        # metal reflection while leaving its conductive response intact.
+        mottling = add(tree, coarse, mul(tree, cavity, .33))
+        old_metal = mul(tree, ramp(tree, mottling, .38, 3.3), patina)
+        pack['colour'] = mix(tree, old_metal, pack['colour'], (.62,.57,.50,1.), blend='MULTIPLY')
+        pack['rough'] = add(tree, pack['rough'], mul(tree, old_metal, .30))
     surface, metallic, normal = response(tree, spec['role'], pack, spec, size_m, source_normal, controls,
                                          region=region, film_loss=film, scuff=scuff)
     if 'substrate' in region:
@@ -292,9 +299,15 @@ def finish_surface(material, shader, finish, strength):
     if 'oxide' in region:
         oxidation = packs[region['oxide']]
         oxide_pack = package_fields(tree, point, oxidation, (offset[2] + .41, offset[0], -offset[1]), 'oxide')
+        grain = region.get('oxide_grain_mix', 0.)
         if observed:
-            oxide_pack['colour'] = mix(tree, observed['support'], oxide_pack['colour'], observed['colour'])
-        rust_surface, _, _ = response(tree, 'iron oxide', oxide_pack, oxidation, size_m, None, controls)
+            pigment = observed['colour']
+            if grain:
+                # Reference chroma gives the rust colour. Scanned grain
+                # fills texture detail lost when the reference was projected.
+                level = add(tree, .76, mul(tree, oxide_pack['height'], .53))
+                pigment = mix(tree, grain, pigment, level, blend='MULTIPLY')
+            oxide_pack['colour'] = mix(tree, observed['support'], oxide_pack['colour'], pigment)
         active = ramp(tree, add(tree, coarse, mul(tree, cavity, .24)), .41, 3.5)
         oxide_cue = mul(tree, oxide_pack['wear'], active)
         if 'substrate' in region:
@@ -308,8 +321,30 @@ def finish_surface(material, shader, finish, strength):
             expanded = oxide_spread_field(tree, oxide_pack['wear'], coarse, cavity, coating_wear)
             oxide_cue = math_node(tree, 'MAXIMUM', oxide_cue, mul(tree, expanded, amount))
         rust = bounded(tree, mul(tree, oxide_cue, wear * controls.get('oxide_gain', 1.)), 0., .98)
+        pits = None
+        if grain and spec['role']=='steel':
+            # Physical-scale grains accumulate unevenly in patches and
+            # recesses. This field is independent of the camera and the key.
+            clustering = ramp(tree, add(tree, coarse, mul(tree, cavity, .34)), .43, 3.5)
+            pore = ramp(tree, surface_noise(tree, point, 153., 2.), .555, 8.)
+            pits = mul(tree, mul(tree, clustering, pore), grain * wear * .93)
+            rust = math_node(tree, 'MAXIMUM', rust, pits)
         if observed:
-            rust = blend_factor(tree, observed['support'], rust, observed['oxide'])
+            reference_oxide = observed['oxide']
+            if grain:
+                boundary = mul(tree, reference_oxide, math_node(tree, 'SUBTRACT', 1., reference_oxide))
+                # Break partial-coverage edges at the texture scale. The
+                # operation vanishes in clear steel and fully covered rust.
+                variation = mul(tree, math_node(tree, 'SUBTRACT', oxide_pack['height'], .48), grain)
+                reference_oxide = bounded(tree, add(tree, reference_oxide, mul(tree, boundary, variation)), 0., .98)
+                if pits is not None:
+                    pit_rim = mul(tree, pits, ramp(tree, reference_oxide, .024, 4.2))
+                    reference_oxide = math_node(tree, 'MAXIMUM', reference_oxide, pit_rim)
+            rust = blend_factor(tree, observed['support'], rust, reference_oxide)
+        if pits is not None:
+            depressed = math_node(tree, 'SUBTRACT', oxide_pack['height'], mul(tree, pits, .45))
+            oxide_pack['height'] = bounded(tree, depressed)
+        rust_surface, _, _ = response(tree, 'iron oxide', oxide_pack, oxidation, size_m, None, controls)
         surface = layer_mix(tree, 'Component dielectric iron oxide', surface, rust_surface, rust)
         metallic = mul(tree, metallic, math_node(tree, 'SUBTRACT', 1., rust))
 

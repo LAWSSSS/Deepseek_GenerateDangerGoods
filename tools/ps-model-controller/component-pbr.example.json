@@ -669,14 +669,17 @@
         {
           "parts": [
             "Cast valve body",
-            "Bored neck plus",
-            "Bored neck minus",
             "Bottom boss"
           ],
           "material": "02 cast steel",
           "package": "cast_steel",
           "oxide": "iron_oxide",
-          "wear": 0.68
+          "wear": 0.9,
+          "parent_roughness": 0.36,
+          "relief_gain": 0.62,
+          "steel_patina": 0.39,
+          "oxide_grain_mix": 0.95,
+          "oxide_spread": 0.24
         },
         {
           "parts": [
@@ -709,8 +712,10 @@
           "material": "02 cast steel",
           "package": "cast_steel",
           "oxide": "iron_oxide",
-          "wear": 0.82,
-          "parent_roughness": 0.48
+          "wear": 0.9,
+          "parent_roughness": 0.42,
+          "steel_patina": 0.34,
+          "oxide_grain_mix": 0.77
         },
         {
           "parts": [
@@ -720,8 +725,11 @@
           "material": "02 machined steel",
           "package": "machined_steel",
           "oxide": "iron_oxide",
-          "wear": 0.75,
-          "parent_roughness": 0.42
+          "wear": 0.96,
+          "parent_roughness": 0.40,
+          "steel_patina": 0.37,
+          "oxide_grain_mix": 0.87,
+          "oxide_spread": 0.78
         },
         {
           "parts": [
@@ -731,7 +739,7 @@
           "material": "02 machined steel",
           "package": "machined_steel",
           "oxide": "iron_oxide",
-          "wear": 0.54,
+          "wear": 0.66,
           "parent_roughness": 0.3,
           "relief_gain": 0.46,
           "machining": {
@@ -741,7 +749,9 @@
               0
             ],
             "anisotropy": 0.32
-          }
+          },
+          "steel_patina": 0.17,
+          "oxide_grain_mix": 0.54
         },
         {
           "parts": [
@@ -751,7 +761,9 @@
           "package": "machined_steel",
           "oxide": "iron_oxide",
           "wear": 0.65,
-          "parent_roughness": 0.37
+          "parent_roughness": 0.37,
+          "steel_patina": 0.23,
+          "oxide_grain_mix": 0.58
         },
         {
           "parts": [
@@ -781,9 +793,10 @@
           "package": "blue_enamel",
           "substrate": "exposed_steel",
           "oxide": "iron_oxide",
-          "wear": 0.58,
+          "wear": 0.74,
           "paint_loss_um": 11,
-          "scuff_strength": 0.28
+          "scuff_strength": 0.36,
+          "oxide_grain_mix": 0.61
         },
         {
           "parts": [
@@ -803,8 +816,10 @@
           "material": "02 machined steel",
           "package": "cast_steel",
           "oxide": "iron_oxide",
-          "wear": 0.76,
-          "parent_roughness": 0.51
+          "wear": 0.89,
+          "parent_roughness": 0.51,
+          "steel_patina": 0.43,
+          "oxide_grain_mix": 0.78
         },
         {
           "parts": [
@@ -814,6 +829,29 @@
           "package": "cast_steel",
           "oxide": "iron_oxide",
           "wear": 0.67
+        },
+        {
+          "parts": [
+            "Bored neck plus",
+            "Bored neck minus"
+          ],
+          "material": "02 cast steel",
+          "package": "cast_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.99,
+          "parent_roughness": 0.32,
+          "relief_gain": 0.62,
+          "steel_patina": 0.39,
+          "oxide_grain_mix": 0.94,
+          "oxide_spread": 0.84,
+          "machining": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "anisotropy": 0.27
+          }
         }
       ],
       "evidence": {

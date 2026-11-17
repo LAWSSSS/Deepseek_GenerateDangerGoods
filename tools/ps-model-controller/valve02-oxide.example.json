@@ -108,7 +108,8 @@
               "angle": 90
             }
           ],
-          "strength": 1.2
+          "strength": 1.2,
+          "oxide_profile": "layered"
         },
         {
           "name": "cast_valve_body",
@@ -256,7 +257,8 @@
               ]
             }
           ],
-          "strength": 1.2
+          "strength": 1.38,
+          "oxide_profile": "layered"
         },
         {
           "name": "body_split_and_bolts",
@@ -332,7 +334,8 @@
               ]
             }
           ],
-          "strength": 1.16
+          "strength": 1.334,
+          "oxide_profile": "layered"
         },
         {
           "name": "flange_plus",
@@ -389,11 +392,60 @@
                   590,
                   37,
                   37
+                ],
+                [
+                  169,
+                  537,
+                  10,
+                  10
+                ],
+                [
+                  217,
+                  537,
+                  10,
+                  10
+                ],
+                [
+                  137,
+                  569,
+                  10,
+                  10
+                ],
+                [
+                  249,
+                  569,
+                  10,
+                  10
+                ],
+                [
+                  137,
+                  617,
+                  10,
+                  10
+                ],
+                [
+                  249,
+                  617,
+                  10,
+                  10
+                ],
+                [
+                  169,
+                  650,
+                  10,
+                  10
+                ],
+                [
+                  217,
+                  650,
+                  10,
+                  10
                 ]
               ]
             }
           ],
-          "strength": 1.32
+          "strength": 1.518,
+          "oxide_profile": "layered"
         },
         {
           "name": "flange_minus",
@@ -450,11 +502,60 @@
                   239,
                   36,
                   37
+                ],
+                [
+                  865,
+                  183,
+                  10,
+                  10
+                ],
+                [
+                  913,
+                  183,
+                  10,
+                  10
+                ],
+                [
+                  832,
+                  216,
+                  10,
+                  10
+                ],
+                [
+                  944,
+                  216,
+                  10,
+                  10
+                ],
+                [
+                  832,
+                  264,
+                  10,
+                  10
+                ],
+                [
+                  944,
+                  264,
+                  10,
+                  10
+                ],
+                [
+                  865,
+                  297,
+                  10,
+                  10
+                ],
+                [
+                  913,
+                  297,
+                  10,
+                  10
                 ]
               ]
             }
           ],
-          "strength": 1.32
+          "strength": 1.518,
+          "oxide_profile": "layered"
         },
         {
           "name": "handwheel",
@@ -532,7 +633,8 @@
               ]
             }
           ],
-          "strength": 1.26
+          "strength": 1.26,
+          "oxide_profile": "layered"
         },
         {
           "name": "steel_stem_collar",
@@ -610,7 +712,8 @@
               "angle": 90
             }
           ],
-          "strength": 1.14
+          "strength": 1.14,
+          "oxide_profile": "layered"
         },
         {
           "name": "foot_minus",
@@ -667,7 +770,8 @@
               ]
             }
           ],
-          "strength": 1.12
+          "strength": 1.12,
+          "oxide_profile": "layered"
         },
         {
           "name": "foot_plus",
@@ -724,137 +828,11 @@
               ]
             }
           ],
-          "strength": 1.12
-        },
-        {
-          "name": "neck_minus",
-          "parts": [
-            "Bored neck minus"
-          ],
-          "material": "steel",
-          "mode": "cylinder",
-          "direction": "horizontal",
-          "axes": {
-            "n": [
-              1,
-              0,
-              0
-            ],
-            "v": [
-              0,
-              1,
-              0
-            ],
-            "u": [
-              0,
-              0,
-              1
-            ]
-          },
-          "origin": [
-            -0.01503005,
-            0,
-            -0.24448896
-          ],
-          "limits": {
-            "v": [
-              -0.305612,
-              -0.143286
-            ]
-          },
-          "views": [
-            {
-              "view": "Front",
-              "angle": 0,
-              "rect": [
-                88,
-                196,
-                116,
-                276
-              ],
-              "flip_across": true
-            },
-            {
-              "view": "Back",
-              "angle": 180,
-              "rect": [
-                449,
-                197,
-                478,
-                277
-              ],
-              "flip_across": true,
-              "reverse": true,
-              "weight": 0.75
-            }
-          ],
-          "strength": 1.22
-        },
-        {
-          "name": "neck_plus",
-          "parts": [
-            "Bored neck plus"
-          ],
-          "material": "steel",
-          "mode": "cylinder",
-          "direction": "horizontal",
-          "axes": {
-            "n": [
-              1,
-              0,
-              0
-            ],
-            "v": [
-              0,
-              1,
-              0
-            ],
-            "u": [
-              0,
-              0,
-              1
-            ]
-          },
-          "origin": [
-            -0.01503005,
-            0,
-            -0.24448896
-          ],
-          "limits": {
-            "v": [
-              0.137274,
-              0.2996
-            ]
-          },
-          "views": [
-            {
-              "view": "Front",
-              "angle": 0,
-              "rect": [
-                246,
-                196,
-                276,
-                277
-              ],
-              "flip_across": true
-            },
-            {
-              "view": "Back",
-              "angle": 180,
-              "rect": [
-                603,
-                196,
-                630,
-                277
-              ],
-              "flip_across": true,
-              "reverse": true,
-              "weight": 0.75
-            }
-          ],
-          "strength": 1.22
+          "strength": 1.12,
+          "oxide_profile": "layered"
         }
-      ]
+      ],
+      "sparse_fallback_oxide": false
     }
   }
 }

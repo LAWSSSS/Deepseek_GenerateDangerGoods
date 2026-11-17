@@ -35,6 +35,17 @@ class SixViewOxideTests(unittest.TestCase):
         self.assertGreater(float(field[256,387,2]),.99)
         self.assertGreater(float(field[256,387,0]),.8)
 
+    def test_layered_rust_deepens_observed_oxide_without_marking_clear_metal(self):
+        image = np.full((100,100,3), .54, np.float32)
+        image[20:80,20:80] = (.55,.34,.16)
+        spec = {'material':'steel','mode':'plane','views':[{'rect':[0,0,100,100]}]}
+        old_colour, old = bake(image,spec,np.array([100,100]))
+        colour, layered = bake(image,{**spec,'oxide_profile':'layered'},np.array([100,100]))
+        self.assertLess(float(colour[256,256,0]),float(old_colour[256,256,0]))
+        self.assertGreater(float(layered[256,256,0]),.85)
+        self.assertEqual(float(layered[20,20,0]),0.)
+        self.assertTrue(np.array_equal(layered[..., 2],old[..., 2]))
+
     def test_paint_pigment_is_not_oxide_and_silver_chips_stay_distinct(self):
         blue = np.asarray([[[.12,.28,.48],[.62,.63,.65],[.63,.39,.20]]],dtype=np.float32)
         oxide, chips = material_cues(blue, 'blue')
