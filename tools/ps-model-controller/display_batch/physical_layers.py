@@ -8,7 +8,7 @@ import re
 
 import bpy
 
-from .generated_shader import (add, channels, mul, ramp, relief, tile, write_surface_pass)
+from .generated_shader import (add, channels, mul, ramp, relief, tile, write_surface_pass, surface_noise)
 from .scanned_shader import assign, math_node, mix, opaque_surface_output, original, texture
 
 
@@ -63,6 +63,12 @@ def finish_surface(material, shader, finish, environment, strength):
     if shader.get('generated_finish'):
         raise ValueError('physical layers must start from the source material')
     recipe = finish['recipe']
+    detailed = recipe.get('detail_mode') == 'evidence_layers_v2'
+    controls = finish.get('controls', {})
+    oxide_gain = float(controls.get('oxide_gain', 1.))
+    scratch_gain = float(controls.get('scratch_gain', 1.))
+    roughness_shift = float(controls.get('roughness_shift', 0.))
+    relief_gain = float(controls.get('relief_gain', 1.))
     coordinate = tree.nodes.new('ShaderNodeTexCoord')
     metric = tree.nodes.new('ShaderNodeVectorMath')
     metric.name = 'Physical coordinates in metres'
@@ -70,6 +76,23 @@ def finish_surface(material, shader, finish, environment, strength):
     assign(tree, coordinate.outputs['Object'], metric.inputs[0])
     metric.inputs['Scale'].default_value = size
     coord = metric.outputs[0]
+    if entry.get('albedo_variant'):
+        # Replace only the source base-colour image, leaving factor/normal/MR nodes.
+        socket=shader.inputs['Base Color']
+        visited=set()
+        def base_images(node):
+            if node in visited:return []
+            visited.add(node)
+            if node.type=='TEX_IMAGE':return [node]
+            return [image for input_socket in node.inputs for link in input_socket.links for image in base_images(link.from_node)]
+        candidates=[image for link in socket.links for image in base_images(link.from_node)]
+        if len(candidates)==1:
+            image=bpy.data.images.load(entry['albedo_variant']['path'],check_existing=True)
+            image.colorspace_settings.name='sRGB'
+            candidates[0].image=image
+            candidates[0]['asset_albedo_cleanup']=entry['albedo_variant']['sha256']
+        else:
+            raise ValueError('asset albedo cleanup requires exactly one original base colour image')
     if 'mask' in entry:
         mask = texture(tree, entry['mask'], coordinate.outputs['UV'], 'Physical known source regions')
         mask.name = 'Physical known source regions'
@@ -93,16 +116,27 @@ def finish_surface(material, shader, finish, environment, strength):
                               1. / recipe['oxide_period_m'], offset)
     chips, lines, grain = tile(tree, coord, finish['maps']['paint'], 'Physical abrasion masks',
                                1. / recipe['scratch_period_m'], (.31, .17, .59))
-    rust = mul(tree, ferrous_domain, mul(tree, ramp(tree, oxide, .35, 1.5), recipe['oxide_max']))
+    oxide_field = ramp(tree, oxide, recipe.get('oxide_threshold', .35), 1.5)
+    if detailed:
+        # Broad islands and small pits are independent spatial scales. A texture
+        # tile is a pattern source, not a measured height or a complete rust map.
+        islands = surface_noise(tree, coord, 1./recipe['oxide_period_m'], 3.)
+        oxide_field = mul(tree, ramp(tree, islands, .39, 4.5),
+                          add(tree, .3, mul(tree, oxide_field, .7)))
+    rust = mul(tree, ferrous_domain, mul(tree, oxide_field, min(.65,recipe['oxide_max']*oxide_gain)))
     # Roughness changes remain bounded; unchanged source governs intact regions.
-    abrasion = mul(tree, known, mul(tree, ramp(tree, math_node(tree, 'MAXIMUM', chips, lines), .18, 1.4),
-                                   recipe['abrasion_max']))
+    abrasion_mask = ramp(tree, math_node(tree, 'MAXIMUM', chips, lines), recipe.get('scratch_threshold', .18), 1.4*scratch_gain)
+    abrasion = mul(tree, known, mul(tree, abrasion_mask, recipe['abrasion_max']))
     original_normal = original(shader.inputs['Normal']) if shader.inputs['Normal'].is_linked else None
     normal = relief(tree, 'Physical wear depth in metres', add(tree, mul(tree, pits, -.5), mul(tree, lines, -.35)),
-                    original_normal, recipe['relief_depth_m'] / size, .22)
+                    original_normal, recipe['relief_depth_m'] * relief_gain / size, .22)
     worn = clone_source(tree, shader)
     source_rough = original(shader.inputs['Roughness'])
-    assign(tree, math_node(tree, 'MINIMUM', add(tree, source_rough, mul(tree, grain, .12)), .85), worn.inputs['Roughness'])
+    worn_rough = add(tree, add(tree, source_rough, mul(tree, grain, .12)), roughness_shift)
+    bounded_rough=math_node(tree,'MINIMUM',worn_rough,.85)
+    if detailed or roughness_shift:
+        bounded_rough=math_node(tree,'MAXIMUM',bounded_rough,.08)
+    assign(tree,bounded_rough,worn.inputs['Roughness'])
     assign(tree, normal, worn.inputs['Normal'])
     # Only confidently painted iron can reveal steel; unknown paint keeps its source.
     bare = tree.nodes.new('ShaderNodeBsdfPrincipled')
@@ -112,9 +146,15 @@ def finish_surface(material, shader, finish, environment, strength):
     bare.inputs['Metallic'].default_value = 1.
     assign(tree, add(tree, .34, mul(tree, fine, .16)), bare.inputs['Roughness'])
     assign(tree, normal, bare.inputs['Normal'])
-    exposed = mul(tree, oxidizable_paint, ramp(tree, chips, .55, 2.))
+    exposed = mul(tree, oxidizable_paint, ramp(tree, chips, .35 if detailed else .55, 2.))
     abraded = layer_mix(tree, 'Physical chipped coating response', worn.outputs[0], bare.outputs[0], exposed)
-    surface = layer_mix(tree, 'Physical bounded abrasion', shader.outputs[0], abraded, abrasion)
+    source_surface = shader.outputs[0]
+    if roughness_shift:
+        adjusted = clone_source(tree, shader)
+        adjusted.name='Physical intact roughness correction'
+        assign(tree, math_node(tree,'MAXIMUM',math_node(tree,'MINIMUM',add(tree,source_rough,roughness_shift),.95),.04), adjusted.inputs['Roughness'])
+        source_surface=layer_mix(tree,'Physical known-region roughness correction',source_surface,adjusted.outputs[0],known)
+    surface = layer_mix(tree, 'Physical bounded abrasion', source_surface, abraded, abrasion)
     rust_shader = tree.nodes.new('ShaderNodeBsdfPrincipled')
     rust_shader.name = 'Physical dielectric oxide'
     rust_shader['display_deposit'] = True
@@ -131,7 +171,14 @@ def finish_surface(material, shader, finish, environment, strength):
     if stage == 'full':
         geometry = tree.nodes.new('ShaderNodeNewGeometry')
         up_split = tree.nodes.new('ShaderNodeSeparateXYZ')
-        assign(tree, geometry.outputs['Normal'], up_split.inputs[0])
+        deposition_normal=geometry.outputs['Normal']
+        if detailed:
+            local_normal=tree.nodes.new('ShaderNodeVectorTransform')
+            local_normal.name='Physical asset-fixed deposition normal'
+            local_normal.vector_type='NORMAL';local_normal.convert_from='WORLD';local_normal.convert_to='OBJECT'
+            assign(tree,deposition_normal,local_normal.inputs['Vector'])
+            deposition_normal=local_normal.outputs['Vector']
+        assign(tree, deposition_normal, up_split.inputs[0])
         up = math_node(tree, 'MAXIMUM', up_split.outputs['Z'], 0.)
         ao = tree.nodes.new('ShaderNodeAmbientOcclusion')
         ao.name = 'Physical local cavity'
@@ -142,9 +189,13 @@ def finish_surface(material, shader, finish, environment, strength):
         coverage, grains, _ = tile(tree, coord, finish['maps']['dust'], 'Physical dust patches',
                                    1. / recipe['dust_period_m'], (.53, .83, .29))
         deposition = math_node(tree, 'ADD', add(tree, .10, mul(tree, up, .55)), mul(tree, cavity, .35), clamp=True)
-        domain = math_node(tree, 'ADD', add(tree, metal, third), mul(tree, paint, .5), clamp=True)
+        domain = math_node(tree, 'ADD', add(tree, metal, third), mul(tree, paint, recipe['paint_dust_multiplier']), clamp=True)
+        dust_mask=ramp(tree, coverage, .18, 1.22)
+        if detailed:
+            islands=surface_noise(tree,coord,1./recipe['dust_period_m'],2.)
+            dust_mask=mul(tree,ramp(tree,islands,.34,3.2),add(tree,.25,mul(tree,dust_mask,.75)))
         powder = mul(tree, mul(tree, dust_strength.outputs[0], domain),
-                     mul(tree, deposition, ramp(tree, coverage, .18, 1.22)))
+                     mul(tree, deposition, dust_mask))
         dust = tree.nodes.new('ShaderNodeBsdfPrincipled')
         dust.name = 'Physical single dielectric deposit'
         dust['display_deposit'] = True

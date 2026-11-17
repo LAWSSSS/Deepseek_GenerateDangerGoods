@@ -12,17 +12,23 @@ import os
 from pathlib import Path
 import shutil
 import time
+import math
+import subprocess
 
 os.environ.setdefault('OPENCV_IO_ENABLE_OPENEXR', '1')
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageDraw
 
-from display_batch.common import ROOT, atomic_json, file_hash, resolve, signature
+from display_batch.common import ROOT, HERE, BLENDER, atomic_json, file_hash, resolve, signature
 from display_batch.generated_material import load_pack
-from display_batch.physical_material import prepare_finish
+from display_batch.physical_material import prepare_finish, refine_finish, CONTROL_LIMITS
 from display_batch.rendering import RenderCache
 from display_batch.worker import Blender
+from display_batch.asset_profiles import load_profile, descriptor
+from display_batch.geometry import pose_points, camera_for
+from display_batch.rendering import render_request
+from display_batch.framing import render_windows
 
 
 VERSION = 'realism-asset-diagnostics-v1'
@@ -35,7 +41,7 @@ def read(path):
     return json.loads(Path(path).read_text(encoding='utf8'))
 
 
-def freeze(source, cache, pack):
+def freeze(source, cache, pack, refinement=False, resolution=512):
     records = sorted((json.loads(line) for line in (source/'results.jsonl').read_text(encoding='utf8').splitlines()),
                      key=lambda row: row['job_id'])
     cases = []
@@ -57,16 +63,56 @@ def freeze(source, cache, pack):
         size = candidate.get('base_pose',{}).get('length_m')
         if size is None and physical_size.get('nominal_mm'):
             size = physical_size['nominal_mm']/1000.
-        finish = prepare_finish(asset, cache, pack, size)
+        profile=load_profile(asset['mesh_hash']) if refinement else None
+        finish = prepare_finish(asset, cache, pack, size, profile=profile)
         cases.append({'asset_id':asset_id, 'name':asset.get('name',asset_id), 'source_job':row['job_id'],
                       'asset_record':str(asset_file), 'asset_record_hash':file_hash(asset_file),
                       'mesh_hash':asset['mesh_hash'], 'candidate':candidate,
                       'finish':finish, 'physical_size':physical_size,
                       'scene_contact_status':'inherited_unknown_not_asset_acceptance',
                       'selection':'first_deliverable_job_by_id_no_visual_ranking'})
-    return {'version':VERSION, 'source':str(source), 'pack':pack['signature'], 'cases':cases,
+    return {'version':VERSION+('-evidence-v2' if refinement else ''), 'source':str(source), 'pack':pack['signature'], 'cases':cases,
+            'asset_refinement':refinement,'resolution':resolution,
             'planned_object_renders':len(cases)*7, 'api_calls':0,
             'scope':'material_diagnostic_not_scene_acceptance'}
+
+
+def inspection_camera(asset, candidate):
+    vertices=np.load(asset['geometry'])['vertices']
+    points,_=pose_points(vertices,candidate['matrix'],candidate['yaw'])
+    camera=camera_for(points,candidate['elevation'])
+    camera['fov']=math.degrees(2*math.atan(math.tan(math.radians(camera['fov']/2))*.62))
+    return camera
+
+
+def comparison_board(out, case, renders):
+    """Every tile is a complete render, never a cropped or selected fragment."""
+    side=1024; canvas=Image.new('RGB',(side*2,4*(side+40)),(112,112,112));draw=ImageDraw.Draw(canvas)
+    for i,item in enumerate(renders):
+        x,y=(i%2)*side,(i//2)*(side+40)
+        with Image.open(out/item['image']) as im:
+            im=im.resize((side,side),Image.Resampling.LANCZOS)
+            canvas.paste(im,(x,y+40),im.getchannel('A'))
+        draw.text((x+15,y+12),case['asset_id']+' / '+item['tag'],fill='white')
+    path=out/case['asset_id']/'complete-comparison.png';canvas.save(path)
+    return path.relative_to(out).as_posix()
+
+
+def export_candidate(out, asset, candidate, params, finish, resolution):
+    finish=refine_finish(finish,{k:params[k] for k in CONTROL_LIMITS if k in params})
+    folder=out/asset['id'];request=render_request(asset,candidate,params,neutral_light())
+    request.update(mesh_hash=asset['mesh_hash'],appearance='local',
+        material_classes=asset['semantic']['material_classes'],dust_control=1.,generated_finish=finish,
+        windows=render_windows(candidate,(3840,2160),resolution,full_frame=True),parts={},
+        device='CPU',persistent_data=False,candidate_path=str(folder/'candidate.blend'))
+    path=folder/'candidate-request.json';atomic_json(path,request)
+    script=HERE/'export_asset_candidate.py'
+    result=subprocess.run([str(BLENDER),'--background','--factory-startup','--python-exit-code','1',
+                           '--python',str(script),'--',str(path)],capture_output=True,text=True,
+                          encoding='utf8',errors='replace',timeout=120)
+    (folder/'candidate-export.log').write_text(result.stdout+result.stderr,encoding='utf8')
+    if result.returncode:raise RuntimeError('candidate export failed: '+str(folder/'candidate-export.log'))
+    return read(folder/'candidate-check.json')
 
 
 def neutral_light(right=False):
@@ -105,6 +151,8 @@ def write_report(out, rows, summary):
           '<pre>'+html.escape(json.dumps(summary,ensure_ascii=False,indent=2))+'</pre>']
     for case in rows:
         body.append('<h2>'+html.escape(case['asset_id']+' '+case['name'])+'</h2><div class="row">')
+        if case.get('comparison'):
+            body.append('<p><a href="'+case['comparison']+'">完整模型对照原图</a></p>')
         for item in case['renders']:
             uri=html.escape(item['image'],quote=True)
             body.append('<figure><figcaption>'+html.escape(item['label'])+'</figcaption><a href="'+uri+'"><img src="'+uri+'"></a></figure>')
@@ -117,7 +165,7 @@ async def run(args):
     source,cache,out=resolve(args.source),resolve(args.cache),resolve(args.output)
     out.mkdir(parents=True,exist_ok=True)
     pack=load_pack(resolve(args.pack))
-    frozen=freeze(source,cache,pack)
+    frozen=freeze(source,cache,pack,args.refinement,args.resolution)
     path=out/'frozen.json'
     if path.is_file() and signature(read(path))!=signature(frozen):
         raise ValueError('diagnostic inputs changed; use a fresh output directory')
@@ -137,13 +185,16 @@ async def run(args):
                 params={'material':'original','light':'scene','dust':'auto','surface_dust':.5,
                         'integration_mode':'coherent','render_detail':'standard','asset_diagnostic':mode}
                 posed=copy.deepcopy(candidate);posed['yaw']=float(posed['yaw'])+turn
+                if args.refinement:
+                    posed['camera']=inspection_camera(asset,posed)
+                    params.update(asset_refinement='component_v1',oxide_gain=1.,scratch_gain=1.,relief_gain=1.,roughness_shift=0.)
                 finish=case['finish'] if mode=='physical' else None
-                folder,meta,hit=await renderer.get(asset,posed,params,neutral_light(light=='right'),(3840,2160),512,
+                folder,meta,hit=await renderer.get(asset,posed,params,neutral_light(light=='right'),(3840,2160),args.resolution,
                             appearance='local',full_frame=True,object_only=True,generated_finish=finish)
                 image=out/case['asset_id']/(tag+'.png');image.parent.mkdir(parents=True,exist_ok=True)
                 shutil.copy2(folder/'object.png',image)
                 with Image.open(image) as im:
-                    if im.size!=(512,512):raise ValueError('unexpected diagnostic plate dimensions')
+                    if im.size!=(args.resolution,args.resolution):raise ValueError('unexpected diagnostic plate dimensions')
                     alpha[tag]=np.asarray(im.getchannel('A'),np.float32)/255.
                 paths[tag]=folder
                 if not np.any(alpha[tag]>.5):raise ValueError('empty diagnostic object')
@@ -153,6 +204,8 @@ async def run(args):
                                 'cache_hit':hit,'render_cache':meta['render_cache'],
                                 'source_regions':coverage_stats(folder,alpha[tag]),
                                 'material_metadata':meta.get('generated_finish')})
+                if args.refinement and tag=='physical-left':
+                    export_candidate(out,asset,posed,params,finish,args.resolution)
                 print(json.dumps({'asset':case['asset_id'],'diagnostic':tag,'cache_hit':hit},ensure_ascii=False),flush=True)
             a,b=alpha['source-left']>.5,alpha['physical-left']>.5
             iou=float((a&b).sum()/max(1,(a|b).sum()))
@@ -169,16 +222,55 @@ async def run(args):
                     'visual_realism':'unreviewed','geometry_against_source_photos':'requires_visual_comparison_not_proven_by_alpha'}
             row={'asset_id':case['asset_id'],'name':case['name'],'renders':renders,'checks':checks,
                  'material_audit':case['finish']['material_audit'],'physical_size':case['physical_size']}
+            if args.refinement:
+                row['asset_profile']=descriptor(case['finish']['asset_profile'])
+                row['candidate_check']=read(out/asset['id']/'candidate-check.json')
+                row['comparison']=comparison_board(out,case,renders)
+                maps=finish_maps[0][alpha['physical-left']>.98]
+                row['layer_coverage']={'mean':maps.mean(axis=0).tolist(),'p95':np.quantile(maps,.95,axis=0).tolist(),
+                                       'channels':['oxidation','abrasion','dust']}
             results.append(row);atomic_json(out/'results.json',results)
             write_report(out,results,{'state':'running','completed_assets':len(results),'api_calls':0})
     finally:
         await worker.close()
-    summary={'version':VERSION,'state':'complete','assets':len(results),'plates':sum(len(r['renders']) for r in results),
+    summary={'version':frozen['version'],'state':'complete','assets':len(results),'plates':sum(len(r['renders']) for r in results),
              'wall_seconds':round(time.monotonic()-started,3),'worker_seconds':round(worker.seconds,3),
              'render_counts':dict(renderer.totals),'api_calls':0,'tokens':0,'api_cost':0,
              'local_compute_cost':'unknown','visual_status':'unreviewed'}
     atomic_json(out/'summary.json',summary);write_report(out,results,summary)
     print(json.dumps(summary,ensure_ascii=False))
+
+
+async def add_turn_reference(args):
+    """Add the missing source-PBR control for an already frozen +55° inspection."""
+    out=resolve(args.output);frozen=read(out/'frozen.json');rows=read(out/'results.json')
+    if not frozen.get('asset_refinement'):raise ValueError('turned control requires the frozen asset inspection camera')
+    case=next(c for c in frozen['cases'] if c['asset_id']==args.add_turn_reference)
+    row=next(r for r in rows if r['asset_id']==args.add_turn_reference)
+    if any(r['tag']=='source-turned' for r in row['renders']):return
+    asset=read(case['asset_record'])
+    if file_hash(asset['mesh'])!=case['mesh_hash']:raise ValueError('source model changed')
+    posed=copy.deepcopy(case['candidate']);posed['yaw']=float(posed['yaw'])+55
+    posed['camera']=inspection_camera(asset,posed)
+    params={'material':'original','light':'scene','dust':'auto','surface_dust':.5,
+            'integration_mode':'coherent','render_detail':'standard','asset_diagnostic':'source',
+            'asset_refinement':'component_v1','oxide_gain':1.,'scratch_gain':1.,'relief_gain':1.,'roughness_shift':0.}
+    worker=Blender(out/'turn-reference-worker',args.device);renderer=RenderCache(resolve(args.cache),worker)
+    start=time.monotonic()
+    try:
+        folder,meta,hit=await renderer.get(asset,posed,params,neutral_light(),(3840,2160),frozen['resolution'],
+                                         appearance='local',full_frame=True,object_only=True)
+    finally:await worker.close()
+    image=out/asset['id']/'source-turned.png';shutil.copy2(folder/'object.png',image)
+    row['renders'].append({'tag':'source-turned','label':'原 PBR · 同一转向 55° 对照','image':image.relative_to(out).as_posix(),
+                           'sha256':file_hash(image),'cache_hit':hit,'render_cache':meta['render_cache'],
+                           'same_view_as':'physical-turned'})
+    row['comparison']=comparison_board(out,case,row['renders']);atomic_json(out/'results.json',rows)
+    extra={'asset_id':asset['id'],'reason':'same_view_source_control_for_readable_barrel',
+           'wall_seconds':time.monotonic()-start,'render_counts':dict(renderer.totals),'api_calls':0}
+    atomic_json(out/'turn-reference-cost.json',extra)
+    summary=read(out/'summary.json');summary['plates']=sum(len(r['renders']) for r in rows)
+    summary['extra_control']=extra;atomic_json(out/'summary.json',summary);write_report(out,rows,summary)
 
 
 def main():
@@ -189,7 +281,11 @@ def main():
     parser.add_argument('--output',required=True)
     parser.add_argument('--device',choices=('OPTIX','CPU'),default='OPTIX')
     parser.add_argument('--freeze-only',action='store_true')
-    asyncio.run(run(parser.parse_args()))
+    parser.add_argument('--refinement',action='store_true',help='opt-in evidence profiles and asset inspection framing')
+    parser.add_argument('--resolution',type=int,choices=(512,1024),default=512)
+    parser.add_argument('--add-turn-reference',choices=ASSETS)
+    args=parser.parse_args()
+    asyncio.run(add_turn_reference(args) if args.add_turn_reference else run(args))
 
 
 if __name__=='__main__':main()

@@ -22,6 +22,10 @@ def parameters(settings):
     if settings.surface_finish in ('generated_pbr', 'physical_layers'):
         result.update(surface_finish=settings.surface_finish,
                       surface_finish_manifest=settings.surface_finish_manifest)
+    if settings.asset_refinement == 'component_v1':
+        from scrap_composite.render_controls import validated, VERSION as CONTROL_VERSION
+        result.update(asset_refinement=settings.asset_refinement, render_controls_version=CONTROL_VERSION,
+                      **validated(settings.render_controls, require_all=True))
     return result
 
 

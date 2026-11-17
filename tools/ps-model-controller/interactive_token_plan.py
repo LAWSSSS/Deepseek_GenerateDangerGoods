@@ -17,8 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from run import Endpoint, ModelClient, token_summary
 from display_batch.common import atomic_json, configure_credential, file_hash, signature
 from scrap_composite.contracts import VisualReport
-from scrap_composite.photography_agent import role_prompt
-from scrap_composite.photography_protocol import PhotoBriefV2, PhotoContext, PhotoReport, VISION_TOKENS, BRIEF_VERSION, validate_brief_context
+from scrap_composite.photography_agent import role_prompt, composed_prompt, observation_payload, detail_policy
+from scrap_composite.photography_protocol import PhotoBriefV2, PhotoBriefV3, PhotoContext, PhotoReport, VISION_TOKENS, BRIEF_VERSION, validate_brief_context, audit_brief, merge_semantic_repair
 
 URL = 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1/chat/completions'
 MODEL = 'qwen3.7-plus'
@@ -84,7 +84,7 @@ def configure():
 
 
 class InteractiveEndpoint(Endpoint):
-    max_output_tokens: int = Field(default=3072, ge=256, le=4096)
+    max_output_tokens: int = Field(default=3072, ge=256, le=8192)
 
     @model_validator(mode='after')
     def provider(self):
@@ -144,7 +144,7 @@ def write_report(out, manifest, result):
     (out/'index.html').write_text('\n'.join(body),encoding='utf8')
 
 
-async def diagnose(images, question, out, *, model=MODEL, http=None, report_format='diagnosis'):
+async def diagnose(images, question, out, *, model=MODEL, http=None, report_format='diagnosis', context_data=None):
     """One bounded logical request (at most one retry), with an explicit image set."""
     images = [Path(p).resolve(strict=True) for p in images]
     if not 1 <= len(images) <= 4 or any(not p.is_file() for p in images):
@@ -155,15 +155,30 @@ async def diagnose(images, question, out, *, model=MODEL, http=None, report_form
         token_field='max_completion_tokens', max_output_tokens=3072, timeout_seconds=120)
     frozen = {'version':VERSION,'model':model,'endpoint':URL,'question':question,
               'images':[{'path':str(p),'sha256':file_hash(p)} for p in images]}
-    if report_format not in ('diagnosis','visual_evidence','photographer'):
+    if report_format not in ('diagnosis','visual_evidence','photographer','asset_photographer'):
         raise ValueError('unsupported report format')
-    schema={'diagnosis': Diagnosis, 'visual_evidence': VisualReport, 'photographer': PhotoBriefV2}[report_format]
+    schema={'diagnosis': Diagnosis, 'visual_evidence': VisualReport, 'photographer': PhotoBriefV2,
+            'asset_photographer':PhotoBriefV3}[report_format]
     prompt=PROMPT
     if schema is PhotoBriefV2:
         context = PhotoContext(images=['frame', *(['context'] * (len(images)-1))], question=question.strip())
-        endpoint = endpoint.model_copy(update={'max_output_tokens': VISION_TOKENS})
+        endpoint = endpoint.model_copy(update={'max_output_tokens': 1536})
         frozen['report_format'] = report_format
-        prompt = role_prompt('observer')
+        prompt = role_prompt('observer') + ('\n本次为兼容photo-brief-v2协议：仅使用scene/identity/unknown参照，'
+            '不使用diagnostic，不要求输出v3的原因和执行字段，优先最多三条主要发现。')
+    if schema is PhotoBriefV3:
+        supplied_context = dict(context_data or {})
+        supplied_context['execution_state'] = {**supplied_context.get('execution_state', {}),
+            'input_image_hashes':[item['sha256'] for item in frozen['images']]}
+        context = PhotoContext.model_validate({**supplied_context, 'question':question.strip(),
+            'diagnosis_mode':'asset', 'first_asset_diagnosis':True})
+        if len(context.images) != len(images):
+            raise ValueError('context image roles must match explicit images')
+        prompt = composed_prompt('observer', context)
+        endpoint = endpoint.model_copy(update={'max_output_tokens':detail_policy(context)['visual_tokens']})
+        frozen.update(report_format=report_format, context=context.model_dump(mode='json'))
+        if context.execution_state.get('image_sha256',frozen['images'][0]['sha256']) != frozen['images'][0]['sha256']:
+            raise ValueError('execution state belongs to another input image')
     if schema is VisualReport:
         frozen['report_format']=report_format
         prompt = ('Inspect the first full image as the current composite; later images are context. '
@@ -202,7 +217,8 @@ async def diagnose(images, question, out, *, model=MODEL, http=None, report_form
             if len(data.getvalue())>384*1024:raise ValueError('Preview cannot fit provider input budget')
             dest.write_bytes(data.getvalue())
             previews.append(dest)
-    started=time.monotonic();calls=[];answer=None;error=None
+    started=time.monotonic();calls=[];answer=None;error=None;semantic_issues=[];original_brief=None
+    format_errors=None; changed_input=False
     own_client=http is None
     client=http or httpx.AsyncClient()
     try:
@@ -212,15 +228,36 @@ async def diagnose(images, question, out, *, model=MODEL, http=None, report_form
                 payload={'question':question,'image_count':len(images)}
                 if schema is VisualReport:
                     payload.update(image_sha256=frozen['images'][0]['sha256'],target='object')
+                elif schema is PhotoBriefV3:
+                    payload = observation_payload(context, frozen['images'][0]['sha256'], 'object')
+                    if attempt and semantic_issues:
+                        payload['semantic_repair'] = {'issues':semantic_issues,
+                            'previous_response':original_brief.model_dump(mode='json'),
+                            'instruction':'Repair listed findings only; retain valid siblings and unresolved severe evidence.'}
                 elif schema is PhotoBriefV2:
-                    payload = {'protocol': BRIEF_VERSION, **context.model_dump(mode='json', exclude_none=True),
+                    payload = {'protocol': 'photo-brief-v2', **context.model_dump(mode='json', exclude_none=True),
                         'reference_roles':[{'image':i,'role':'scene','coordinates':'first_frame_normalized'}
                                            for i in range(1,len(images)+1)]}
-                if attempt:payload['format_correction']='Previous reply invalid; return exactly the JSON schema.'
+                if attempt and not semantic_issues:
+                    payload['format_correction'] = format_errors or 'Previous reply invalid; return exactly the JSON schema.'
                 answer=await ModelClient(client,report).ask(endpoint,'interactive-vision',schema,
-                    prompt,payload,previews,qwen_json=True,plain_json=True,compact_json=schema is PhotoBriefV2)
+                    prompt,payload,previews,qwen_json=True,plain_json=True,compact_json=schema in (PhotoBriefV2,PhotoBriefV3),
+                    max_response_chars=32768 if schema is PhotoBriefV3 else 12000)
+                changed_input=any(file_hash(p) != item['sha256'] for p,item in zip(images,frozen['images']))
+                if changed_input:
+                    raise ValueError('input image changed while diagnosis was running')
                 if schema is VisualReport:
                     answer.bind(payload['image_sha256'],payload['target'])
+                elif schema is PhotoBriefV3:
+                    _, faults = audit_brief(answer, context)
+                    if faults and attempt == 0:
+                        semantic_issues = [f.model_dump(mode='json') for f in faults]
+                        original_brief = answer
+                        answer = None
+                        continue
+                    if original_brief is not None:
+                        answer = merge_semantic_repair(original_brief,answer,context)
+                    answer = PhotoReport.bind(answer, frozen['images'][0]['sha256'], 'object', context)
                 elif schema is PhotoBriefV2:
                     validate_brief_context(answer, context)
                     answer = PhotoReport.bind(answer, frozen['images'][0]['sha256'], 'object', context)
@@ -231,8 +268,15 @@ async def diagnose(images, question, out, *, model=MODEL, http=None, report_form
                 answer=None
                 code=report['calls'][-1].get('http_status') if report['calls'] else None
                 error={'kind':type(exc).__name__,'http_status':code}
+                last = report['calls'][-1] if report['calls'] else {}
+                format_errors = last.get('schema_errors') or {
+                    'format_issue':last.get('format_issue'), 'finish_reason':last.get('finish_reason'),
+                    'instruction':'Return complete JSON within the supplied schema; do not invent enum values.'}
+                if schema is PhotoBriefV3 and original_brief is not None and attempt and code == 200 and not changed_input:
+                    answer=PhotoReport.bind(original_brief,frozen['images'][0]['sha256'],'object',context)
+                    break
                 # Never print server bodies, arbitrary exception text or credentials.
-                if code in (400,401,403,404) or not report['calls'] or attempt:break
+                if changed_input or code in (400,401,403,404) or not report['calls'] or attempt:break
                 await asyncio.sleep(1)
             finally:
                 for call in report['calls']:call['attempt']=attempt;calls.append(call)
@@ -260,11 +304,13 @@ def main():
     cli.add_argument('--question-file',type=Path,required=True)
     cli.add_argument('--out',type=Path,required=True)
     cli.add_argument('--model',default=MODEL)
-    cli.add_argument('--format',choices=('diagnosis','visual_evidence','photographer'),default='diagnosis',dest='report_format')
+    cli.add_argument('--format',choices=('diagnosis','visual_evidence','photographer','asset_photographer'),default='diagnosis',dest='report_format')
+    cli.add_argument('--context-file',type=Path,help='Explicit asset profile and image roles for asset_photographer')
     args=cli.parse_args()
     try:
         result=asyncio.run(diagnose(args.image,args.question_file.read_text(encoding='utf8'),args.out,
-                                   model=args.model,report_format=args.report_format))
+                                   model=args.model,report_format=args.report_format,
+                                   context_data=json.loads(args.context_file.read_text(encoding='utf8')) if args.context_file else None))
         print(json.dumps(result,ensure_ascii=False))
         return 0 if result['status']=='completed' else 2
     except (OSError,ValueError,RuntimeError) as error:

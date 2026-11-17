@@ -12,7 +12,8 @@ import numpy as np
 from PIL import Image
 
 from scrap_composite.photoshop import (PhotoshopAdapter, PhotoshopExportRequest, availability,
-                                      file_hash, load_request, validate_actions)
+                                      file_hash, load_request, validate_actions, read_adjustments,
+                                      review_binding, validate_review_binding)
 
 
 class FakePhotoshopSession:
@@ -48,6 +49,7 @@ class FakePhotoshopSession:
         changed = np.asarray(obj).copy()
         values = changed[..., :3].astype(np.float32)
         for action, amount in job["actions"].items():
+            before_action = values.copy()
             if action == "brightness":
                 values += amount
             elif action == "warmth":
@@ -55,6 +57,13 @@ class FakePhotoshopSession:
             elif action == "saturation":
                 neutral = values.mean(axis=2, keepdims=True)
                 values = neutral + (values - neutral) * (1 + amount / 100)
+            elif action in ('black_point','highlights'):
+                values += amount*.1
+            elif action == 'tint':
+                values += [0,-amount,0]
+            if action in job.get('action_masks',{}):
+                mask = np.asarray(Image.open(job['action_masks'][action]))[...,3] > 0
+                values[~mask] = before_action[~mask]
         changed[..., :3] = np.uint8(np.clip(values, 0, 255))
         actual = composite(Image.fromarray(changed))
         if self.sabotage == "outside":
@@ -83,6 +92,25 @@ class FakePhotoshopSession:
             layers.reverse()
         metadata = {"canvas": job["canvas"], "applied": len(job["actions"]), "layers": layers,
                     "mode": "RGB8", "reopened": True, "color_profile": "mock sRGB"}
+        for index, layer in enumerate(layers):
+            layer.update(id=index+1, opacity=100, blend_mode='BlendMode.NORMAL')
+            if not layer['name'].startswith('Object adjustment | '):
+                continue
+            name = layer['name'].split(' | ')[1]; value = job['actions'][name]
+            if name == 'saturation':
+                layer['adjustment'] = [{'colorize':False,'adjustment':[{'hue':0,'saturation':value,'lightness':0}]}]
+                continue
+            channels = {'red':value,'blue':-value} if name == 'warmth' else {'green':-value} if name == 'tint' else {'composite':value}
+            curves = []
+            for channel,delta in channels.items():
+                points = [(0,0),(48,48+delta*.48),(128,128+delta),(208,208+delta*.48),(255,255)]
+                if name == 'black_point': points = [(0,0),(48,48+delta),(128,128),(208,208),(255,255)]
+                elif name == 'highlights': points = [(0,0),(48,48),(128,128),(208,208+delta),(255,255)]
+                curves.append({'channel':{'enumerated':channel},'curve':[{'horizontal':x,'vertical':y} for x,y in points]})
+            layer['adjustment'] = [{'adjustment':curves}]
+        metadata['state'] = {'version':'photoshop-state-v2','document':{'id':1},'layers':layers}
+        if self.sabotage == 'readback_values':
+            layers[0]['opacity'] = 13
         return SimpleNamespace(isError=False, content=[SimpleNamespace(text=json.dumps({
             "success": True, "result": json.dumps(metadata)}))])
 
@@ -167,6 +195,40 @@ class PhotoshopAdapterTests(unittest.IsolatedAsyncioTestCase):
         await adapter.export(self.request, self.root/"once")
         with self.assertRaisesRegex(ValueError, "new_or_empty"):
             await adapter.export(self.request, self.root/"once")
+
+    async def test_readback_receipt_binds_image_state_and_prevents_stale_edits(self):
+        adapter = PhotoshopAdapter(session=FakePhotoshopSession())
+        first = await adapter.export(replace(self.request, actions={'brightness':5}), self.root/'bound')
+        binding = review_binding(first)
+        validate_review_binding(binding)
+        self.assertEqual(first['receipt']['absolute_parameters']['brightness'],5)
+        self.assertEqual(first['local_measurements']['physical_illumination'],'unknown')
+        second = await adapter.export(replace(self.request, actions={'brightness':10},review_binding=binding),self.root/'next')
+        self.assertEqual(second['receipt']['parameter_delta']['brightness'],5)
+        self.assertGreater(second['receipt']['changed_pixels_vs_reviewed_image'],0)
+        Path(binding['image_path']).write_bytes(b'changed')
+        with self.assertRaisesRegex(ValueError,'stale_review_image'):
+            await adapter.export(replace(self.request,actions={'brightness':12},review_binding=binding),self.root/'stale')
+
+    async def test_actual_adjustment_values_are_required_not_echoed_requests(self):
+        session = FakePhotoshopSession()
+        exported = await PhotoshopAdapter(session=session).export(replace(self.request,actions={'brightness':5}),self.root/'read')
+        metadata = exported['photoshop']
+        layer = next(l for l in metadata['state']['layers'] if l['name']=='Object adjustment | brightness')
+        layer['adjustment'][0]['adjustment'][0]['curve'][2]['vertical'] = 180
+        with self.assertRaisesRegex(ValueError,'curve_readback_mismatch'):
+            read_adjustments(metadata,{'brightness':5})
+
+    async def test_registered_material_mask_limits_saturation_to_named_part(self):
+        part=np.zeros((48,64),np.uint8); part[12:38,16:26]=255
+        Image.fromarray(part).save(self.root/'paint.png')
+        request=replace(self.request,actions={'saturation':-20},action_masks={'saturation':self.root/'paint.png'},action_parts={'saturation':'paint_body'})
+        result=await PhotoshopAdapter(session=FakePhotoshopSession()).export(request,self.root/'part')
+        self.assertTrue(result['validation']['checks']['registered_part_masks'])
+        self.assertEqual(result['receipt']['action_parts'],{'saturation':'paint_body'})
+        self.assertLess(result['validation']['changed_object_pixels'],int((np.asarray(Image.open(self.request.object_rgba))[...,3]>0).sum()))
+        with self.assertRaisesRegex(ValueError,'part_mask_registry'):
+            await PhotoshopAdapter(session=FakePhotoshopSession()).export(replace(request,action_parts={}),self.root/'invalidpart')
 
     async def test_actual_photoshop_fixture_if_app_is_already_available(self):
         if os.environ.get("SCRAP_TEST_REAL_PHOTOSHOP") != "1":

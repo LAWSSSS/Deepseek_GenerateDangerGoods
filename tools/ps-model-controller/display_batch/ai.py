@@ -17,7 +17,7 @@ from scrap_composite.photography_protocol import PHOTO_JOB_ID
 
 
 class VisionEndpoint(Endpoint):
-    max_output_tokens: int = Field(default=2048, ge=128, le=4096)
+    max_output_tokens: int = Field(default=2048, ge=128, le=8192)
     response_protocol: Literal['tools','qwen-json'] = 'tools'
 
     @model_validator(mode='after')
@@ -85,7 +85,8 @@ class Vision:
         return result
 
     async def ask(self, role, schema, prompt, payload, images=(), *, cache=True,
-                  image_limits=None,max_output_tokens=None,plain_json=False,planning=False,validate=None,compact=False):
+                  image_limits=None,max_output_tokens=None,plain_json=False,planning=False,validate=None,compact=False,
+                  max_attempts=2):
         previews=[]
         source_hashes=[]
         service=self.planner if planning else self.endpoint
@@ -136,7 +137,9 @@ class Vision:
         async with self.semaphore:
             last_error = None
             retry_payload = payload
-            for attempt in range(2):
+            if max_attempts not in (1, 2):
+                raise ValueError('max_attempts must be 1 or 2')
+            for attempt in range(max_attempts):
                 report = {"calls": []}
                 start = time.monotonic()
                 try:
@@ -146,7 +149,8 @@ class Vision:
                     answer = await ModelClient(self.http, report).ask(endpoint, role, schema,
                         prompt + guidance,
                         retry_payload, images, tool=None if use_json else "inspect_display",
-                        detail=None if qwen else "high",qwen_json=qwen,plain_json=use_json,compact_json=compact)
+                        detail=None if qwen else "high",qwen_json=qwen,plain_json=use_json,compact_json=compact,
+                        max_response_chars=32768 if payload.get('protocol') == 'photo-brief-v3' else 12000)
                     if validate is not None:
                         try:
                             validate(answer)
@@ -161,7 +165,7 @@ class Vision:
                     code = (report["calls"][-1].get("http_status") if report["calls"] else None)
                     if code in (400, 401, 403, 404):
                         raise ProviderUnavailable(f"视觉服务不可用：HTTP {code}") from None
-                    if attempt == 0:
+                    if attempt + 1 < max_attempts:
                         last_call=report['calls'][-1] if report['calls'] else {}
                         retry_payload={**payload,'format_correction':last_call.get('schema_errors')
                             or last_call.get('validation_error') or 'Previous reply was invalid. Use exactly the JSON schema.'}

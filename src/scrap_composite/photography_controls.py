@@ -4,7 +4,7 @@ import math
 from .photography_protocol import ControlChange
 
 
-def _steps(factor, control, current, values, strength, stage, effect):
+def _steps(factor, control, current, values, strength, stage, effect, **metadata):
     """Use the nearest effective absolute value in each direction."""
     origin = strength(current)
     if origin is None:
@@ -19,7 +19,7 @@ def _steps(factor, control, current, values, strength, stage, effect):
         if direction not in nearest or distance < nearest[direction][0]:
             nearest[direction] = distance, value
     return [ControlChange(factor=factor, direction=direction, control=control, current=current,
-                          value=value, effect=effect[direction], stage=stage)
+                          value=value, effect=effect[direction], stage=stage, **metadata)
             for direction, (_, value) in nearest.items()]
 
 
@@ -88,6 +88,27 @@ def composite_changes(params, allowed, photo, *, tone_profiles, light_profiles=N
     if 'surface_dust' in allowed:
         changes.extend(_steps('dust_coverage', 'surface_dust', params['surface_dust'], allowed['surface_dust'],
                               float, 'render', {'increase': '增加表面浮灰覆盖', 'decrease': '减少表面浮灰覆盖'}))
+    if params.get('asset_refinement') == 'component_v1':
+        controls = (
+            ('oxide_gain', 'wear_detail', 'ratio', '增加已确认铁基区域的不规则氧化', '减少已确认铁基区域的不规则氧化'),
+            ('scratch_gain', 'wear_detail', 'ratio', '增加已确认表面的擦伤覆盖', '减少已确认表面的擦伤覆盖'),
+            ('relief_gain', 'wear_detail', 'ratio', '增大物理限幅内的磨损微凹凸', '减小磨损微凹凸'),
+            ('roughness_shift', 'specular_width', 'roughness', '增加已分类基底粗糙度以展宽反射', '降低已分类基底粗糙度以收窄反射'),
+            ('light_width_scale', 'specular_width', 'ratio', '增大宽面光源尺寸以展宽反射', '减小宽面光源尺寸以收窄反射'),
+            ('fill_gain', 'key_fill_ratio', 'ratio', '增加补光以减小主辅光比', '减少补光以增大主辅光比'),
+        )
+        causes = {'oxide_gain':'oxide_distribution', 'scratch_gain':'scratch_distribution',
+                  'relief_gain':'surface_normals', 'roughness_shift':'surface_roughness',
+                  'light_width_scale':'light_size', 'fill_gain':'light_energy'}
+        for control, factor, unit, increase, decrease in controls:
+            if control not in allowed or control not in params:
+                continue
+            # key_fill_ratio is key/fill, distinct from direct/environment light_ratio.
+            invert = control == 'fill_gain'
+            meaning = {'increase': decrease if invert else increase, 'decrease': increase if invert else decrease}
+            changes.extend(_steps(factor, control, params[control], allowed[control],
+                                  (lambda value: -float(value)) if invert else float, 'render', meaning,
+                                  backend='blender', unit=unit, cause=causes[control]))
     return changes
 
 
@@ -97,11 +118,18 @@ def photoshop_changes(current, limits):
         ('exposure', 'brightness', 6, {'increase': '提亮物品曲线中点', 'decrease': '压低物品曲线中点'}),
         ('warmth', 'warmth', 4, {'increase': '红蓝通道微调偏暖', 'decrease': '红蓝通道微调偏冷'}),
         ('chroma', 'saturation', 6, {'increase': '增加物品饱和度', 'decrease': '减少物品饱和度'}),
+        ('black_point', 'black_point', 4, {'increase': '抬升物品暗部曲线点', 'decrease': '降低物品暗部曲线点'}),
+        ('highlight_clip', 'highlights', 4, {'increase': '提亮物品亮部曲线点', 'decrease': '降低物品亮部曲线点'}),
+        ('tint', 'tint', 4, {'increase': '通道曲线偏洋红', 'decrease': '通道曲线偏绿'}),
     ):
+        if control not in current or control not in limits:
+            continue
         low, high = limits[control]
         value = current[control]
         candidates = [max(low, value-step), min(high, value+step)]
         if control == 'saturation':
             candidates = [int(v) for v in candidates]
-        changes.extend(_steps(factor, control, value, candidates, float, 'photoshop', effect))
+        changes.extend(_steps(factor, control, value, candidates, float, 'photoshop', effect,
+                              unit='percent_point' if control == 'saturation' else 'curve_code_value',
+                              backend='photoshop'))
     return changes

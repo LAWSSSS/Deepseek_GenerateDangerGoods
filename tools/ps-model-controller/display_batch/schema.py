@@ -35,9 +35,17 @@ class EffectSettings(Strict):
     contrast_matching: Literal['legacy', 'local'] = 'legacy'
     surface_finish: Literal['existing', 'generated_pbr', 'physical_layers'] = 'existing'
     surface_finish_manifest: str | None = Field(default=None, min_length=1)
+    asset_refinement: Literal['existing', 'component_v1'] = 'existing'
+    render_controls: dict[str, float | str] = Field(default_factory=dict)
 
     @model_validator(mode='after')
     def preserve_limits(self):
+        from scrap_composite.render_controls import validated
+        self.render_controls = validated(self.render_controls)
+        if (self.asset_refinement != 'existing' or self.render_controls) and self.surface_finish != 'physical_layers':
+            raise ValueError('component refinement controls require physical_layers')
+        if self.render_controls and self.asset_refinement != 'component_v1':
+            raise ValueError('render_controls require component_v1')
         if bounded_surface_dust(self.model_dump()) and self.surface_dust > .5:
             raise ValueError('surface_dust must not exceed 0.5 for the selected surface finish')
         if self.rust_relief and self.rust_pattern != 'photo':
@@ -275,7 +283,8 @@ class Defect(Strict):
 
 class Action(Strict):
     kind: Literal["candidate", "material", "light", "tone", "chroma", "dust", "contrast", "haze", "sharpness",
-                  "fog_extra", "pool_kernel", "surface_dust", "fog_gain"]
+                  "fog_extra", "pool_kernel", "surface_dust", "fog_gain",
+                  "oxide_gain", "scratch_gain", "roughness_shift", "relief_gain", "light_width_scale", "fill_gain"]
     value: str = Field(max_length=32)
 
 
@@ -373,6 +382,9 @@ def apply_actions(params, actions, candidate_ids):
                "light": set(LIGHT_PROFILES), "tone": set(TONE_PROFILES)}
     allowed.update({k:set(v) for k,v in PHOTO_CONTROLS.items()})
     allowed.update({k:set(v) for k,v in EFFECT_ACTIONS.items() if params.get('effects_enabled')})
+    if params.get('asset_refinement') == 'component_v1' and params.get('surface_finish') == 'physical_layers':
+        from scrap_composite.render_controls import RENDER_CONTROLS
+        allowed.update({k:set(v) for k,v in RENDER_CONTROLS.items() if k in params})
     if bounded_surface_dust(params) and 'surface_dust' in allowed:
         allowed['surface_dust'] = {value for value in allowed['surface_dust'] if float(value) <= .5}
     seen = set()

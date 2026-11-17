@@ -39,3 +39,5 @@ npm ci --prefix tools/ps-model-controller/placement-web
 视觉服务的地址与模型通过配置设置。批量使用独立的 API 凭据，标准百炼示例为 `batch-config.qwen.example.json`。Token Plan 用于[交互诊断](skills/token-plan-vision/SKILL.md)。凭据由进程环境或本机凭据存储提供。
 
 批次会在指定输出目录存储原尺寸 PNG、`index.html`、`results.jsonl` 和实际请求用量。相同配置和输入可续跑；改变算法或输入后使用新目录。`realism_v1` 是可选的材质与成像试验预设。
+
+逐件模型修复、结构化摄影诊断和 Photoshop 实际回读见[写实工作流](docs/model-realism-workflow.md)。`component_v1` 为独立候选试验；先检查模型，再确认是否进入场景测试。

@@ -18,10 +18,12 @@ function exportObject(job) {
             return layer;
         } finally { opened.close(SaveOptions.DONOTSAVECHANGES); app.activeDocument = doc; }
     }
-    function curve(list, channel, delta) {
+    function curve(list, channel, delta, shape) {
         var c = charIDToTypeID, d = new ActionDescriptor(), ref = new ActionReference(), points = new ActionList();
         ref.putEnumerated(c("Chnl"), c("Chnl"), c(channel)); d.putReference(c("Chnl"), ref);
         var samples = [[0,0],[48,48+delta*.48],[128,128+delta],[208,208+delta*.48],[255,255]];
+        if (shape === "black_point") samples = [[0,0],[48,48+delta],[128,128],[208,208],[255,255]];
+        if (shape === "highlights") samples = [[0,0],[48,48],[128,128],[208,208+delta],[255,255]];
         for (var i=0; i<samples.length; i++) {
             var point = new ActionDescriptor();
             point.putDouble(c("Hrzn"), samples[i][0]); point.putDouble(c("Vrtc"), samples[i][1]);
@@ -39,6 +41,8 @@ function exportObject(job) {
             var channels = new ActionList();
             if (name === "brightness") curve(channels, "Cmps", value);
             else if (name === "warmth") { curve(channels, "Rd  ", value); curve(channels, "Bl  ", -value); }
+            else if (name === "black_point" || name === "highlights") curve(channels, "Cmps", value, name);
+            else if (name === "tint") { curve(channels, "Grn ", -value); }
             else throw Error("photoshop_unknown_adjustment");
             settings.putList(c("Adjs"), channels);
         }
@@ -47,6 +51,24 @@ function exportObject(job) {
         layer.putString(c("Nm  "), "Object adjustment | " + name); layer.putObject(c("Type"), c(type), settings);
         action.putObject(c("Usng"), c("AdjL"), layer); executeAction(c("Mk  "), action, DialogModes.NO);
         doc.activeLayer.grouped = true;
+        if (job.action_masks && job.action_masks[name]) {
+            var adjustmentLayer = doc.activeLayer;
+            var maskLayer = imported(job.action_masks[name], "Temporary registered part mask");
+            doc.activeLayer = maskLayer;
+            var selection = new ActionDescriptor(), selectionRef = new ActionReference(), alphaRef = new ActionReference();
+            selectionRef.putProperty(c("Chnl"),c("fsel")); selection.putReference(c("null"),selectionRef);
+            alphaRef.putEnumerated(c("Chnl"),c("Chnl"),c("Trsp")); selection.putReference(c("T   "),alphaRef);
+            executeAction(c("setd"),selection,DialogModes.NO);
+            maskLayer.remove(); doc.activeLayer = adjustmentLayer;
+            // Replace the initial white adjustment mask with the registered selection.
+            var remove = new ActionDescriptor(), oldMask = new ActionReference();
+            oldMask.putEnumerated(c("Chnl"),c("Chnl"),c("Msk ")); remove.putReference(c("null"),oldMask);
+            executeAction(c("Dlt "),remove,DialogModes.NO);
+            var makeMask = new ActionDescriptor(), at = new ActionReference();
+            makeMask.putClass(c("Nw  "),c("Chnl")); at.putEnumerated(c("Chnl"),c("Chnl"),c("Msk "));
+            makeMask.putReference(c("At  "),at); makeMask.putEnumerated(c("Usng"),c("UsrM"),c("RvlS"));
+            executeAction(c("Mk  "),makeMask,DialogModes.NO); doc.selection.deselect();
+        }
     }
     try {
         app.displayDialogs = DialogModes.NO; app.preferences.rulerUnits = Units.PIXELS;
@@ -62,7 +84,7 @@ function exportObject(job) {
         var foreground = job.foreground_rgba ? imported(job.foreground_rgba, "Foreground and protected | original pixels") : null;
         png(doc, job.outputs.baseline);
         doc.activeLayer = object;
-        var applied = 0, names = ["brightness", "warmth", "saturation"];
+        var applied = 0, names = ["brightness", "black_point", "highlights", "warmth", "tint", "saturation"];
         for (var i=0; i<names.length; i++) {
             if (job.actions[names[i]] !== undefined) { adjustment(names[i], job.actions[names[i]]); applied++; }
         }
@@ -80,15 +102,10 @@ function exportObject(job) {
         isolated.close(SaveOptions.DONOTSAVECHANGES); isolated = null;
         doc.close(SaveOptions.DONOTSAVECHANGES); doc = null;
         reopened = app.open(new File(job.outputs.psd)); png(reopened, job.outputs.reopened);
-        var layers = [];
-        for (var k=0; k<reopened.layers.length; k++) {
-            var current = reopened.layers[k], clipped = false;
-            try { clipped = current.grouped; } catch (notArtLayer) {}
-            layers.push({name:current.name, clipped:clipped, visible:current.visible});
-        }
+        var actualState = psDocumentState(reopened), layers = actualState.layers;
         return JSON.stringify({canvas:[reopened.width.as("px"), reopened.height.as("px")],
             applied:applied, layers:layers, color_profile:reopened.colorProfileName,
-            mode:"RGB8", reopened:true});
+            mode:"RGB8", reopened:true, state:actualState});
     } finally {
         if (reopened) reopened.close(SaveOptions.DONOTSAVECHANGES);
         if (isolated) isolated.close(SaveOptions.DONOTSAVECHANGES);

@@ -74,7 +74,8 @@ def light_rig(environment,camera,gain=1.,shape=(128,256)):
     """No narrow reflection strips; reuse a bounded sky and broad sources."""
     sky,lights=coherent_rig(environment,camera,gain,shape)
     # Keep both emitters broad even when a scene gradient happens to be strong.
-    lights=[(position,power,max(4.8,size)) for position,power,size in lights]
+    minimum = 4.8 * float(environment.get('photographic_light',{}).get('light_width_scale',1.))
+    lights=[(position,power,max(minimum,size)) for position,power,size in lights]
     return sky,lights
 
 

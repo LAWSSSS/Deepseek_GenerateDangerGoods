@@ -17,15 +17,21 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Any
 
 import numpy as np
 from PIL import Image
 
 
-VERSION = "photoshop-object-export-v1"
-LIMITS = {"brightness": (-48., 48.), "warmth": (-24., 24.), "saturation": (-40., 40.)}
+VERSION = "photoshop-object-export-v2"
+LIMITS = {"brightness": (-48., 48.), "black_point": (-24., 24.), "highlights": (-24., 24.),
+          "warmth": (-24., 24.), "tint": (-16., 16.), "saturation": (-40., 40.)}
+UNITS = {name: "saturation_percent_point" if name == "saturation" else "curve_code_value_8bit"
+         for name in LIMITS}
 TEMPLATE = Path(__file__).with_name("photoshop_export.jsx")
+STATE_TEMPLATE = Path(__file__).with_name("photoshop_readback.jsx")
+INSPECT_TEMPLATE = Path(__file__).with_name("photoshop_inspect.jsx")
 
 
 def file_hash(path: Path) -> str:
@@ -60,6 +66,63 @@ def validate_actions(actions: dict[str, float]) -> dict[str, float]:
     return result
 
 
+def read_adjustments(metadata: dict[str, Any], requested: dict[str, float]) -> dict[str, float]:
+    """Decode actual AM values and compare the registered curve, including channel."""
+    state = metadata.get("state", {})
+    layers = state.get("layers", [])
+    ids = [layer.get("id") for layer in layers]
+    if (state.get("version") != "photoshop-state-v2" or not ids
+            or any(type(value) is not int for value in ids) or len(ids) != len(set(ids))):
+        raise ValueError("photoshop_missing_stable_layer_readback")
+    actual = dict.fromkeys(LIMITS, 0.)
+    for name, value in requested.items():
+        rows = [layer for layer in layers if layer.get("name") == "Object adjustment | " + name]
+        if len(rows) != 1:
+            raise ValueError("photoshop_adjustment_readback_missing")
+        layer = rows[0]
+        if layer.get("opacity") != 100 or layer.get("blend_mode") != "BlendMode.NORMAL" or not layer.get("clipped"):
+            raise ValueError("photoshop_adjustment_state_mismatch")
+        try:
+            body = layer["adjustment"][0]
+            adjustments = body["adjustment"]
+            if name == "saturation":
+                if body.get("colorize") is not False or len(adjustments) != 1 or adjustments[0].get("hue") != 0 or adjustments[0].get("lightness") != 0:
+                    raise ValueError("photoshop_saturation_readback_mismatch")
+                actual[name] = float(adjustments[0]["saturation"])
+                if actual[name] != value:
+                    raise ValueError("photoshop_saturation_readback_mismatch")
+                continue
+            expected = {"composite": value}
+            if name == "warmth":
+                expected = {"red": value, "blue": -value}
+            elif name == "tint":
+                expected = {"green": -value}
+            curves = {}
+            for curve in adjustments:
+                channel = curve["channel"]["enumerated"]
+                if channel == "grain":  # Photoshop's charID Grn resolves to this string ID.
+                    channel = "green"
+                curves[channel] = {float(p["horizontal"]): float(p["vertical"]) for p in curve["curve"]}
+            if set(curves) != set(expected):
+                raise ValueError("photoshop_curve_channel_mismatch")
+            for channel, delta in expected.items():
+                points = curves[channel]
+                expected_points = {0:0,48:48+delta*.48,128:128+delta,208:208+delta*.48,255:255}
+                if name == "black_point":
+                    expected_points = {0:0,48:48+delta,128:128,208:208,255:255}
+                elif name == "highlights":
+                    expected_points = {0:0,48:48,128:128,208:208+delta,255:255}
+                # Photoshop stores 8-bit curve ordinates with integer quantization.
+                if set(points) != set(expected_points) or any(abs(points[x]-y) >= 1.01 for x,y in expected_points.items()):
+                    raise ValueError("photoshop_curve_readback_mismatch")
+            point = 48 if name == "black_point" else 208 if name == "highlights" else 128
+            channel = next(iter(expected))
+            actual[name] = (curves[channel][point]-point) * (-1 if name == "tint" else 1)
+        except (KeyError, TypeError, IndexError) as error:
+            raise ValueError("photoshop_adjustment_readback_unparseable") from error
+    return actual
+
+
 @dataclass(frozen=True)
 class PhotoshopExportRequest:
     """All RGBA layers/masks have the full background canvas and fixed pixel origin.
@@ -78,6 +141,31 @@ class PhotoshopExportRequest:
     expected_png: Path | None = None
     geometry_signature: str | None = None
     source_hashes: dict[str, str] = field(default_factory=dict)
+    review_binding: dict[str, str] = field(default_factory=dict)
+    action_masks: dict[str, Path] = field(default_factory=dict)
+    action_parts: dict[str, str] = field(default_factory=dict)
+
+
+def validate_review_binding(binding: dict[str, str]) -> None:
+    """Host-authored evidence paths; the model receives only hashes and layer IDs."""
+    if not binding:
+        return
+    required = {"image_path", "image_sha256", "state_path", "state_sha256"}
+    if set(binding) != required:
+        raise ValueError("photoshop_invalid_review_binding")
+    for key in ("image", "state"):
+        if file_hash(Path(binding[key + "_path"])) != binding[key + "_sha256"]:
+            raise ValueError("photoshop_stale_review_" + key)
+    state = json.loads(Path(binding["state_path"]).read_text(encoding="utf8"))
+    if state.get("image_sha256") != binding["image_sha256"]:
+        raise ValueError("photoshop_review_image_state_mismatch")
+
+
+def review_binding(exported: dict[str, Any]) -> dict[str, str]:
+    image = exported["outputs"]["png"]
+    state = exported["readback"]
+    return {"image_path": image["path"], "image_sha256": image["sha256"],
+            "state_path": state["path"], "state_sha256": state["sha256"]}
 
 
 def load_request(path: str | Path) -> PhotoshopExportRequest:
@@ -90,6 +178,8 @@ def load_request(path: str | Path) -> PhotoshopExportRequest:
     for key in ("background", "object_rgba", "shadow_rgba", "foreground_mask", "protected_mask", "expected_png"):
         if data.get(key) is not None:
             data[key] = (path.parent / data[key]).resolve(strict=True)
+    if 'action_masks' in data:
+        data['action_masks'] = {key:(path.parent / value).resolve(strict=True) for key,value in data['action_masks'].items()}
     request = PhotoshopExportRequest(**data)
     validate_actions(request.actions)
     return request
@@ -120,6 +210,7 @@ def _mask(path: Path | None, shape: tuple[int, int]) -> np.ndarray:
 
 def prepare_request(request: PhotoshopExportRequest, scratch: Path) -> dict[str, Any]:
     actions = validate_actions(request.actions)
+    validate_review_binding(request.review_binding)
     if not isinstance(request.object_id, str) or not request.object_id or len(request.object_id) > 80:
         raise ValueError("invalid_object_identifier")
     if any(ord(char) < 32 for char in request.object_id):
@@ -132,6 +223,13 @@ def prepare_request(request: PhotoshopExportRequest, scratch: Path) -> dict[str,
             if not path.is_file():
                 raise ValueError("registered_input_is_not_a_file")
             inputs[name] = {"path": str(path), "sha256": file_hash(path)}
+    if (set(request.action_masks) != set(request.action_parts) or set(request.action_masks) - set(LIMITS)
+            or any(not isinstance(part,str) or not re.fullmatch(r'[A-Za-z0-9_.-]{1,80}',part) or part == 'whole'
+                   for part in request.action_parts.values())):
+        raise ValueError('photoshop_invalid_part_mask_registry')
+    for name, path in request.action_masks.items():
+        path = Path(path).resolve(strict=True)
+        inputs['action_mask:'+name] = {'path':str(path),'sha256':file_hash(path)}
     if set(request.source_hashes) - set(inputs):
         raise ValueError("unknown_source_hash_identifier")
     for name, expected in request.source_hashes.items():
@@ -167,14 +265,33 @@ def prepare_request(request: PhotoshopExportRequest, scratch: Path) -> dict[str,
         path = scratch / (name + ".png")
         Image.fromarray(pixels).save(path)
         paths[name] = path.as_posix()
+    action_masks = {}
+    adjustment_region = np.zeros(shape,bool)
+    for name in actions:
+        if name in request.action_masks:
+            mask = _mask(request.action_masks[name],shape) & (obj[...,3] > 0) & ~blocked
+            if not mask.any():
+                raise ValueError('photoshop_empty_part_mask')
+            pixels = np.full((*shape,4),255,np.uint8)
+            pixels[...,3] = mask.astype(np.uint8)*255
+            path = scratch / ('part-mask-'+name+'.png')
+            Image.fromarray(pixels).save(path)
+            action_masks[name] = path.as_posix()
+            adjustment_region |= mask
+        else:
+            adjustment_region |= obj[...,3] > 0
     manifest = {"version": VERSION, "object_id": request.object_id, "inputs": inputs,
                 "actions": actions, "geometry_signature": request.geometry_signature,
-                "template_sha256": file_hash(TEMPLATE), "canvas": [shape[1], shape[0]],
+                "template_sha256": file_hash(TEMPLATE), "readback_template_sha256": file_hash(STATE_TEMPLATE),
+                "canvas": [shape[1], shape[0]], "action_units": {n: UNITS[n] for n in actions},
+                "review_binding": request.review_binding,
+                "action_parts": {n:request.action_parts.get(n,'whole') for n in actions},
                 "action_semantics": "absolute_from_original_object_RGBA",
                 "shadow_blend": "normal_prepared_RGBA"}
     return {"manifest": manifest, "paths": paths, "background": background,
             "object_alpha": obj[..., 3], "shadow_alpha": shadow[..., 3],
-            "blocked": blocked, "actions": actions}
+            "blocked": blocked, "actions": actions, "action_masks": action_masks,
+            "adjustment_region": adjustment_region}
 
 
 def verify_exports(prepared: dict[str, Any], request: PhotoshopExportRequest,
@@ -197,6 +314,7 @@ def verify_exports(prepared: dict[str, Any], request: PhotoshopExportRequest,
         protected_and_foreground=np.array_equal(final[blocked], bg[blocked]),
         baseline_outside_layers=np.array_equal(baseline[source_guard], bg[source_guard]),
         only_object_adjusted=np.array_equal(final[alpha == 0], baseline[alpha == 0]),
+        registered_part_masks=np.array_equal(final[~prepared['adjustment_region']],baseline[~prepared['adjustment_region']]),
         transparent_holes=np.array_equal(final[source_guard], bg[source_guard]),
         psd_readback=np.array_equal(final, reopened),
         applied_actions=metadata.get("applied") == len(prepared["actions"]),
@@ -223,6 +341,8 @@ def verify_exports(prepared: dict[str, Any], request: PhotoshopExportRequest,
     checks["adjustments_clipped"] = all(item.get("clipped") is True for item in layers
                                           if item.get("name", "").startswith("Object adjustment | "))
     checks["reopened_RGB8"] = metadata.get("mode") == "RGB8" and metadata.get("reopened") is True
+    actual_actions = read_adjustments(metadata, prepared["actions"])
+    checks["actual_adjustment_readback"] = True
     expected_error = None
     if not prepared["actions"]:
         checks["zero_action_matches_baseline"] = np.array_equal(final, baseline)
@@ -241,6 +361,7 @@ def verify_exports(prepared: dict[str, Any], request: PhotoshopExportRequest,
     if failures:
         raise ValueError("photoshop_validation_failed:" + ",".join(failures))
     return {"status": "pass", "checks": checks, "changed_object_pixels": int(changed.sum()),
+            "actual_parameters": actual_actions,
             "expected_max_rgb_error": expected_error,
             "basis": "actual_PS_PNG_and_reopened_PSD_not_prediction",
             "visual_acceptance": "not_evaluated", "physics_acceptance": "not_evaluated"}
@@ -310,6 +431,7 @@ class PhotoshopAdapter:
         self.timeout = timeout
 
     async def export(self, request: PhotoshopExportRequest, output_dir: str | Path) -> dict[str, Any]:
+        started = time.monotonic()
         output = Path(output_dir).resolve()
         if output.exists() and any(output.iterdir()):
             raise ValueError("photoshop_output_directory_must_be_new_or_empty")
@@ -330,8 +452,9 @@ class PhotoshopAdapter:
                          "object_alpha": scratch / "object-alpha.png"}
                 payload = {**prepared["paths"], "canvas": prepared["manifest"]["canvas"],
                            "object_id": request.object_id, "actions": prepared["actions"],
+                           "action_masks": prepared['action_masks'],
                            "outputs": {name: path.as_posix() for name, path in paths.items()}}
-                script = "var JOB=" + json.dumps(payload, ensure_ascii=True, allow_nan=False) + ";\n" + TEMPLATE.read_text(encoding="utf8")
+                script = "var JOB=" + json.dumps(payload, ensure_ascii=True, allow_nan=False) + ";\n" + STATE_TEMPLATE.read_text(encoding="utf8") + "\n" + TEMPLATE.read_text(encoding="utf8")
                 async def execute(session):
                     response = await asyncio.wait_for(session.call_tool("photoshop_execute_jsx", {"script": script}), self.timeout)
                     if response.isError:
@@ -347,6 +470,7 @@ class PhotoshopAdapter:
                         metadata = await execute(session)
                 if not all(path.is_file() and path.stat().st_size > 0 for path in paths.values()):
                     raise RuntimeError("photoshop_missing_export")
+                validate_review_binding(request.review_binding)
                 validation = verify_exports(prepared, request, paths, metadata)
                 artifacts = {}
                 for name, source in paths.items():
@@ -358,11 +482,91 @@ class PhotoshopAdapter:
                 report.update(status="exported_verified", validation=validation, outputs=artifacts,
                               photoshop=metadata, actions=prepared["actions"],
                               action_semantics="absolute_from_original_object_RGBA")
+                state = {**metadata.get("state", {}), "image_sha256": artifacts["png"]["sha256"],
+                         "psd_sha256": artifacts["psd"]["sha256"]}
+                state_path = output / "photoshop-state.json"
+                _write_json(state_path, state)
+                report["readback"] = {"path": str(state_path), "sha256": file_hash(state_path)}
+                from .photography_measurements import measure_export_regions, region_statistics
+                report["local_measurements"] = measure_export_regions(
+                    _image(paths["png"]), prepared["object_alpha"], blocked=prepared["blocked"],
+                    shadow_alpha=prepared["shadow_alpha"])
+                report['local_measurements']['parts'] = {
+                    request.action_parts[name]: region_statistics(_image(paths['png']),
+                        _mask(path,prepared['object_alpha'].shape) & (prepared['object_alpha'] >= 242) & ~prepared['blocked'])
+                    for name,path in request.action_masks.items()}
+                previous = {}
+                if request.review_binding:
+                    old_path = Path(request.review_binding["state_path"])
+                    previous = json.loads(old_path.read_text(encoding="utf8")).get("applied_parameters", {})
+                state["requested_parameters"] = prepared["actions"]
+                state["applied_parameters"] = validation["actual_parameters"]
+                state["action_parts"] = prepared['manifest']['action_parts']
+                _write_json(state_path, state)
+                report["readback"]["sha256"] = file_hash(state_path)
+                report["receipt"] = {"version": "photoshop-receipt-v2", "previous_binding": request.review_binding,
+                    "image_sha256": artifacts["png"]["sha256"], "state_sha256": report["readback"]["sha256"],
+                    "requested_parameters": prepared["actions"], "absolute_parameters": validation["actual_parameters"], "units": UNITS,
+                    "action_parts": prepared['manifest']['action_parts'],
+                    "parameter_delta": {n: value - previous.get(n, 0.) for n, value in validation["actual_parameters"].items()},
+                    "changed_pixels": validation["changed_object_pixels"], "basis": "actual_export_vs_original_layers",
+                    "visual_status": "not_evaluated", "seconds": round(time.monotonic()-started, 3)}
+                if request.review_binding:
+                    prior_pixels = _image(Path(request.review_binding["image_path"]))
+                    final_pixels = _image(paths["png"])
+                    report["receipt"]["changed_pixels_vs_reviewed_image"] = int(np.any(prior_pixels != final_pixels,axis=2).sum())
         except Exception as exc:
             # No arbitrary exception or server body is copied into the ledger.
+            report['status'] = 'failed'
             report["error_kind"] = type(exc).__name__
             report["error_code"] = str(exc).split(":", 1)[0] if str(exc).startswith("photoshop_") else "input_or_execution_failure"
             _write_json(output / "result.json", report)
             raise
         _write_json(output / "result.json", report)
         return report
+
+    async def inspect(self, psd: str | Path, *, expected_sha256: str,
+                      regions: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+        """Read a registered PSD and bounded pixels; never save changes to the source."""
+        started = time.monotonic()
+        path = Path(psd).resolve(strict=True)
+        if path.suffix.lower() != ".psd" or file_hash(path) != expected_sha256:
+            raise ValueError("photoshop_registered_PSD_changed")
+        if regions is not None and (not isinstance(regions, list) or len(regions) > 12):
+            raise ValueError("photoshop_too_many_measurement_regions")
+        from .photography_measurements import measure_regions
+        measure_regions(np.zeros((1,1,3),np.uint8),regions or [])  # Validate before launching Photoshop.
+        with tempfile.TemporaryDirectory(prefix="ps-inspect-") as directory:
+            preview = Path(directory) / "inspect.png"
+            # Never open/close a user's already open PSD. Inspect an identical private copy.
+            snapshot = Path(directory) / 'registered-copy.psd'
+            shutil.copyfile(path,snapshot)
+            if file_hash(snapshot) != expected_sha256:
+                raise ValueError('photoshop_registered_PSD_changed')
+            payload = {"psd": snapshot.as_posix(), "preview": preview.as_posix()}
+            script = "var JOB=" + json.dumps(payload) + ";\n" + STATE_TEMPLATE.read_text(encoding="utf8") + "\n" + INSPECT_TEMPLATE.read_text(encoding="utf8")
+            async def execute(session):
+                response = await asyncio.wait_for(session.call_tool("photoshop_execute_jsx", {"script": script}), self.timeout)
+                if response.isError:
+                    raise RuntimeError("photoshop_inspection_failed")
+                message = json.loads(response.content[0].text)
+                if message.get("success") is not True:
+                    raise RuntimeError("photoshop_inspection_failed")
+                return json.loads(message["result"])
+            if self.session is not None:
+                state = await execute(self.session)
+            else:
+                available = availability(self.mcp)
+                if not available["available"]:
+                    raise RuntimeError("photoshop_unavailable")
+                async with _session(Path(available["mcp_executable"])) as session:
+                    state = await execute(session)
+            pixels = _image(preview)
+            measured = measure_regions(pixels, regions or [])
+            if file_hash(path) != expected_sha256:
+                raise ValueError("photoshop_inspection_modified_source")
+            return {"state": state, "psd_sha256": expected_sha256,
+                    "image_sha256": file_hash(preview), "measurements": measured,
+                    "pixel_sha256": hashlib.sha256(pixels.tobytes()).hexdigest(),
+                    "source_unchanged": True, "new_model_requests": 0,
+                    "photoshop_calls": 1, "seconds": round(time.monotonic()-started,3)}

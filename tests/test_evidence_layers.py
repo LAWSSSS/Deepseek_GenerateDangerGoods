@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 import numpy as np
-from PIL import Image
+from PIL import Image, PngImagePlugin
 
 from scrap_composite.contracts import PlanProposal, VisualObservation
 from scrap_composite.layers import save_bundle
@@ -127,3 +127,49 @@ class LayerWorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['status'], 'review')
             first, second = [trial['photography_diagnosis']['image_sha256'] for trial in result['trials']]
             self.assertNotEqual(first, second)
+
+    async def test_png_metadata_only_change_stops_before_review_with_or_without_receipt(self):
+        for with_receipt in (False, True):
+            with self.subTest(with_receipt=with_receipt), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory)
+                class Exporter:
+                    calls=0
+                    async def export(self,request,folder):
+                        self.calls+=1;folder.mkdir()
+                        with Image.open(request.expected_png) as source:image=source.convert('RGB')
+                        metadata=PngImagePlugin.PngInfo()
+                        metadata.add_text('export_attempt',str(self.calls))
+                        image.save(folder/'final.png',pnginfo=metadata)
+                        (folder/'final.psd').write_bytes(b'fixture')
+                        result={'outputs':{ext:{'path':str(folder/f'final.{ext}'),
+                                    'sha256':file_hash(folder/f'final.{ext}')} for ext in ('png','psd')},
+                                'validation':{'status':'pass'}}
+                        if with_receipt and self.calls>1:
+                            result['receipt']={'changed_pixels_vs_reviewed_image':0}
+                        return result
+                class Client:
+                    visual_calls=0
+                    plan_calls=0
+                    async def ask(self,role,schema,prompt,payload,images=(),**kwargs):
+                        if role=='execution-plan':
+                            self.plan_calls+=1
+                            return PlanProposal(status='ready',note='fixture',operations=[
+                                {'capability':'brightness','value':8,'evidence_ids':['f1'],'expected_effect':'提亮中间调'}])
+                        self.visual_calls+=1
+                        scores=dict.fromkeys(('support','occlusion','lighting','edge','texture','material','structure'),3)
+                        scores['lighting']=2
+                        return VisualObservation(trace='visible',scores=scores,summary='fixture',findings=[
+                            {'code':'lighting','severity':'minor','visibility':'visible','scope':'image',
+                             'region':(.3,.3,.7,.7),'confidence':.9,'direction':'increase','evidence':'物品偏暗'}])
+                adapter,client=Exporter(),Client()
+                result=await refine_photoshop(self.fixture(root),root/'result',adapter,client)
+                self.assertEqual(adapter.calls,2)
+                self.assertEqual(client.visual_calls,1)
+                self.assertEqual(client.plan_calls,1)
+                self.assertEqual(result['reason'],'no_effective_pixel_change')
+                self.assertEqual(result['best_iteration'],0)
+                self.assertEqual(result['status'],'review')
+                a,b=result['trials']
+                self.assertNotEqual(a['export']['outputs']['png']['sha256'],b['export']['outputs']['png']['sha256'])
+                self.assertEqual(a['pixel_sha256'],b['pixel_sha256'])
+                self.assertEqual(result['outputs']['png']['sha256'],a['export']['outputs']['png']['sha256'])

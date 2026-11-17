@@ -206,7 +206,9 @@ class ModelClient:
         self.http, self.report = http, report
 
     async def ask(self, endpoint, role, schema, system, payload, previews=(), *, tool=None, detail=None,
-                  qwen_json=False,plain_json=False,compact_json=False):
+                  qwen_json=False,plain_json=False,compact_json=False,max_response_chars=12000):
+        if type(max_response_chars) is not int or not 12000 <= max_response_chars <= 65536:
+            raise ValueError('response character budget outside 12000..65536')
         key = os.environ.get(endpoint.key_env) if endpoint.key_env else None
         if endpoint.key_env and not key:
             raise ValueError(f"missing environment variable {endpoint.key_env}")
@@ -263,6 +265,8 @@ class ModelClient:
                                                       "prompt_cache_hit_tokens","prompt_cache_miss_tokens")
                                 if type(usage.get(k)) is int and usage[k] >= 0}
             choice = data["choices"][0]
+            log['finish_reason'] = choice.get('finish_reason')
+            log['truncated'] = choice.get('finish_reason') == 'length'
             if choice.get("finish_reason") in {"length", "content_filter"}:
                 raise RuntimeError(f"{role} output truncated or filtered")
             message=choice["message"]
@@ -275,14 +279,18 @@ class ModelClient:
                 raw=selected[0]["function"]["arguments"]
             else:
                 raw=message["content"]
-            if not isinstance(raw, str) or len(raw) > 12000:
+            log['response_chars'] = len(raw) if isinstance(raw, str) else None
+            log['response_char_limit'] = max_response_chars
+            if not isinstance(raw, str) or len(raw) > max_response_chars:
+                log['format_issue'] = 'invalid_response_size'
                 raise ValueError("invalid response size")
             return schema.model_validate_json(raw)
         except ValidationError as error:
             errors = error.errors(include_input=False, include_context=False, include_url=False)
             log["schema_errors"] = [
                 {"path": list(item["loc"]), "type": item["type"],
-                 **({"rule": item["msg"][:120]} if compact_json and item["type"] == "value_error" else {})}
+                 **({"rule": item["msg"][:240]} if compact_json and item["type"] in
+                    ("value_error", "literal_error", "missing", "too_long", "too_short") else {})}
                 for item in errors[:10]
             ]
             raise ValueError(f"{role} did not return valid {schema.__name__} JSON") from None

@@ -139,8 +139,9 @@ class ReviewV2Tests(unittest.IsolatedAsyncioTestCase):
                 await client.http.aclose()
                 async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
                     client.http=http
-                    with self.assertRaises(InvalidStructuredReply):
-                        await run_photography(client,PhotoContext(images=['frame']),'a'*64,images=[png])
+                    result = await run_photography(client,PhotoContext(images=['frame']),'a'*64,images=[png])
+                    self.assertEqual(result.report.findings[0].visibility, 'unassessable')
+                    self.assertEqual(len(result.report.issues), 1)
             self.assertEqual(len(calls),2)
 
 

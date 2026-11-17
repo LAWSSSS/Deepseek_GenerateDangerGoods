@@ -105,7 +105,10 @@ class PhotographyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(compile_plan(plan, scope), {'brightness': 6})
         with self.assertRaisesRegex(ValueError, 'unavailable'):
             scope.bind(PhotoChoice(option='a2', reason='match'))
-        new_scope = scope_plan(report, context, changes, parameters={**current, 'warmth': 4})
+        new_current = {**current, 'warmth': 4}
+        with self.assertRaisesRegex(ValueError, 'current value'):
+            scope_plan(report, context, changes, parameters=new_current)
+        new_scope = scope_plan(report, context, photoshop_changes(new_current, LIMITS), parameters=new_current)
         with self.assertRaisesRegex(ValueError, 'stale or modified'):
             compile_plan(plan, new_scope)
         with self.assertRaisesRegex(ValueError, 'stale or modified'):
@@ -123,15 +126,15 @@ class PhotographyTests(unittest.IsolatedAsyncioTestCase):
             payload = json.loads(content[0]['text'] if isinstance(content, list) else content)
             schema = payload['response_JSON_schema']
             self.assertNotIn('title', schema)
-            if payload['protocol'] == 'photo-brief-v2':
+            if payload['protocol'] == 'photo-brief-v3':
                 self.assertEqual(len(content), 3)
                 reply = brief(finding(observed_state='too_low', reference_role='scene',
-                    reference_region=[.1,.35,.27,.67])).model_dump(mode='json')
+                    reference_region=[.1,.35,.27,.67], hypothesis='局部照明偏弱，需排除材质反射率差异')).model_dump(mode='json')
             else:
                 self.assertIsInstance(content, str)
                 self.assertEqual(len(payload['options']), 1)
                 self.assertEqual(payload['options'][0]['value'], 'brighter')
-                self.assertNotIn('image_sha256', payload)
+                self.assertEqual(payload['image_sha256'], file_hash(image))
                 reply = {'option': 'a1', 'reason': 'match'}
             return httpx.Response(200, json={'choices': [{'finish_reason': 'stop',
                 'message': {'content': json.dumps(reply)}}],
@@ -162,7 +165,7 @@ class PhotographyTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(steps[0]['evidence_id'], 'f1')
                     self.assertEqual(plan['image_sha256'], file_hash(image))
                 self.assertEqual([r['model'] for r in requests], ['fixture-vision','fixture-planner'])
-                self.assertEqual([r['max_tokens'] for r in requests], [1536,256])
+                self.assertEqual([r['max_tokens'] for r in requests], [3072,1024])
                 self.assertEqual(client.usage()['api_calls'], 2)
                 self.assertEqual(client.cache_hits, 2)
                 self.assertEqual(client.usage()['reported_tokens'], 300)

@@ -501,6 +501,9 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
         photo['surface_context']={'applied':False,'reason':'material_and_atmosphere_not_matched_to_ground'}
         photo['color_pipeline']='scene_linear_EXR_exposure_WB_AgX_once_scene_air_shadow_occlusion_single_camera'
         stage_measurements['occlusion_and_camera']=imaging_measurement(result,visible_alpha)
+    from .render_readback import compact_readback
+    for key in ('material_readback','lighting_readback'):
+        if render_meta.get(key):photo[key]=compact_readback(render_meta[key])
     if chroma_groups is not None:
         exported_preview=np.rint(np.clip(result,0,1)*255).astype(np.float32)/255
         initial_final=measure(exported_preview,chroma_groups,chroma_limits)

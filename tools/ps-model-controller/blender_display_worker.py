@@ -1080,6 +1080,9 @@ def render_parts(request):
     hdri=request.get('scanned_hdri')
     scene_lighting(state,camera,request['environment'],request.get('light_gain',1.),reference and not hdri,hdri)
     adapted=configure_materials(obj,request,reference)
+    from display_batch.render_readback import material_state, lighting_state
+    material_readback=material_state(obj)
+    lighting_readback=lighting_state(scene)
     base_faces=len(obj.data.polygons)
     fine_render_mesh(obj,request)
     normal=np.asarray(request.get('plane_normal',[0,0,1]),dtype=float)
@@ -1163,6 +1166,7 @@ def render_parts(request):
             'scanned_materials':adapted if request.get('surface_scans') else [],
             'matte_materials':adapted if matte is not None else [],
             'generated_finish':finish_metadata,
+            'material_readback':material_readback,'lighting_readback':lighting_readback,
             'integration_mode':integration_mode,
             'render_mesh_detail':{'profile':request.get('render_detail','standard'),
                 'base_faces':base_faces,'render_faces':base_faces*(4 if request.get('render_detail')=='fine' else 1),

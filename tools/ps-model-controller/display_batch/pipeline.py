@@ -313,10 +313,12 @@ class Pipeline:
                     pack = await asyncio.to_thread(load_pack, path)
                 if params.get('surface_finish') == 'physical_layers':
                     from .physical_material import prepare_finish
+                    from .asset_profiles import load_profile
                     size = asset.get('physical_size',{}).get('nominal_mm')
                     if size is None:
                         lo,hi=asset['semantic']['major_mm'];size=math.sqrt(lo*hi)
-                    extras['generated_finish']=await asyncio.to_thread(prepare_finish,asset,self.cache,pack,size/1000)
+                    profile=load_profile(asset['mesh_hash']) if params.get('asset_refinement') == 'component_v1' else None
+                    extras['generated_finish']=await asyncio.to_thread(prepare_finish,asset,self.cache,pack,size/1000,profile=profile)
                     regions=extras['generated_finish']['regions']
                 else:
                     regions = await asyncio.to_thread(finish_regions, asset, pack, self.cache)
@@ -794,7 +796,7 @@ class Pipeline:
                     from .structured import inspect_frame
                     profile=getattr(self.config,'review_profile','legacy')
                     observation,review=await inspect_frame(self.vision,asset,comp,draft['image_hash'],
-                                                           profile=profile)
+                                                           profile=profile,parameters=params)
                 else:
                     review=await inspect(self.vision,REVIEW_PROMPT,asset,comp,params,allowed,folder_render,
                         compact=self.config.review_format=='compact',geometry_board=geometry_board,

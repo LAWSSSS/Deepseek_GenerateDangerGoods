@@ -12,6 +12,7 @@ from .strict_contact import pose_review_context, reconcile_pose_evidence
 
 
 def frame_inputs(asset, comp):
+    from .asset_profiles import load_profile, descriptor
     width, height = comp['checks']['size']['pixels']
     left, top, right, bottom = comp['edit_bounds']
     semantic = asset.get('semantic', {})
@@ -19,21 +20,27 @@ def frame_inputs(asset, comp):
     paths = [(kind, comp[key]) for kind, key in (('frame', 'image'), ('local', 'crop')) if comp.get(key)]
     if asset.get('board'):
         paths.append(('asset', asset['board']))
+    profile=load_profile(asset.get('mesh_hash'))
     context = PhotoContext(
         name=asset['name'][:80], target_region=(left/width, top/height, right/width, bottom/height),
         images=[kind for kind, _ in paths], material=[s[:24] for s in semantic.get('material_classes', [])[:6]],
-        features=[s[:42] for s in semantic.get('key_features', [])[:4] if s.strip()],
+        features=[s[:160] for s in semantic.get('key_features', [])[:12] if s.strip()],
         intended_pose='lying_on_side', axis_deg=pose['measured_axis_angle_deg'],
         checks={key: value['status'] for key, value in comp['checks'].items()},
         measurements=measurements(comp.get('photo', {})),
+        asset_profile=descriptor(profile) if profile else {},
+        execution_state=comp.get('execution_state', {}),
+        measurement_evidence={key:comp['photo'][key] for key in ('effects','calibration','material_readback','lighting_readback') if key in comp.get('photo',{})},
     )
     return context, [path for _, path in paths]
 
 
-async def inspect_frame(client, asset, comp, image_hash, *, profile='legacy'):
+async def inspect_frame(client, asset, comp, image_hash, *, profile='legacy', parameters=None):
     if profile == 'photographer':
+        if parameters is not None:
+            comp={**comp,'execution_state':{'parameters':dict(parameters), 'image_sha256':image_hash}}
         context, images = frame_inputs(asset, comp)
-        decision = await run_photography(client, context, image_hash, images=images)
+        decision = await run_photography(client, context, image_hash, images=images, parameters=parameters)
         return decision.report, _review(decision.report.legacy(), comp['checks'])
     width, height = comp['checks']['size']['pixels']
     left, top, right, bottom = comp['edit_bounds']
@@ -132,6 +139,9 @@ async def plan_frame(client, report, review, comp, params, allowed, ids, seen, *
     if isinstance(report, PhotoReport):
         from .common import file_hash
         try:
+            observed = report.context.execution_state.get('parameters')
+            if observed is not None and observed != params:
+                raise ValueError('parameters changed since image diagnosis')
             changes = composite_changes(params, allowed, comp['photo'], tone_profiles=TONE_PROFILES,
                                         light_profiles=LIGHT_PROFILES)
             changes = [change for change in changes if not seen({**params, change.control: change.value})]

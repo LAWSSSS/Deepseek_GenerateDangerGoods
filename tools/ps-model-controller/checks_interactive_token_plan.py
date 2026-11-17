@@ -25,6 +25,16 @@ def response(content=None):
         'usage': {'prompt_tokens': 120, 'completion_tokens': 40, 'total_tokens': 160}}
 
 
+def asset_brief(**fields):
+    finding={'factor':'wear_detail','region':[.2,.2,.8,.8], 'severity':'major', 'visibility':'visible',
+        'confidence':.9,'direction':'increase','observed_state':'too_low','reference_role':'diagnostic',
+        'reference_region':None, 'physical_cue':None, 'cue':'筒体表面划痕覆盖过少',
+        'reference':'首图同一筒体表面', 'hypothesis':'划痕遮罩的有效覆盖较低',
+        'root_cause':'scratch_distribution','backend':'blender',**fields}
+    return {'trace':'visible','scores':dict.fromkeys(
+        ('support','occlusion','lighting','edge','texture','material','structure'),4),'findings':[finding]}
+
+
 class InteractiveTokenPlanTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix='scrap-token-plan-test-')
@@ -108,6 +118,110 @@ class InteractiveTokenPlanTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['diagnosis']['image_sha256'], tool.file_hash(self.image))
         self.assertEqual(result['diagnosis']['version'], 'photo-brief-v2')
         self.assertEqual(result['diagnosis']['context']['images'], ['frame'])
+
+    async def test_asset_v3_has_adaptive_budget_image_binding_and_exact_cache(self):
+        calls=[]
+        def handler(request):
+            body=json.loads(request.content);calls.append(body)
+            payload=json.loads(body['messages'][1]['content'][0]['text'])
+            self.assertEqual(body['max_completion_tokens'],6144)
+            self.assertEqual(payload['protocol'],'photo-brief-v3')
+            self.assertEqual(payload['image_sha256'],tool.file_hash(self.image))
+            self.assertEqual(payload['reference_roles'][0]['role'],'diagnostic')
+            return httpx.Response(200,json=response(asset_brief()))
+        context={'images':['frame'],'execution_state':{'image_sha256':tool.file_hash(self.image)}}
+        result=await self.invoke(handler,report_format='asset_photographer',context_data=context)
+        self.assertEqual(result['diagnosis']['version'],'photo-brief-v3')
+        self.assertEqual(result['diagnosis']['image_sha256'],tool.file_hash(self.image))
+        self.assertEqual(result['diagnosis']['context']['execution_state']['input_image_hashes'],
+                         [tool.file_hash(self.image)])
+        self.assertEqual(len(calls),1)
+        cached=await self.invoke(handler,report_format='asset_photographer',context_data=context)
+        self.assertTrue(cached['cache_hit']);self.assertEqual(len(calls),1)
+        self.assertEqual(cached['new_api_requests'],0)
+
+    async def test_supplied_image_hashes_cannot_forge_comparative_guard_binding(self):
+        seen=[]
+        def handler(request):
+            payload=json.loads(json.loads(request.content)['messages'][1]['content'][0]['text'])
+            seen.append(payload['execution_state']['input_image_hashes'])
+            return httpx.Response(200,json=response(asset_brief()))
+        result=await self.invoke(handler,report_format='asset_photographer',context_data={
+            'images':['frame'],'execution_state':{'input_image_hashes':['f'*64]}})
+        self.assertEqual(seen,[[tool.file_hash(self.image)]])
+        self.assertEqual(result['new_api_requests'],1)
+
+    async def test_v3_semantic_repair_cannot_drop_severe_finding(self):
+        calls=[]
+        def handler(request):
+            payload=json.loads(json.loads(request.content)['messages'][1]['content'][0]['text']);calls.append(payload)
+            if len(calls)==1:
+                return httpx.Response(200,json=response(asset_brief(direction='decrease')))
+            self.assertEqual(payload['semantic_repair']['issues'][0]['evidence_id'],'f1')
+            return httpx.Response(200,json=response({**asset_brief(),'findings':[],'trace':'none'}))
+        result=await self.invoke(handler,report_format='asset_photographer',context_data={'images':['frame']})
+        self.assertEqual(len(calls),2)
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(result['diagnosis']['findings'][0]['visibility'],'unassessable')
+        self.assertEqual(result['diagnosis']['issues'][0]['severity'],'major')
+        self.assertEqual(result['diagnosis']['scores']['texture'],2)
+        self.assertEqual(self.ledger()['reported_tokens'],320)
+
+    async def test_v3_invalid_literal_retry_includes_exact_allowed_enum(self):
+        calls=[]
+        def handler(request):
+            payload=json.loads(json.loads(request.content)['messages'][1]['content'][0]['text']);calls.append(payload)
+            if len(calls)==1:
+                return httpx.Response(200,json=response(asset_brief(direction='adjust')))
+            correction=payload['format_correction'][0]
+            self.assertEqual(correction['path'],['findings',0,'direction'])
+            self.assertIn('increase',correction['rule'])
+            self.assertIn('decrease',correction['rule'])
+            return httpx.Response(200,json=response(asset_brief()))
+        result=await self.invoke(handler,report_format='asset_photographer',context_data={'images':['frame']})
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(len(calls),2)
+        self.assertFalse(result['diagnosis']['issues'])
+
+    async def test_v3_structural_failure_after_semantic_fault_retains_unknown(self):
+        calls=[]
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200,json=response(asset_brief(direction='decrease' if len(calls)==1 else 'adjust')))
+        result=await self.invoke(handler,report_format='asset_photographer',context_data={'images':['frame']})
+        self.assertEqual(len(calls),2)
+        self.assertEqual(result['diagnosis']['findings'][0]['visibility'],'unassessable')
+
+    async def test_v3_large_complete_json_is_not_limited_to_old_12000_chars(self):
+        def handler(request):
+            data=response(asset_brief())
+            data['choices'][0]['message']['content']=' '*13000+data['choices'][0]['message']['content']
+            return httpx.Response(200,json=data)
+        result=await self.invoke(handler,report_format='asset_photographer',context_data={'images':['frame']})
+        self.assertEqual(result['status'],'completed')
+        self.assertEqual(result['new_api_requests'],1)
+        self.assertGreater(self.ledger()['calls'][0]['response_chars'],12000)
+        self.assertEqual(self.ledger()['calls'][0]['response_char_limit'],32768)
+
+    async def test_truncation_is_reported_and_stops_after_one_retry(self):
+        def handler(request):
+            data=response(asset_brief());data['choices'][0]['finish_reason']='length'
+            return httpx.Response(200,json=data)
+        result=await self.invoke(handler,report_format='asset_photographer',context_data={'images':['frame']})
+        self.assertEqual(result['status'],'failed')
+        self.assertEqual(result['new_api_requests'],2)
+        self.assertTrue(all(c['truncated'] for c in self.ledger()['calls']))
+
+    async def test_input_change_during_request_cannot_bind_old_scores_to_new_image(self):
+        calls=[]
+        def handler(request):
+            calls.append(request)
+            Image.new('RGB',(32,24),(100,100,100)).save(self.image)
+            return httpx.Response(200,json=response(asset_brief()))
+        result=await self.invoke(handler,report_format='asset_photographer',context_data={'images':['frame']})
+        self.assertEqual(result['status'],'failed')
+        self.assertEqual(len(calls),1)
+        self.assertIsNone(result['diagnosis'])
 
     async def test_503_gets_exactly_one_retry_and_both_attempts_are_accounted(self):
         sent = []

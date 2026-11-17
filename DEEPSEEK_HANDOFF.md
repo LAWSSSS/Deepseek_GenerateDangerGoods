@@ -1,5 +1,7 @@
 # DeepSeek Harness 项目交接
 
+**2026-11-17 模型检查点：暂不进入场景测试。** [四件资产与可测量执行记录](docs/history/DISPLAY_ASSET_CHECKPOINT.md)；[维护与入口](docs/model-realism-workflow.md)。新增 v3 摄影诊断、实际 Photoshop/Blender 读回、受限材质／照明操作及部件档案。五件共 36 张完整模型图已交付，四件写实尚未达标；13 几乎不变却被视觉模型判断退化，比较结果单列不可信。44 源模型不变、生产默认不变。当前对话诊断共 12 请求／131,004 token，金额未知。用户确认模型前不得启动 12 场景小样，Token Plan 仍不用于无人值守批处理。
+
 **本轮已实现证据流程。** 使用 `workflow=evidence_v1` 开启凹处选位和结构化模型执行，独立 Photoshop 入口读取程序导出的合成清单。实景留出 12 项在车宽对应不足处停止；实际 Photoshop 三操作夹具和 qwen 结构化协议验证通过。参数库收录 273 条记录，批准规则为 0。完整运行方式、失败原因和用量见 [结构化执行记录](docs/history/DISPLAY_EVIDENCE_WORKFLOW.md)。
 
 **最新用户结论：16图离线版效果退化，不采用。** [现场证据与 Token Plan 记录](docs/history/DISPLAY_CONTACT_EVIDENCE_TOKEN_PLAN.md)。用户选择套餐用于当前 Codex 交互诊断，已安装 `token-plan-vision`，真实调用 `qwen3.7-plus` 成功；批量继续暂停，未换批处理凭据/后台。新 coherent 车辆观测不再强制臆测宽度线，候选/接收片按可见深度连续区域构建，模拟间隙通过不能升级现场接触。265项回归通过、实际1请求4513token，无新渲染；Credits及现金金额未知。几何实际改善尚未重新生成验证，摄影的受光/反差和模糊预算仍未解决。

@@ -36,6 +36,9 @@ def reference_resolution(candidate):
 
 
 def render_request(asset,candidate,params,environment):
+    if params.get('asset_refinement') == 'component_v1':
+        from scrap_composite.render_controls import light_controls
+        environment = {**environment, 'photographic_light': light_controls(params)}
     request={'mesh':asset['mesh'],'matrix':candidate['matrix'],'yaw':candidate['yaw'],
              'plane_normal':candidate.get('plane_normal',[0,0,1]),
              'elevation':candidate['elevation'],'environment':environment,
@@ -81,7 +84,7 @@ def reference_path(cache,asset,candidate,params,environment,device='OPTIX',resol
 def render_dependencies():
     files=['blender_display_worker.py','blender_worker.py','display_batch/geometry.py',
            'display_batch/framing.py','display_batch/materials.py','display_batch/rendering.py','display_batch/contact_geometry.py',
-           'display_batch/scanned_shader.py','display_batch/local_light.py']
+           'display_batch/scanned_shader.py','display_batch/local_light.py','display_batch/render_readback.py']
     return signature('blender-4.5.3',{name:file_hash(HERE/name) for name in files})
 
 
@@ -93,7 +96,7 @@ def finish_dependencies():
 
 def part_keys(request, device, dependencies, *, include_detail=True):
     windows=request['windows']
-    fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe','local_irradiance','integration_mode','realism_light')
+    fields=('world_color','light_color','key_direction','light_level','light_spread','reflection_probe','local_irradiance','integration_mode','realism_light','photographic_light')
     environment=request['environment']
     light={k:environment[k] for k in fields if k in environment}
     light['calibrated']=bool(environment.get('calibration'))
@@ -178,6 +181,10 @@ class RenderCache:
             request['matte_profile']=matte_profile
         if generated_finish is not None:
             request['generated_finish'] = generated_finish
+            if params.get('asset_refinement') == 'component_v1':
+                from scrap_composite.render_controls import material_controls
+                from .physical_material import refine_finish
+                request['generated_finish'] = refine_finish(generated_finish, material_controls(params))
         keys=part_keys(request,self.worker.device,render_dependencies())
         archived_receiver = None if object_only else self.archived_receiver(request, shadow_reference)
         if object_only:
@@ -261,6 +268,9 @@ class RenderCache:
                     info['matte_materials']=response['matte_materials']
                 if part == 'object' and request.get('generated_finish'):
                     info['generated_finish'] = response['generated_finish']
+                if part == 'object':
+                    for key in ('material_readback','lighting_readback'):
+                        if key in response:info[key]=response[key]
                 if part=='with_shadow' and request.get('scanned_hdri'):
                     info.update(shadow_basis=response['shadow_basis'],
                                 shadow_catcher_fallback=response['shadow_catcher_fallback'])
@@ -295,6 +305,8 @@ class RenderCache:
                     render_mesh_detail=worker_detail or {'profile':request.get('render_detail','standard'),
                         'rust_spots':float(request.get('rust_spots',0.))})
         if shadow_pair:meta['shadow_pair_validation']=shadow_pair
+        for key in ('material_readback','lighting_readback'):
+            if key in obj:meta[key]=obj[key]
         if request.get('surface_scans'):
             meta['scanned_materials']=obj.get('scanned_materials',[])
         if request.get('matte_partitions'):
@@ -303,6 +315,10 @@ class RenderCache:
             meta['matte_profile']=request['matte_profile']
         if request.get('generated_finish'):
             meta['generated_finish'] = obj['generated_finish']
+            if request['generated_finish'].get('controls'):
+                meta['registered_material_controls'] = request['generated_finish']['controls']
+        if request['environment'].get('photographic_light'):
+            meta['registered_light_controls'] = request['environment']['photographic_light']
         if request.get('scanned_hdri') and 'with_shadow' in entries:
             meta.update({k:entries['with_shadow'].get(k) for k in ('shadow_basis','shadow_catcher_fallback')})
         return Path(obj['path']),meta,not missing

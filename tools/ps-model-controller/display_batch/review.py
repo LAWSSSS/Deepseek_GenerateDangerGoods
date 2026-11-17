@@ -117,6 +117,15 @@ def allowed_actions(params, comp, candidate_ids, *, render_style, adjustable=Tru
         # use their dedicated controls; old screen-weathering knobs do nothing.
         for name in ('chroma','contrast','dust','haze','pool_kernel','material'):
             options.pop(name,None)
+    if (params.get('asset_refinement') == 'component_v1' and params.get('effects_ai_adjust', True)
+            and params.get('review_profile') == 'photographer'):
+        from scrap_composite.render_controls import MATERIAL_CONTROLS, LIGHT_CONTROLS
+        material_domains = photo.get('material_readback', {}).get('control_domains', {})
+        options.update({key:list(values) for key,values in MATERIAL_CONTROLS.items()
+                        if key in params and material_domains.get(key) is True})
+        light_domains = photo.get('lighting_readback', {}).get('control_domains', {})
+        options.update({key:list(values) for key,values in LIGHT_CONTROLS.items()
+                        if key in params and light_domains.get(key) is True})
     controls=photo.get('effective_controls',{})
     for kind,values in list(options.items()):
         current=params[kind]
@@ -179,6 +188,10 @@ def repair(params, review, allowed, candidate_ids, seen, *, dust_in_shader=False
     selected=[];log=[];selected_causes=None;stage=None
     for action in review.actions if suggestions is None else suggestions:
         kind,value=action.kind,action.value
+        if kind not in ACTION_CAUSES:
+            log.append({'action':action.model_dump(),'from':params.get(kind),
+                        'disposition':'requires_typed_photographic_diagnosis'})
+            continue
         dependency='placement' if kind=='candidate' else 'lighting' if kind=='light' else (
             'material' if kind in ('material','surface_dust') or (kind=='dust' and dust_in_shader) else 'photography')
         causes=ACTION_CAUSES[kind]&(severe or limiting or visible)

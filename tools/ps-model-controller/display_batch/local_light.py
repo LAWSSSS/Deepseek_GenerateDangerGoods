@@ -241,6 +241,16 @@ def coherent_rig(environment, camera, gain=1., shape=(128, 256)):
     key = 115*float(evidence['level'])*gain
     fill_ratio = .14+.16*float(np.clip(evidence['fill_ratio'],0,1))
     lights = [(tuple(offset), key, 4.8-1.4*confidence), (tuple(toward), key*fill_ratio, 5.8)]
+    controls = environment.get('photographic_light')
+    if controls:
+        # Absolute, bounded changes to source size and fill; source power stays
+        # unchanged when widening a light. These are not surface roughness edits.
+        width = float(controls.get('light_width_scale', 1.))
+        fill = float(controls.get('fill_gain', 1.))
+        if not (.75 <= width <= 1.25 and .75 <= fill <= 1.25):
+            raise ValueError('invalid photographic light controls')
+        lights = [(position, power*(fill if i else 1.), size*width)
+                  for i, (position, power, size) in enumerate(lights)]
     return np.float32(sky), lights
 
 
