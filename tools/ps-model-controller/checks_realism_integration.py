@@ -45,6 +45,17 @@ def request():
 
 
 class EntryContracts(unittest.TestCase):
+    def test_veil_at_missing_tile_transitions_without_a_hard_seam(self):
+        valid = np.array([[True, False], [True, False]])
+        grid = np.float32([[.4, 0.], [.4, 0.]])
+        field = scene_atmosphere._field(grid, valid, (240, 60), 0.)
+        self.assertAlmostEqual(float(field[30, 0]), .4)
+        self.assertEqual(float(field[30, -1]), 0.)
+        self.assertLess(float(np.abs(np.diff(field[30])).max()), .01)
+        self.assertTrue(np.all(np.diff(field[30]) <= 1e-6))
+        air = scene_atmosphere._field(np.repeat(grid[..., None], 3, axis=2), valid, (240, 60), .5)
+        self.assertTrue(np.allclose(air[:, -1, :], .5))
+
     def test_old_configuration_and_manual_fog_semantics_stay_unchanged(self):
         legacy=config()
         self.assertEqual(legacy.preset,'existing')

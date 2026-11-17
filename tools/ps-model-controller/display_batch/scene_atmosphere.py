@@ -18,7 +18,7 @@ from .atmosphere import field_crop, regions_mask
 from .common import atomic_json, signature, file_hash
 from .photography import linear, LUMA
 
-VERSION = 'scene-veil-atlas-v1'
+VERSION = 'scene-veil-atlas-v2'
 LONG_EDGE = 512
 CELL = 32
 RADII = (24, 48, 72)
@@ -63,8 +63,12 @@ def _field(grid, mask, size, fallback):
     coverage = cv2.resize(np.float32(mask), size, interpolation=cv2.INTER_LINEAR)
     extra = (None,) if grid.ndim == 3 else ()
     values = cv2.resize(grid*mask[(...,)+extra], size, interpolation=cv2.INTER_LINEAR)
-    return np.where((coverage > .2)[(...,)+extra],
-                    values/np.maximum(coverage, 1e-6)[(...,)+extra], fallback).astype(np.float32)
+    # Fade toward the uncertain fallback as the supported interpolation
+    # weight vanishes. A hard cutoff draws a veil edge through a solid object.
+    observed = values / np.maximum(coverage, 1e-6)[(...,)+extra]
+    balance = np.clip(coverage / .65, 0., 1.)
+    balance = (balance * balance * (3. - 2. * balance))[(...,)+extra]
+    return (observed * balance + fallback * (1. - balance)).astype(np.float32)
 
 
 def estimate(scene):

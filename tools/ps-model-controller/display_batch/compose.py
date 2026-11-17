@@ -277,7 +277,7 @@ def compose(scene,candidate,render_dir,render_meta,environment,samples,params,se
     rgb,photo=match_linear(raw,alpha,reference_pixels,highlight,params,seed,photo_environment,
                            reference=reference,camera_capture=not (native or local),
                            surface_weathering=not any(name in render_meta for name in
-                               ('scanned_materials', 'matte_profile', 'generated_finish')),
+                               ('scanned_materials', 'matte_profile', 'generated_finish', 'packed_subject')),
                            fixed_tone=fixed_tone,**channels)
     photo['radiance_basis']='combined_EXR' if combined is not None else 'cached_diffuse_plus_specular_EXR'
     stage_measurements={}

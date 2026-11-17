@@ -103,6 +103,13 @@ def load_catalog():
     return rows
 
 
+def mesh_input(row):
+    request = {'mesh': row['mesh']}
+    if row.get('packed_subject'):
+        request.update(packed_subject=row['packed_subject'], mesh_hash=row['mesh_hash'])
+    return request
+
+
 def configure_credential(env_name):
     """Read only the explicitly selected provider credential, never log its value."""
     if not env_name or os.environ.get(env_name):

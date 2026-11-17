@@ -29,6 +29,22 @@
 
 检查比对未编辑面的位置和 UV，回填其原法线，重开后核对贴图像素来源和原材质图片字节。两处衬套都用穿孔射线验证，新增表盘视线用局部射线检查原阀头遮挡。螺距、筒肩曲线和表壳尺寸为外观估计。几何候选用于外观点评，现场接触和投影需另行复验。
 
+### 微增锈与两场景检查
+
+微调在已经对位的铁锈通道上完成。默认将覆盖权重 $m$ 增加 $0.24m(1-m)$，单处最多增加 0.06。露钢、原有贴图与细网格仍由上一轮候选提供。新目录保存三份打包模型、通道读回、源模型及候选散列。实景投影和刚体接触使用打包文件中的同一网格。渲染只追加该物品及材质，照明和接收面根据监控照片重建。
+
+```powershell
+$blender = 'work/blender45/blender-4.5.3-windows-x64/blender.exe'
+$python = 'work/triposr-env/Scripts/python.exe'
+$controller = 'tools/ps-model-controller'
+& $blender -b --factory-startup --python-exit-code 1 --python "$controller/boost_six_view_oxide.py" -- --baseline <细网格候选目录> --output <增锈候选目录>
+& $python -X utf8 -B "$controller/validate_six_view_scenes.py" run --out <实景试验目录> --backgrounds <背景目录> --candidates <增锈候选目录>/asset-candidates.json
+& $python -X utf8 -B "$controller/validate_six_view_scenes.py" retry-surface --out <实景试验目录>
+& $python -X utf8 -B "$controller/validate_six_view_scenes.py" recompose-atmosphere --out <实景试验目录>
+```
+
+默认使用 `36_6_6` 和 `53_7_35`。宽承托复验针对首轮因位置或接触淘汰的组合，沿用同一物品、场景尺度和接触门槛。雾场重合成按原签名读取物体与成对阴影 EXR，通过 alpha、遮挡、阴影和编辑范围检查后输出。旧视觉评分绑定旧图。程序证据和视觉复核尚未完整的图片保留为待审。
+
 ## 准备与绑定
 
 `prepare_reference_textures.py` 有两种输入。普通六视图提取用于审计局部样本及结构污染风险；`--flat-master` 用于已经检查过的无结构表面母图。不能因为六视图提取有输出文件就自动当作合格纹理。

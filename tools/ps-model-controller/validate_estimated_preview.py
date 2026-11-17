@@ -130,19 +130,18 @@ def write_overview(out, frozen, records):
             left = gap+j*(width+gap)
             row = by_pair[scene, asset]
             image = row.get('preview_file')
-            draw.text((left,top+6), f'{asset.zfill(2)}  /  {scene}', fill=(32,38,39),font=font)
-            if image:
-                with Image.open(image) as source:
-                    frame = ImageOps.contain(source.convert('RGB'), (width,height), Image.Resampling.LANCZOS)
-                sheet.paste(frame, (left+(width-frame.width)//2, top+header+(height-frame.height)//2))
-            else:
-                draw.text((left+32,top+header+32),'No deliverable',fill=(100,46,37),font=font)
+            status = '' if image else '  ·  未出图，显示原背景'
+            draw.text((left,top+6), f'{asset.zfill(2)}  /  {scene}{status}', fill=(32,38,39),font=font)
+            with Image.open(image or row['background']) as source:
+                frame = ImageOps.contain(ImageOps.exif_transpose(source).convert('RGB'),
+                                         (width,height), Image.Resampling.LANCZOS)
+            sheet.paste(frame, (left+(width-frame.width)//2, top+header+(height-frame.height)//2))
     sheet.save(out/'overview.jpg',quality=92,subsampling=0)
 
 
-def report(out):
+def report(out, *, trial_records=None):
     frozen = read(out/'frozen.json')
-    index = preview_records(out)
+    index = preview_records(out) if trial_records is None else trial_records
     records = []
     page = ['<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>3 件物品 × 2 张背景</title>',
             '<meta name="viewport" content="width=device-width">',
@@ -150,7 +149,7 @@ def report(out):
             'img{width:100%;height:auto;display:block}section{background:white;margin:16px 0;padding:14px}'
             'a{color:#16526a}summary{cursor:pointer}</style>',
             '<h1>3 件物品 × 2 张背景</h1>',
-            f'<p>原尺寸检查图，估算版本 {SCALE_VERSION}。尺度与现场支撑含估算，每张保留程序检查和视觉反馈。</p>',
+            f'<p>原尺寸检查图，估算版本 {SCALE_VERSION}。尺度与现场支撑含估算，详见各图的程序检查和视觉复核状态。</p>',
             '<p><a href="overview.jpg">六组全画面总览</a> · <a href="validation.json">逐项验证与累计用量</a></p>']
     shown = set()
     for job in frozen['jobs']:
@@ -194,6 +193,14 @@ def report(out):
             page.append('<p>待审 · 可见长边 '+str(round(row['measured_major_px']))+
                         ' px · '+html.escape(basis.get(scale['basis'],scale['basis']))+'</p>')
             page.append('<a href="'+name+'"><img loading="lazy" src="'+name+'" alt="原尺寸完整合成"></a>')
+            if row.get('unreviewed_draft'):
+                page.append('<p>程序检查后保留的待审图。视觉复核结果未知。</p>')
+            if row.get('recomposed_from'):
+                previous = Path(row['recomposed_from']['image']).resolve()
+                if previous.is_relative_to(out):
+                    link = html.escape(previous.relative_to(out).as_posix(), quote=True)
+                    page.append(f'<details><summary>雾场修正前的完整画面</summary>'
+                                f'<a href="{link}"><img loading="lazy" src="{link}" alt="雾场修正前全景"></a></details>')
             findings = best.get('visual_evidence',{}).get('findings',[])
             page.append('<details><summary>复核记录</summary><ul>'+''.join(
                 '<li>'+html.escape(item['evidence'])+'</li>' for item in findings)+'</ul></details>')

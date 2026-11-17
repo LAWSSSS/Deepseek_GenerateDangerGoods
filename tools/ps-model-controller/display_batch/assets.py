@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image, ImageOps
 import trimesh
 
-from .common import atomic_json, signature, file_hash
+from .common import atomic_json, signature, file_hash, mesh_input
 from .schema import AssetAnswer
 
 ASSET_VERSION='asset-v1'
@@ -96,17 +96,30 @@ def initial_poses(vertices):
     return long.tolist(),matrices
 
 
+async def export_geometry(folder, row, blender):
+    folder.mkdir(parents=True, exist_ok=True)
+    record, geometry = folder/'export.json', folder/'geometry.npz'
+    if record.is_file() and geometry.is_file():
+        return json.loads(record.read_text(encoding='utf8'))
+    exported = await blender.ask('export', {**mesh_input(row), 'geometry':str(geometry)})
+    atomic_json(record, exported)
+    return exported
+
+
 async def prepare(row, root, blender, vision,strict=False):
     start=time.monotonic()
-    key=signature(ASSET_VERSION,row['mesh_hash'],file_hash(row['board']),
-                  file_hash(row['original']) if row.get('original') else None)
-    folder=Path(root)/'assets'/key;folder.mkdir(parents=True,exist_ok=True)
-    export_path=folder/'export.json';geometry=folder/'geometry.npz'
-    if export_path.is_file() and geometry.is_file():
-        exported=json.loads(export_path.read_text(encoding='utf8'))
-    else:
-        exported=await blender.ask('export',{'mesh':row['mesh'],'geometry':str(geometry)})
-        atomic_json(export_path,exported)
+    identity_hashes = (file_hash(row['board']), file_hash(row['original']) if row.get('original') else None)
+    key=signature(ASSET_VERSION,row['mesh_hash'],*identity_hashes)
+    folder=Path(root)/'assets'/key
+    geometry=folder/'geometry.npz'
+    exported=await export_geometry(folder,row,blender)
+    reviewed=exported
+    if row.get('packed_subject'):
+        # The source photographic identity and assembly evidence remain valid.
+        # Collision and projection always use geometry from the new Blender file.
+        original={'mesh':row['source_mesh']}
+        source_key=signature(ASSET_VERSION,row['source_mesh_hash'],*identity_hashes)
+        reviewed=await export_geometry(Path(root)/'assets'/source_key,original,blender)
     previews=[]
     for i,path in enumerate([row['board'],row.get('original')]):
         if not path:continue
@@ -116,8 +129,8 @@ async def prepare(row, root, blender, vision,strict=False):
                 im=ImageOps.exif_transpose(im).convert('RGB');im.thumbnail((1280,1000));im.save(out,quality=85)
         previews.append(out)
     semantic=await vision.ask('asset',AssetAnswer,ASSET_PROMPT,
-                              {'name':row['name'],'extents':exported['extents'],
-                               'material_names':[m['name'] for m in exported['materials']]},previews)
+                              {'name':row['name'],'extents':reviewed['extents'],
+                               'material_names':[m['name'] for m in reviewed['materials']]},previews)
     atomic_json(folder/'semantic.json',semantic.model_dump())
     result={**row,'folder':str(folder),'geometry':str(geometry),'inspection':exported,
             'semantic':semantic.model_dump(),'signature':key,'poses':[]}

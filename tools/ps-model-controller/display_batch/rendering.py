@@ -10,7 +10,7 @@ import time
 
 from PIL import Image
 
-from .common import HERE, ROOT, atomic_json, file_hash, signature
+from .common import HERE, ROOT, atomic_json, file_hash, mesh_input, signature
 from .framing import render_windows
 from .schema import LIGHT_PROFILES, MATERIAL_PROFILES, PHOTO_CONTROLS
 
@@ -39,7 +39,7 @@ def render_request(asset,candidate,params,environment):
     if params.get('asset_refinement') == 'component_v1':
         from scrap_composite.render_controls import light_controls
         environment = {**environment, 'photographic_light': light_controls(params)}
-    request={'mesh':asset['mesh'],'matrix':candidate['matrix'],'yaw':candidate['yaw'],
+    request={**mesh_input(asset),'matrix':candidate['matrix'],'yaw':candidate['yaw'],
              'plane_normal':candidate.get('plane_normal',[0,0,1]),
              'elevation':candidate['elevation'],'environment':environment,
              'roughness_delta':MATERIAL_PROFILES[params['material']],
@@ -136,6 +136,8 @@ def part_keys(request, device, dependencies, *, include_detail=True):
             surface=(*surface,reference['pigment_linear'])
     if request.get('asset_diagnostic'):
         surface=(*surface,request['asset_diagnostic'])
+    if request.get('packed_subject'):
+        surface=(*surface,request['packed_subject'])
     return {
         'object': signature('object',shared,surface,windows['object']),
         'with_shadow': signature('with_shadow',shared,surface,windows['shadow']),
@@ -314,6 +316,8 @@ class RenderCache:
         if shadow_pair:meta['shadow_pair_validation']=shadow_pair
         for key in ('material_readback','lighting_readback'):
             if key in obj:meta[key]=obj[key]
+        if request.get('packed_subject'):
+            meta['packed_subject']={'object':request['packed_subject'], 'sha256':request['mesh_hash']}
         if request.get('surface_scans'):
             meta['scanned_materials']=obj.get('scanned_materials',[])
         if request.get('matte_partitions'):

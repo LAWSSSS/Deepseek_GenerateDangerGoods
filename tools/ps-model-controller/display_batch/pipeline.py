@@ -117,12 +117,15 @@ def catalog_preflight(catalog):
         info={'asset_id':key,'available':row['available'],'model_review':row['human_review'],
               'mesh_hash':row['mesh_hash'],'formal_status':'unchanged'}
         if row['available']:
-            with open(row['mesh'],'rb') as f:
+            with open(row.get('source_mesh', row['mesh']),'rb') as f:
                 header=f.read(20);length=struct.unpack_from('<I',header,12)[0]
                 doc=json.loads(f.read(length))
             info.update(materials=len(doc.get('materials',[])),textures=len(doc.get('textures',[])),
                         mesh_primitives=sum(len(m['primitives']) for m in doc.get('meshes',[])),
                         render_topology_preserved=True)
+        if row.get('packed_subject'):
+            info.update(source_mesh_hash=row['source_mesh_hash'], packed_subject=row['packed_subject'],
+                        source_material_statistics=True)
         result.append(info)
     return result
 
@@ -186,7 +189,7 @@ def write_summary(out,store,usage=None,run=None):
 
 
 class Pipeline:
-    def __init__(self,config):
+    def __init__(self,config,*,catalog=None):
         self.config=config;self.out=resolve(config.output);self.out.mkdir(parents=True,exist_ok=True)
         self.cache=resolve(config.cache);self.cache.mkdir(parents=True,exist_ok=True)
         self.surface_pack = None
@@ -201,7 +204,8 @@ class Pipeline:
         self.scenes=Scenes(self.cache,self.vision,structured=config.support_geometry=='structured',
                            structured_json=config.workflow=='evidence_v1');self.assets={}
         self.atmospheres=Atmospheres(self.cache,self.vision)
-        self.catalog=load_catalog();self.store=Store(self.out/'jobs.sqlite')
+        self.catalog=load_catalog() if catalog is None else catalog
+        self.store=Store(self.out/'jobs.sqlite')
         self.cpu=asyncio.Semaphore(config.cpu_concurrency)
         self.prepare_lock=asyncio.Lock()
         self.width_gates={}
@@ -324,7 +328,11 @@ class Pipeline:
             else:
                 environment=await asyncio.to_thread(lighting_for,scene,candidate,environment,params['effects_lighting'],
                                                    preserve=params.get('weathering')=='preserve_source')
-            if params.get('surface_finish') in ('generated_pbr', 'physical_layers'):
+            if asset.get('packed_subject'):
+                if (params.get('surface_finish', 'existing') != 'existing'
+                        or any(float(params.get(name, 0.)) for name in ('surface_dust', 'rust_spots'))):
+                    raise ValueError('Packed candidate requires existing material and no added weathering')
+            elif params.get('surface_finish') in ('generated_pbr', 'physical_layers'):
                 from .generated_material import WEATHERED_STEEL_VERSION, finish_regions, load_pack
                 path = resolve(params['surface_finish_manifest'])
                 pack = self.surface_pack
@@ -589,7 +597,8 @@ class Pipeline:
         environment,_=sample_environment(scene,candidate)
         render_path=folder/'result.json'
         if not render_path.is_file():
-            metadata=await self.blender.ask('render',{'mesh':asset['mesh'],'matrix':asset['poses'][0]['matrix'],
+            from .common import mesh_input
+            metadata=await self.blender.ask('render',{**mesh_input(asset),'matrix':asset['poses'][0]['matrix'],
                 'yaw':90,'elevation':45,'environment':environment,'resolution':512,'roughness_delta':0,
                 'light_gain':1,'dust_gain':1,'output':str(folder)},timeout=240)
             atomic_json(render_path,metadata)
@@ -803,6 +812,8 @@ class Pipeline:
                 draft={**comp,'iteration':iteration,'params':params.copy(),'render_cache_hit':hit,
                        'render_cache':meta.get('render_cache',{}),'render_resolution':meta.get('resolution'),
                        'image_hash':file_hash(image)}
+                if meta.get('packed_subject'):
+                    draft['packed_subject'] = meta['packed_subject']
                 if structured:
                     from .structured import algorithm_versions
                     draft['algorithm_versions']=algorithm_versions(params,comp['photo'].get('version'))

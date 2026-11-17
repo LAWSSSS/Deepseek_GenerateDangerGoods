@@ -14,7 +14,7 @@ from mathutils import Matrix, Vector
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import blender_worker as legacy
 from display_batch.geometry import camera_for, contact_geometry, horizontal_angle, pose_points, transformed, material_detail_allowed
-from display_batch.common import atomic_json
+from display_batch.common import atomic_json, file_hash
 from display_batch.materials import material_kind, SURFACE_DUST
 from display_batch.scanned_shader import matte_dust_surface, overcast_pixels, scanned_surface
 from display_batch.generated_shader import finish_surface, shape_weld_beads
@@ -68,15 +68,40 @@ def canonicalize_mesh(obj):
     return obj
 
 
-def normalized_mesh(path, *, before_join=None):
+def append_packed_subject(path, subject, digest):
+    if Path(path).suffix.lower() != '.blend' or file_hash(path) != digest:
+        raise ValueError('Packed subject does not match the verified Blender file')
+    # Only append the normalized object. Candidate cameras, lighting and
+    # receivers belong to the inspection scene and must not enter the batch.
+    with bpy.data.libraries.load(str(path), link=False) as (available, imported):
+        if subject not in available.objects:
+            raise ValueError('Packed subject is absent from the candidate')
+        imported.objects = [subject]
+    obj, = imported.objects
+    if obj is None or obj.type != 'MESH' or obj.parent or obj.modifiers:
+        raise ValueError('Packed subject is not a self-contained canonical mesh')
+    bpy.context.scene.collection.objects.link(obj)
+    obj.matrix_world = Matrix.Identity(4)
+    obj.hide_render = False
+    obj.visible_camera = True
+    return obj
+
+
+def normalized_mesh(path, *, before_join=None, packed_subject=None, mesh_hash=None):
     global BASE, BASE_PATH, BASE_ROUGHNESS
-    if BASE is None or BASE_PATH!=path:
+    key = (path, packed_subject, mesh_hash) if packed_subject else path
+    if BASE is None or BASE_PATH!=key:
         if BASE is not None:
             BASE.use_fake_user=False
             # Remove unused textures/materials before loading another large asset.
             bpy.data.orphans_purge(do_recursive=True)
-        obj=canonicalize_mesh(legacy.load_mesh(path, before_join=before_join))
-        BASE=obj.data;BASE.use_fake_user=True;BASE_PATH=path
+        if packed_subject:
+            if before_join is not None:
+                raise ValueError('Packed candidate already has assigned materials')
+            obj = append_packed_subject(path, packed_subject, mesh_hash)
+        else:
+            obj=canonicalize_mesh(legacy.load_mesh(path, before_join=before_join))
+        BASE=obj.data;BASE.use_fake_user=True;BASE_PATH=key
         BASE_ROUGHNESS={}
         for material in BASE.materials:
             if material and material.use_nodes:
@@ -89,6 +114,11 @@ def normalized_mesh(path, *, before_join=None):
     return obj
 
 
+def request_mesh(request, *, before_join=None):
+    return normalized_mesh(request['mesh'], before_join=before_join,
+                           packed_subject=request.get('packed_subject'), mesh_hash=request.get('mesh_hash'))
+
+
 def arrays(obj):
     vertices=np.array([list(v.co) for v in obj.data.vertices],dtype=np.float64)
     obj.data.calc_loop_triangles()
@@ -98,7 +128,7 @@ def arrays(obj):
 
 def export(request):
     reset(request['device'])
-    obj=normalized_mesh(request['mesh']); vertices,faces=arrays(obj)
+    obj=request_mesh(request); vertices,faces=arrays(obj)
     np.savez_compressed(request['geometry'],vertices=vertices,faces=faces)
     mats=[]
     for m in obj.data.materials:
@@ -615,6 +645,10 @@ def configure_materials(obj,request,reference=True):
     scans=request.get('surface_scans')
     matte=request.get('matte_partitions')
     finish=request.get('generated_finish')
+    if request.get('packed_subject'):
+        if scans or matte or finish or request.get('rust_spots', 0.):
+            raise ValueError('Packed material graph already owns surface weathering')
+        return []
     adapted=set()
     for material in obj.data.materials:
         if not material or not material.use_nodes:continue
@@ -684,7 +718,7 @@ def configure_materials(obj,request,reference=True):
 
 def render(request):
     folder=Path(request['output']);folder.mkdir(parents=True,exist_ok=True)
-    scene=reset(request['device'],request.get('resolution',1024));obj=normalized_mesh(request['mesh'])
+    scene=reset(request['device'],request.get('resolution',1024));obj=request_mesh(request)
     vertices,faces=arrays(obj);p,rot=pose_points(vertices,request['matrix'],request['yaw'])
     matrix=np.eye(4);matrix[:3,:3]=rot
     obj.matrix_world=Matrix(matrix) @ Matrix(request['matrix'])
@@ -1054,7 +1088,7 @@ def render_parts(request):
     scene=bpy.context.scene;state=LIVE_RENDER
     scene.render.use_persistent_data=request.get('persistent_data',True)
     imported=0.;import_seconds=0.
-    mesh_key=(request['mesh'],request['mesh_hash'],matte['signature'] if matte is not None else None,
+    mesh_key=(request['mesh'],request['mesh_hash'],request.get('packed_subject'),matte['signature'] if matte is not None else None,
               request.get('matte_profile'),integration_mode,request.get('render_detail','standard'),
               request.get('rust_spots',0.),request.get('surface_dust',0.),
               tuple(request['environment'].get('dust_color',())) if request.get('rust_spots',0.) else (),
@@ -1075,7 +1109,7 @@ def render_parts(request):
         if finish and 'packages' in finish.get('reference', {}) and finish.get('layer_stage') != 'source':
             from display_batch.component_shader import assign_slots
             before_join = lambda objects: assign_slots(objects, finish)
-        asset=normalized_mesh(request['mesh'], before_join=before_join)
+        asset=request_mesh(request, before_join=before_join)
         state.update(asset=asset,arrays=arrays(asset),mesh_key=mesh_key)
         formed = finish and ('cylinder' in finish['maps'] or finish['version'] == 'generated-pbr-v3')
         state['weld_detail'] = shape_weld_beads(asset.data, finish) if formed else None
