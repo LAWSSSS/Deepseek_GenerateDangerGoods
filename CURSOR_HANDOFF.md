@@ -10,11 +10,11 @@
 ## 项目和可用资料
 
 - **仓库与工作目录：** `D:\CodexProjects\experiments\scrap-composite`，当前基线提交 `02340b3`。从这里打开 Cursor；桌面“废钢合成-完整迁移包”不是当前 Git 仓库。
-- 用户六视图：`C:\Users\zhaoc\Desktop\六视图`；逐件参考映射：`outputs/ps-model-controller/six-view-map.json`。这些图是外观参考，并非已标定的摄影测量数据。
+- 用户六视图：`C:\Users\zhaoc\Desktop\六视图`；逐件参考映射：`tools/ps-model-controller/six-view-map.json`。这些图是外观参考，并非已标定的摄影测量数据。
 - 39 件原图：`external/异物生成/input/objects`；对应高清原貌和做锈素材：`outputs/物品高清输入-39件/原貌HD`、`生锈HD`。原模型与相机记录：`outputs/三维模型库-圆润复验/results.jsonl`。
 - 六方向原模型审计及逐件记录：`outputs/三维模型-39件六视角审计/index.html`、`audit.jsonl`。已有 08、15、16、19、29、36 号等局部修复候选：参见根目录 `README.md`。不要把候选存在视为该物品整体通过。
-- 01 示例入口与工作方式：`outputs/ps-model-controller/mesh_rebuild_item.py`、`mesh_rebuild_item_worker.py`、`valve01_config.json`。**当前入口只支持 01，不能把它当作支持其他物品的通用建模器。** 本机 Blender：`work/blender45/blender-4.5.3-windows-x64/blender.exe`；Python：`work/triposr-env/Scripts/python.exe`。
-- 本机网页代码：`outputs/ps-model-controller/placement-web`，当前服务 `http://127.0.0.1:8765/`；01 检查页为 `/review/01`。页面候选与原模型分开，候选保留 `manual_only`，避免进入未经验证的自动流程。
+- 01 示例入口与工作方式：`tools/ps-model-controller/mesh_rebuild_item.py`、`mesh_rebuild_item_worker.py`、`valve01_config.json`。**当前入口只支持 01，不能把它当作支持其他物品的通用建模器。** 本机 Blender：`work/blender45/blender-4.5.3-windows-x64/blender.exe`；Python：`work/triposr-env/Scripts/python.exe`。
+- 本机网页代码：`tools/ps-model-controller/placement-web`，当前服务 `http://127.0.0.1:8765/`；01 检查页为 `/review/01`。页面候选与原模型分开，候选保留 `manual_only`，避免进入未经验证的自动流程。
 
 ## 对每件的工作要求
 
@@ -32,10 +32,10 @@
 从仓库根目录运行与改动适配的检查，至少保留并在需要时扩展：
 
 ```powershell
-& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/placement-web/checks_web.py
-& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/checks_mesh.py
-& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/checks_v2.py
-& work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/checks_rebuild_01.py
+& work/triposr-env/Scripts/python.exe -X utf8 -B tools/ps-model-controller/placement-web/checks_web.py
+& work/triposr-env/Scripts/python.exe -X utf8 -B tools/ps-model-controller/checks_mesh.py
+& work/triposr-env/Scripts/python.exe -X utf8 -B tools/ps-model-controller/checks_v2.py
+& work/triposr-env/Scripts/python.exe -X utf8 -B tools/ps-model-controller/checks_rebuild_01.py
 ```
 
 实际用浏览器和 Blender 检查新版本，不只依赖单元测试；记录各次检测范围。不要声称运行了不存在的模型、视觉复核或 Photoshop 验收。

@@ -1,0 +1,199 @@
+{
+  "version": "separator08-parametric-v1",
+  "radial_segments": 128,
+  "radius": 0.116,
+  "shell_top_z": 0.36,
+  "top_head_depth": 0.058,
+  "shell_bottom_z": -0.25,
+  "bottom_head_depth": 0.048,
+  "top_seam_z": 0.366,
+  "bottom_seam_z": -0.256,
+  "seam_minor": 0.0055,
+  "nozzle": {
+    "z": 0.22,
+    "outer": 0.036,
+    "bore": 0.03,
+    "sleeve_outer": 0.0298,
+    "sleeve_inner": 0.0284,
+    "length": 0.106,
+    "flange_thickness": 0.016,
+    "flange_outer": 0.09,
+    "flange_bore": 0.03,
+    "bolt_holes": 4,
+    "bolt_hole_radius": 0.0105,
+    "bolt_circle_radius": 0.0625,
+    "bolt_azimuths_deg": [
+      45.0,
+      135.0,
+      225.0,
+      315.0
+    ],
+    "raised_face_inner": 0.036,
+    "raised_face_outer": 0.05,
+    "raised_face_thickness": 0.0025,
+    "weld_major": 0.04,
+    "weld_minor": 0.0055
+  },
+  "lift_lug": {
+    "eye_center_z": 0.459,
+    "eye_major": 0.026,
+    "eye_minor": 0.011,
+    "band_half_x": 0.0135,
+    "band_half_y": 0.011,
+    "band_half_z": 0.0055,
+    "neck_r0": 0.021,
+    "neck_r1": 0.017,
+    "neck_z0": 0.416,
+    "neck_z1": 0.437,
+    "pad_r0": 0.052,
+    "pad_r1": 0.03,
+    "pad_z0": 0.409,
+    "pad_z1": 0.426,
+    "collar_major": 0.0195,
+    "collar_minor": 0.0035,
+    "collar_z": 0.432
+  },
+  "drain": {
+    "head_apex_z": -0.298,
+    "blue_boss_r": 0.02,
+    "blue_boss_z0": -0.295,
+    "blue_boss_z1": -0.328,
+    "thread_rings": 3,
+    "thread_major": 0.0203,
+    "thread_minor": 0.0013,
+    "weld_major": 0.024,
+    "weld_minor": 0.0035,
+    "brass_nut_r": 0.03,
+    "brass_nut_z0": -0.328,
+    "brass_nut_z1": -0.345,
+    "washer_r": 0.032,
+    "washer_z0": -0.345,
+    "washer_z1": -0.3485,
+    "collar_r": 0.043,
+    "collar_z0": -0.3485,
+    "collar_z1": -0.375,
+    "collar_ribs": 36,
+    "rib_half_tangent": 0.0022,
+    "rib_depth": 0.0018,
+    "body_top_r": 0.039,
+    "body_z0": -0.375,
+    "body_z1": -0.448,
+    "body_round_z": -0.461,
+    "body_neck_r": 0.024,
+    "body_neck_z": -0.461,
+    "window_z_center": -0.415,
+    "window_half_width": 0.0135,
+    "window_half_height": 0.0365,
+    "window_tube": 0.0032,
+    "lens_half_width": 0.0108,
+    "lens_half_height": 0.034,
+    "spigot_nut_r": 0.0165,
+    "spigot_nut_z0": -0.46,
+    "spigot_nut_z1": -0.468,
+    "spigot_r": 0.0115,
+    "spigot_z0": -0.468,
+    "spigot_z1": -0.5,
+    "bore_radius": 0.0055,
+    "bore_top_z": -0.405,
+    "sleeve_outer": 0.0053,
+    "sleeve_inner": 0.0047
+  },
+  "material_profile": {
+    "blue_paint": {
+      "roughness": 0.34,
+      "metallic": 0.5,
+      "rust_amount": 0.06,
+      "base_rgb": [
+        18,
+        82,
+        142
+      ]
+    },
+    "weathered_blue": {
+      "roughness": 0.42,
+      "metallic": 0.44,
+      "rust_amount": 0.18,
+      "base_rgb": [
+        16,
+        72,
+        126
+      ]
+    },
+    "rusted_paint": {
+      "roughness": 0.72,
+      "metallic": 0.16,
+      "rust_amount": 0.85,
+      "base_rgb": [
+        40,
+        56,
+        58
+      ]
+    },
+    "chipped_blue": {
+      "roughness": 0.5,
+      "metallic": 0.68,
+      "rust_amount": 0.15,
+      "base_rgb": [
+        50,
+        80,
+        108
+      ]
+    },
+    "brass": {
+      "roughness": 0.34,
+      "metallic": 0.95,
+      "base_rgb": [
+        170,
+        140,
+        88
+      ]
+    }
+  },
+  "proportion_source": {
+    "note": "The working size follows the original photograph's pixel proportions and the model-library visual scale (about 1.0 m total height). They are not measured dimensions. The six-view collage is an uncalibrated visual-match reference of the same visible design; it is used for hidden/back-side topology and comparison only.",
+    "source_photo": "outputs/物品高清输入-39件/原貌HD/08-分离过滤器.png",
+    "rust_photo": "outputs/物品高清输入-39件/生锈HD/08-分离过滤器.png",
+    "six_view_reference": "references/六视图/蓝色工业压力容器六视图目录图.png",
+    "six_view_reference_sha256": "52ed638397205f79746f1649f355791e781ffa39062fba968bccf920e1598a18",
+    "photo_pixel_measurements": {
+      "image_size": [
+        1229,
+        1280
+      ],
+      "object_bbox_px": [
+        312,
+        24,
+        910,
+        1255
+      ],
+      "total_height_px": 1232,
+      "shell_diameter_px": 285,
+      "flange_outer_diameter_px": 222,
+      "nozzle_pipe_outer_diameter_px": 88,
+      "lifting_eye_outer_width_px": 93,
+      "lifting_eye_hole_width_px": 34,
+      "drain_collar_diameter_px": 106,
+      "drain_body_diameter_px": 95,
+      "note": "Measured from the supplied rust photograph's alpha silhouette; used only as pixel ratios and visual scale."
+    },
+    "observed": [
+      "vertical cylindrical pressure body with a shallow dished top head and a shallow dished bottom head",
+      "two opposed horizontal side nozzles with four-bolt flanges at about 0.22 m above the mid-height",
+      "large forged lifting eye on a saddle pad at the top centre",
+      "two circumferential rope-like weld beads near the top and bottom tangents",
+      "prominent fillet weld beads around both nozzle-to-shell joints",
+      "blue metallic paint with rust patches and scratches",
+      "brass automatic drain / sight-glass assembly under the bottom head: knurled collar, vertical oval window, bottom spigot",
+      "no feet, brackets or other visible support in the source photograph"
+    ],
+    "inferred": [
+      "hidden/back-side topology follows the uncalibrated six-view reference: symmetric second nozzle and back-side drain window; no other ports",
+      "flange thickness, bolt-hole diameter, bolt circle, bore depth and raised-face profile",
+      "the exact automatic-drain internal mechanism, thread forms and whether both oval windows are glazed",
+      "the eye-ring top band and saddle-pad profile",
+      "all hidden faces, wall thickness, internal separator element and assembly relationships",
+      "support/mounting method and floor contact: no support is visible, so stability is not claimed"
+    ],
+    "public_reference_note": "Public category references used only to check plausibility, not as measurements and not as evidence that this exact unit is that model: Burgess-Manning Series 3100 vertical gas separators (two flanged side nozzles, lifting eyes; https://www.burgessmanning.com/new_pdfs/separators/Series%203100%20Vertical%20Gas%20Vane%20Separators.pdf), FD Separators Type T (flanged nozzles, sight gauge; https://fd-separators.com/PDF/T-GAS-LIQUID-SEPARATOR-SPECIFICATIONS.pdf), and compressed-air automatic-drain assemblies with metal bowl, sight glass and knurled retaining ring (SAGE SD17-800 manual; http://wogscontrol.com/wp-content/uploads/media_uploads/SAGE_SD17-800-Manual-or-Auto-Drain-Datasheet-2024.pdf)."
+  }
+}

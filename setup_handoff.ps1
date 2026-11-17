@@ -39,7 +39,7 @@ if (!$SkipInstall) {
     $basePython = Join-Path $base 'Scripts/python.exe'
     $meshPython = Join-Path $mesh 'Scripts/python.exe'
     $mcpPython = Join-Path $psmcp 'Scripts/python.exe'
-    & $basePython -m pip install -r (Join-Path $project 'outputs/ps-model-controller/requirements-v2.txt') 'pywin32==312' 'scikit-image==0.26.0' 'scipy==1.18.1'
+    & $basePython -m pip install -r (Join-Path $project 'tools/ps-model-controller/requirements-v2.txt') 'pywin32==312' 'scikit-image==0.26.0' 'scipy==1.18.1'
     if ($LASTEXITCODE -ne 0) { throw '基础依赖安装失败。' }
     Set-Content -LiteralPath (Join-Path $base 'Lib/site-packages/handoff-vendor.pth') -Value '../../../../vendor' -Encoding ascii
     $shared = @(

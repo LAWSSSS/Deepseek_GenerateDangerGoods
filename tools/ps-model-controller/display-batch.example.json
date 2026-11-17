@@ -1,0 +1,19 @@
+{
+  "backgrounds": "external/backgrounds",
+  "output": "outputs/多背景批量展示",
+  "assets": [],
+  "excluded_assets": ["5", "6", "7"],
+  "asset_scale_factors": {"31": 0.375, "33": 0.25},
+  "count": 100,
+  "seed": 20261110,
+  "max_iterations": 2,
+  "render_device": "OPTIX",
+  "cache": "work/display-batch-cache",
+  "ai_concurrency": 2,
+  "cpu_concurrency": 2,
+  "photo_style": "scrap_gray",
+  "appearance": "reference",
+  "placement_mode": "auto",
+  "uncertain_policy": "render_review",
+  "atmosphere": "auto"
+}

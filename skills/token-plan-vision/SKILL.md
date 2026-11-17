@@ -10,18 +10,17 @@ Use 1–4 explicit existing images from the current question, with a UTF-8 quest
 The tool returns structured Chinese evidence and provider token usage. It does not render,
 edit images, place objects, resume batches or mark production output accepted.
 
-Project: `D:/CodexProjects/experiments/scrap-composite`.
-From that directory, run:
+From the scrap-composite repository root, run:
 
 ```powershell
-work/triposr-env/Scripts/python.exe -X utf8 -B outputs/ps-model-controller/interactive_token_plan.py --image <full-image> --question-file <question.txt> --out <new-output-directory>
+work/triposr-env/Scripts/python.exe -X utf8 -B tools/ps-model-controller/interactive_token_plan.py --image <full-image> --question-file <question.txt> --out <new-output-directory>
 ```
 
 Use `--format visual_evidence` for the versioned seven-score protocol. In that
 mode the first image is the current frame and any remaining images are context.
 The report binds findings and normalized regions to the first image's hash.
 For industrial documentary photography, use `--format photographer` with a short
-question of up to 240 characters. It returns the same `photo-brief-v1` factors as
+question of up to 240 characters. It returns the same `photo-brief-v2` factors as
 the local photography workflow. See [scrap-photography](../../.agents/skills/scrap-photography/SKILL.md).
 
 The default is `qwen3.7-plus` on the official Beijing Token Plan endpoint. Credentials
