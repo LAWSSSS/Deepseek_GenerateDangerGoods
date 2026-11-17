@@ -46,6 +46,11 @@ def sample(sheet, columns, rows, view, scale):
     for x0, y0, x1, y1 in view.get('exclude', ()):
         distance = np.maximum.reduce([x0 - columns, columns - x1, y0 - rows, rows - y1])
         support *= smooth(distance, 0., 6.)
+    for cx, cy, rx, ry in view.get('exclude_ellipses', ()):
+        if not all(np.isfinite((cx, cy, rx, ry))) or min(rx, ry) <= 0:
+            raise ValueError('Invalid excluded ellipse')
+        normalized = np.hypot((columns - cx) / rx, (rows - cy) / ry)
+        support *= smooth(normalized, 1., 1. + 4. / min(rx, ry))
     return rgb, support
 
 

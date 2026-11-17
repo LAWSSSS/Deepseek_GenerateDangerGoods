@@ -53,7 +53,7 @@ def rig(scene, subject, outward, up, focus=None):
         light.rotation_euler = (center-light.location).to_track_quat('-Z','Y').to_euler()
 
 
-def render(candidate, views, output, resolution, expected_axis, detail=None):
+def render(candidate, views, output, resolution, expected_axis, detail=None, whole_frame=None):
     bpy.ops.wm.open_mainfile(filepath=str(candidate))
     scene = bpy.context.scene
     objects = [obj for obj in scene.objects if obj.type == 'MESH']
@@ -91,7 +91,7 @@ def render(candidate, views, output, resolution, expected_axis, detail=None):
     output.mkdir(parents=True, exist_ok=True)
     paths = []
     for name,(outward,up) in views.items():
-        rig(scene, subject, outward, up, detail if name == 'Detail' else None)
+        rig(scene, subject, outward, up, detail if name == 'Detail' else whole_frame)
         path = output / f'{name.lower()}.png'
         if path.exists():
             raise FileExistsError(path)
@@ -129,7 +129,9 @@ def main():
         prior_views = {'Front':views['Front']}
         if args.views:
             views = {name:views[name] for name in args.views}
-        detail = details.get(aid, {}).get('detail_view')
+        view_recipe = details.get(aid, {})
+        detail = view_recipe.get('detail_view')
+        whole_frame = view_recipe.get('whole_view_frame')
         if detail:
             direction = Vector(detail['direction']).normalized()
             up = Vector(detail['up'])
@@ -137,9 +139,9 @@ def main():
             views['Detail'] = prior_views['Detail'] = (direction, up)
         if args.baseline:
             results.extend(render((args.baseline/aid/'candidate.blend').resolve(),
-                                  prior_views, output/aid/'baseline', args.resolution, expected_axis, detail))
+                                  prior_views, output/aid/'baseline', args.resolution, expected_axis, detail, whole_frame))
         results.extend(render((args.candidates/aid/'candidate.blend').resolve(), views, output/aid, args.resolution,
-                              expected_axis, detail))
+                              expected_axis, detail, whole_frame))
     (output/'render-log.json').write_text(json.dumps({'files':results, 'resolution':args.resolution,
         'renders':len(results), 'seconds':round(time.monotonic()-started,3),'api_calls':0}, ensure_ascii=False, indent=2),
         encoding='utf8')

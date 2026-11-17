@@ -662,6 +662,166 @@
         "protected_named_parts": [],
         "finish_detail_basis": "Source roughness texture preserves the hose and molded polymer response. Coating scuff strength is estimated."
       }
+    },
+    "2": {
+      "mesh_sha256": "2707f700bc420b26689efbe65eef5c5fa141cb4e83eccd8ae9d6e64ce3f1da3c",
+      "regions": [
+        {
+          "parts": [
+            "Cast valve body",
+            "Bored neck plus",
+            "Bored neck minus",
+            "Bottom boss"
+          ],
+          "material": "02 cast steel",
+          "package": "cast_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.68
+        },
+        {
+          "parts": [
+            "Body split flange",
+            "Split flange bolt head 01",
+            "Split flange nut 01",
+            "Split flange bolt head 02",
+            "Split flange nut 02",
+            "Split flange bolt head 03",
+            "Split flange nut 03",
+            "Split flange bolt head 04",
+            "Split flange nut 04",
+            "Split flange bolt head 05",
+            "Split flange nut 05",
+            "Split flange bolt head 06",
+            "Split flange nut 06",
+            "Split flange bolt head 07",
+            "Split flange nut 07",
+            "Split flange bolt head 08",
+            "Split flange nut 08",
+            "Split flange bolt head 09",
+            "Split flange nut 09",
+            "Split flange bolt head 10",
+            "Split flange nut 10",
+            "Split flange bolt head 11",
+            "Split flange nut 11",
+            "Split flange bolt head 12",
+            "Split flange nut 12"
+          ],
+          "material": "02 cast steel",
+          "package": "cast_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.82,
+          "parent_roughness": 0.48
+        },
+        {
+          "parts": [
+            "End flange plus",
+            "End flange minus"
+          ],
+          "material": "02 machined steel",
+          "package": "machined_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.75,
+          "parent_roughness": 0.42
+        },
+        {
+          "parts": [
+            "Raised face plus",
+            "Raised face minus"
+          ],
+          "material": "02 machined steel",
+          "package": "machined_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.54,
+          "parent_roughness": 0.3,
+          "relief_gain": 0.46,
+          "machining": {
+            "axis": [
+              0,
+              1,
+              0
+            ],
+            "anisotropy": 0.32
+          }
+        },
+        {
+          "parts": [
+            "Stem collar"
+          ],
+          "material": "02 machined steel",
+          "package": "machined_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.65,
+          "parent_roughness": 0.37
+        },
+        {
+          "parts": [
+            "Stem",
+            "Wheel center cap",
+            "Wheel center bolt"
+          ],
+          "material": "02 machined steel",
+          "package": "machined_steel",
+          "parent_roughness": 0.29,
+          "relief_gain": 0.43
+        },
+        {
+          "parts": [
+            "Handwheel rim",
+            "Handwheel hub",
+            "Handwheel spoke 1",
+            "Handwheel spoke 2",
+            "Handwheel spoke 3",
+            "Gearbox housing",
+            "Gearbox round cover",
+            "Blue pedestal",
+            "Blue adapter ring",
+            "Gearbox side shaft"
+          ],
+          "material": "02 blue paint",
+          "package": "blue_enamel",
+          "substrate": "exposed_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.58,
+          "paint_loss_um": 11,
+          "scuff_strength": 0.28
+        },
+        {
+          "parts": [
+            "Foot base minus",
+            "Foot upright minus inner",
+            "Foot gusset minus inner",
+            "Foot upright minus outer",
+            "Foot gusset minus outer",
+            "Foot top strap minus",
+            "Foot base plus",
+            "Foot upright plus inner",
+            "Foot gusset plus inner",
+            "Foot upright plus outer",
+            "Foot gusset plus outer",
+            "Foot top strap plus"
+          ],
+          "material": "02 machined steel",
+          "package": "cast_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.76,
+          "parent_roughness": 0.51
+        },
+        {
+          "parts": [
+            "Upper front cast lug"
+          ],
+          "material": "02 cast steel",
+          "package": "cast_steel",
+          "oxide": "iron_oxide",
+          "wear": 0.67
+        }
+      ],
+      "evidence": {
+        "identity_status": "reference_match",
+        "reference_role": "DN200 WCB raw photo and rusty six views",
+        "source_sheet": "DN200_handwheel_ball_valve_rust_6views_HD.png",
+        "unmodified": "Cast labels, ball/valve seat, bore details and fastener interfaces use the authored geometry."
+      }
     }
   },
   "derivation": "Physical A/B v2; linked paint chip relief, separate exposed steel and cavity-dependent oxide. Adjustments are conservative estimates, no full-model greying."

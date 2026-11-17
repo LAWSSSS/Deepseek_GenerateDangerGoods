@@ -1,0 +1,83 @@
+{
+  "version": "reference-mesh-detail-v1",
+  "coordinate_frame": "normalized-render-mesh",
+  "assets": {
+    "2": {
+      "expected_span_delta": [
+        0,
+        0.006012,
+        0
+      ],
+      "operations": [
+        {
+          "kind": "flange_facing",
+          "part": "Raised face plus",
+          "flange_part": "End flange plus",
+          "source_center_y": 0.3356714,
+          "center": [
+            -0.01503005,
+            0.3356714,
+            -0.24448896
+          ],
+          "inner": 0.1050837,
+          "outer": 0.1322645,
+          "half": 0.003006,
+          "bevel": 0.00052,
+          "groove": 0.00022,
+          "bolt_circle_radius": 0.1503006
+        },
+        {
+          "kind": "flange_facing",
+          "part": "Raised face minus",
+          "flange_part": "End flange minus",
+          "source_center_y": -0.3086172,
+          "center": [
+            -0.01503005,
+            -0.3416833,
+            -0.24448896
+          ],
+          "inner": 0.1050837,
+          "outer": 0.1322645,
+          "half": 0.003006,
+          "bevel": 0.00052,
+          "groove": 0.00022,
+          "bolt_circle_radius": 0.1503006
+        },
+        {
+          "kind": "seat_cast_lug",
+          "part": "Upper front cast lug",
+          "body_part": "Cast valve body",
+          "min_bearing_depth": 0.0025,
+          "max_shift": 0.14,
+          "face_protrusion": 0.016
+        }
+      ],
+      "detail_view": {
+        "direction": [
+          0.25,
+          -1,
+          0.13
+        ],
+        "up": [
+          0,
+          0,
+          1
+        ],
+        "center": [
+          -0.01503005,
+          -0.3446893,
+          -0.24448896
+        ],
+        "span": 0.41
+      },
+      "whole_view_frame": {
+        "center": [
+          0,
+          0,
+          0
+        ],
+        "span": 1.16
+      }
+    }
+  }
+}

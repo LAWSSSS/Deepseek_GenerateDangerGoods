@@ -60,6 +60,14 @@ $controller = 'tools/ps-model-controller'
 
 活动工作流中，05–07 和 38–39 为归档储罐。01、25 与 33 可继续查阅各自的专用细网格候选。这个入口处理其余 36 项。
 
+### 02 DN200 球阀逐件精修
+
+02 的身份按原照与铸字核对。使用 [02 锈迹配准](../tools/ps-model-controller/valve02-oxide.example.json) 单独绑定手轮、齿轮箱、铸体、接管、法兰、支脚及环带。环形孔口从参考取样中屏蔽。侧面朝向按手轮相对阀体的位置校正。
+
+[02 局部网格配置](../tools/ps-model-controller/valve02-mesh.example.json)规定两个凸起加工面的原孔径、外缘、厚度和目标轴向位置。负向凸台移到外端，阀体铸耳的轴向深度按壳体曲面逐点贴合。程序检查两个中心孔及十六个螺栓孔。正面前后图使用相同相机，法兰另有固定近景。
+
+使用同章材质和网格命令复跑。材质包改用 `component-pbr.example.json` 里的 02 分件配置，配准使用 `valve02-oxide.example.json`，诊断入口选择 `--asset-ids 2 --pose-mode inspection --surface-dust .21`。最后以 `valve02-mesh.example.json` 完成网格和正、背、左、右四张原尺寸审核图。
+
 ## 准备与绑定
 
 `prepare_reference_textures.py` 有两种输入。普通六视图提取用于审计局部样本及结构污染风险；`--flat-master` 用于已经检查过的无结构表面母图。不能因为六视图提取有输出文件就自动当作合格纹理。

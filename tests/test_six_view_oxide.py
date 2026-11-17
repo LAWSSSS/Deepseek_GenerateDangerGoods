@@ -25,6 +25,16 @@ class SixViewOxideTests(unittest.TestCase):
         self.assertEqual(excluded[335,512,0], 0.)
         self.assertEqual(excluded[335,512,2], 0.)
 
+    def test_circular_exclusion_keeps_the_adjacent_flange_colour(self):
+        image = np.broadcast_to(np.float32([.57,.35,.14]), (100,100,3)).copy()
+        spec = {'material':'steel','mode':'plane','views':[
+            {'rect':[0,0,100,100],'exclude_ellipses':[[50,50,17,20]]}]}
+        _, field = bake(image,spec,np.array([100,100]))
+        self.assertEqual(float(field[256,256,2]),0.)
+        self.assertEqual(float(field[256,256,0]),0.)
+        self.assertGreater(float(field[256,387,2]),.99)
+        self.assertGreater(float(field[256,387,0]),.8)
+
     def test_paint_pigment_is_not_oxide_and_silver_chips_stay_distinct(self):
         blue = np.asarray([[[.12,.28,.48],[.62,.63,.65],[.63,.39,.20]]],dtype=np.float32)
         oxide, chips = material_cues(blue, 'blue')

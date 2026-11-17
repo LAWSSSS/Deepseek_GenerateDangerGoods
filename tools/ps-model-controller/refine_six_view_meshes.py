@@ -133,6 +133,103 @@ def refine_bushing(bm, mesh, case, edit, origin, changed):
             'bore_radius_model_units':inner,'radial_segments':240}
 
 
+def turn_flange_facing(bm, mesh, case, edit, origin, changed):
+    """Rebuild only the existing raised face from its audited annular dimensions."""
+    slot = slot_for(mesh, case, edit['part'])
+    center = Vector(edit['center'])
+    original_y = edit['source_center_y']
+    inner, outer, half = (edit[key] for key in ('inner', 'outer', 'half'))
+    bevel, groove = edit['bevel'], edit['groove']
+    if not 0. < bevel < half or not 2. * bevel < outer - inner or not 0. <= groove < bevel:
+        raise ValueError('Raised flange face has invalid dimensions')
+    faces = {face for face in bm.faces if face.material_index == slot}
+    vertices = {v for face in faces for v in face.verts}
+    if len(vertices) < 100 or any(f not in faces for v in vertices for f in v.link_faces):
+        raise ValueError('Raised face does not identify an isolated source ring')
+    radial = [math.hypot(v.co.x-center.x, v.co.z-center.z) for v in vertices]
+    axial = [v.co.y for v in vertices]
+    if max(abs(min(radial)-inner), abs(max(radial)-outer),
+           abs(min(axial)-(original_y-half)), abs(max(axial)-(original_y+half))) > .0002:
+        raise ValueError('Raised face dimensions differ from the audited source')
+    old_count = len(faces)
+    changed.update(f[origin] for f in faces)
+    bmesh.ops.delete(bm, geom=list(faces), context='FACES')
+    segments = 240
+    added = add_lathe(bm, center, Vector((0.,1.,0.)), bushing_profile(half, inner, outer, bevel, groove),
+                      slot, segments, closed=True)
+    return {'kind':'flange_facing','part':edit['part'],'old_faces':old_count,'added_faces':added,
+            'radial_segments':segments,'bore_radius_model_units':inner,
+            'axial_translation_model_units':center.y-original_y,'groove_depth_model_units':groove}
+
+
+def mesh_slots_tree(bm, slots):
+    bm.verts.index_update()
+    vertices = [tuple(v.co) for v in bm.verts]
+    faces = [[v.index for v in f.verts] for f in bm.faces if f.material_index in slots]
+    return BVHTree.FromPolygons(vertices, faces)
+
+
+def seat_cast_lug(bm, mesh, case, edit, origin, changed):
+    slot = slot_for(mesh, case, edit['part'])
+    body = mesh_slots_tree(bm, {slot_for(mesh, case, edit['body_part'])})
+    faces = {f for f in bm.faces if f.material_index == slot}
+    vertices = {v for f in faces for v in f.verts}
+    if not vertices or any(f not in faces for v in vertices for f in v.link_faces):
+        raise ValueError('Cast lug does not identify an isolated authored part')
+    x0 = min(v.co.x for v in vertices)
+    x1 = max(v.co.x for v in vertices)
+    if x1-x0 <= .002:
+        raise ValueError('Cast lug has no usable axial depth')
+    bearing = float(edit['min_bearing_depth'])
+    protrusion = float(edit['face_protrusion'])
+    if not .001 <= bearing <= .008 or not .006 <= protrusion <= x1-x0:
+        raise ValueError('Cast lug projection has invalid local depth')
+    targets = []
+    # Conform the lug to the curved casting across its complete footprint.
+    # A rigid translation would sink its lower face before closing the gap at
+    # the shoulder. Keep the authored shape in Y/Z and retain its UVs.
+    for vertex in vertices:
+        x, y, z = vertex.co
+        hit = body.ray_cast(Vector((x1+.08,y,z)), Vector((-1.,0.,0.)),.35)[0]
+        if hit is None:
+            raise ValueError('Cast lug footprint lacks an auditable valve-body surface')
+        x_next = hit.x - bearing + (x-x0)/(x1-x0)*(bearing+protrusion)
+        if not -edit['max_shift'] <= x_next-x < 0:
+            raise ValueError('Cast lug fit leaves the audited casting range')
+        targets.append((vertex,x_next,x_next-x))
+    for vertex, x_next, _ in targets:
+        vertex.co.x = x_next
+    changed.update(f[origin] for f in faces)
+    return {'kind':'seat_cast_lug','part':edit['part'],
+            'translation_x_range_model_units':[min(t[2] for t in targets), max(t[2] for t in targets)],
+            'bearing_depth_model_units':bearing,'face_protrusion_model_units':protrusion,
+            'body_support_samples':len(targets)}
+
+
+def verify_flange_openings(bm, mesh, case, operations):
+    records = []
+    for op in operations:
+        if op['kind'] != 'flange_facing':
+            continue
+        slots = {slot_for(mesh,case,op[key]) for key in ('part','flange_part')}
+        tree = mesh_slots_tree(bm, slots)
+        x, y, z = op['center']
+        radius = op['bolt_circle_radius']
+        offsets = [(0.,0.)] + [(radius * math.cos(i*math.tau/8), radius * math.sin(i*math.tau/8))
+                               for i in range(8)]
+        for dx, dz in offsets:
+            hit = tree.ray_cast(Vector((x+dx, y-.08, z+dz)), Vector((0.,1.,0.)), .16)
+            if hit[0] is not None:
+                raise ValueError('Raised face obstructs a source flange opening')
+        # A ray in the raised annulus should strike it and prove the subset
+        # really contains the edited geometry in the expected axial location.
+        mid = (op['inner'] + op['outer']) * .5
+        if tree.ray_cast(Vector((x+mid, y-.08, z)), Vector((0.,1.,0.)), .16)[0] is None:
+            raise ValueError('Expected flange annulus is missing')
+        records.append({'part':op['part'],'open_bore_rays':1,'open_bolt_rays':8})
+    return records
+
+
 def rounded_shoulder(bm, mesh, case, edit, origin, changed):
     body = slot_for(mesh, case, edit['part'])
     seams = slot_for(mesh, case, edit['seam'])
@@ -292,7 +389,7 @@ def dimensions(mesh):
     return np.ptp(values, axis=0)
 
 
-def refine(path, folder, case, operations, sheet):
+def refine(path, folder, case, operations, sheet, expected_span_delta=None):
     record = json.loads((path.parent/'candidate-check.json').read_text(encoding='utf8'))
     bpy.ops.wm.open_mainfile(filepath=str(path))
     scene = bpy.context.scene
@@ -318,6 +415,10 @@ def refine(path, folder, case, operations, sheet):
             changes.append(threaded_stem(bm,original,case,edit))
         elif kind == 'bushing':
             changes.append(refine_bushing(bm,original,case,edit,origin,edited))
+        elif kind == 'flange_facing':
+            changes.append(turn_flange_facing(bm,original,case,edit,origin,edited))
+        elif kind == 'seat_cast_lug':
+            changes.append(seat_cast_lug(bm,original,case,edit,origin,edited))
         elif kind == 'shoulder':
             changes.append(rounded_shoulder(bm,original,case,edit,origin,edited))
         elif kind == 'gauge':
@@ -327,13 +428,17 @@ def refine(path, folder, case, operations, sheet):
     bm.normal_update()
     holes = bushing_holes(bm,operations)
     gauge_rays = gauge_face_rays(bm,new,operations)
+    flange_openings = verify_flange_openings(bm,new,case,operations)
     bm.to_mesh(new)
     bm.free()
     new.update()
     retained = preserve_corners(original,new,'mesh_detail_origin',edited)
     after = {'vertices':len(new.vertices),'faces':len(new.polygons),'span':dimensions(new).tolist()}
-    if after['faces']<=before['faces'] or max(abs(np.subtract(after['span'],before['span'])))>.0015:
-        raise ValueError('Mesh refinement changed the overall proportions')
+    delta = np.subtract(after['span'],before['span'])
+    envelope_ok = (max(abs(delta)) <= .0015 if expected_span_delta is None
+                   else np.allclose(delta, expected_span_delta, atol=.0002, rtol=0.))
+    if after['faces'] <= before['faces'] or not envelope_ok:
+        raise ValueError('Mesh refinement changed the overall proportions beyond the audited correction')
     subject.data = new
     output = folder/'candidate.blend'
     folder.mkdir(parents=True,exist_ok=False)
@@ -351,6 +456,7 @@ def refine(path, folder, case, operations, sheet):
         raise ValueError('An existing registered texture changed during local mesh editing')
     return {'before':before,'after':after,'unrelated_faces_positions_uv_preserved':retained,
             'verified_open_bushings':holes,'clear_dial_rays':gauge_rays,'original_images_verified':len(texture_bytes),
+            'flange_openings':flange_openings,
             'changes':changes,'reopened':True,'sha256':sha256(output.read_bytes()).hexdigest()}
 
 
@@ -369,7 +475,8 @@ def main():
     started = time.monotonic()
     records = {}
     for aid,detail in recipe['assets'].items():
-        records[aid] = refine(base/aid/'candidate.blend',output/aid,cases[aid],detail['operations'],base/aid/'reference-sheet.png')
+        records[aid] = refine(base/aid/'candidate.blend',output/aid,cases[aid],detail['operations'],
+                              base/aid/'reference-sheet.png',detail.get('expected_span_delta'))
     (output/'mesh-checks.json').write_text(json.dumps({'assets':records,'seconds':round(time.monotonic()-started,3)},
                                                        ensure_ascii=False,indent=2),encoding='utf8')
 

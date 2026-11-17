@@ -1,0 +1,860 @@
+{
+  "version": "six-view-surface-registration-v1",
+  "coordinate_frame": "normalized-render-mesh",
+  "coordinate_size": [
+    1080,
+    720
+  ],
+  "assets": {
+    "2": {
+      "source_sheet": "DN200_handwheel_ball_valve_rust_6views_HD.png",
+      "source_sha256": "bb907c1fa355616ffb4321caed8842af48d9f4f3aaa6f302de9ad2c4d1e4f785",
+      "mesh_sha256": "2707f700bc420b26689efbe65eef5c5fa141cb4e83eccd8ae9d6e64ce3f1da3c",
+      "basis": "DN200 WCB original, matching three-spoke rusty sheet; labels excluded from sampling. Top panel is an oblique front view.",
+      "surfaces": [
+        {
+          "name": "blue_gearbox",
+          "parts": [
+            "Gearbox housing",
+            "Gearbox round cover"
+          ],
+          "material": "blue",
+          "mode": "cylinder",
+          "axes": {
+            "u": [
+              0,
+              1,
+              0
+            ],
+            "v": [
+              0,
+              0,
+              -1
+            ],
+            "n": [
+              1,
+              0,
+              0
+            ]
+          },
+          "origin": [
+            0,
+            -0.003006,
+            0
+          ],
+          "limits": {
+            "v": [
+              -0.351704,
+              -0.201403
+            ]
+          },
+          "direction": "vertical",
+          "views": [
+            {
+              "view": "Front",
+              "rect": [
+                129,
+                56,
+                197,
+                116
+              ],
+              "angle": 0,
+              "exclude": [
+                [
+                  174,
+                  64,
+                  194,
+                  83
+                ]
+              ],
+              "weight": 0.72
+            },
+            {
+              "view": "Back",
+              "rect": [
+                497,
+                57,
+                591,
+                107
+              ],
+              "angle": 180,
+              "exclude_ellipses": [
+                [
+                  562,
+                  81,
+                  15,
+                  15
+                ]
+              ]
+            },
+            {
+              "view": "Left",
+              "rect": [
+                851,
+                52,
+                919,
+                111
+              ],
+              "angle": -90
+            },
+            {
+              "view": "Right",
+              "rect": [
+                154,
+                407,
+                227,
+                468
+              ],
+              "angle": 90
+            }
+          ],
+          "strength": 1.2
+        },
+        {
+          "name": "cast_valve_body",
+          "parts": [
+            "Cast valve body"
+          ],
+          "material": "steel",
+          "mode": "cylinder",
+          "axes": {
+            "u": [
+              0,
+              0,
+              1
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "n": [
+              1,
+              0,
+              0
+            ]
+          },
+          "origin": [
+            -0.01503005,
+            0,
+            -0.24448896
+          ],
+          "limits": {
+            "v": [
+              -0.152217,
+              0.146205
+            ]
+          },
+          "direction": "horizontal",
+          "views": [
+            {
+              "view": "Front",
+              "rect": [
+                104,
+                164,
+                251,
+                302
+              ],
+              "angle": 0,
+              "flip_across": true,
+              "exclude": [
+                [
+                  104,
+                  158,
+                  142,
+                  311
+                ],
+                [
+                  156,
+                  206,
+                  210,
+                  225
+                ],
+                [
+                  174,
+                  225,
+                  191,
+                  244
+                ],
+                [
+                  166,
+                  243,
+                  199,
+                  259
+                ],
+                [
+                  169,
+                  260,
+                  193,
+                  274
+                ]
+              ],
+              "profile": [
+                [
+                  0,
+                  190,
+                  281
+                ],
+                [
+                  0.31,
+                  170,
+                  299
+                ],
+                [
+                  0.7,
+                  172,
+                  299
+                ],
+                [
+                  1,
+                  184,
+                  291
+                ]
+              ]
+            },
+            {
+              "view": "Back",
+              "rect": [
+                467,
+                160,
+                606,
+                307
+              ],
+              "angle": 180,
+              "flip_across": true,
+              "reverse": true,
+              "weight": 0.83,
+              "exclude": [
+                [
+                  467,
+                  156,
+                  509,
+                  318
+                ]
+              ],
+              "profile": [
+                [
+                  0,
+                  194,
+                  279
+                ],
+                [
+                  0.24,
+                  174,
+                  292
+                ],
+                [
+                  0.7,
+                  168,
+                  303
+                ],
+                [
+                  1,
+                  192,
+                  289
+                ]
+              ]
+            }
+          ],
+          "strength": 1.2
+        },
+        {
+          "name": "body_split_and_bolts",
+          "parts": [
+            "Body split flange",
+            "Split flange bolt head 01",
+            "Split flange nut 01",
+            "Split flange bolt head 02",
+            "Split flange nut 02",
+            "Split flange bolt head 03",
+            "Split flange nut 03",
+            "Split flange bolt head 04",
+            "Split flange nut 04",
+            "Split flange bolt head 05",
+            "Split flange nut 05",
+            "Split flange bolt head 06",
+            "Split flange nut 06",
+            "Split flange bolt head 07",
+            "Split flange nut 07",
+            "Split flange bolt head 08",
+            "Split flange nut 08",
+            "Split flange bolt head 09",
+            "Split flange nut 09",
+            "Split flange bolt head 10",
+            "Split flange nut 10",
+            "Split flange bolt head 11",
+            "Split flange nut 11",
+            "Split flange bolt head 12",
+            "Split flange nut 12"
+          ],
+          "material": "steel",
+          "mode": "plane",
+          "axes": {
+            "u": [
+              0,
+              1,
+              0
+            ],
+            "v": [
+              0,
+              0,
+              -1
+            ],
+            "n": [
+              1,
+              0,
+              0
+            ]
+          },
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "limits": {
+            "u": [
+              -0.129,
+              -0.079
+            ],
+            "v": [
+              0.048,
+              0.443
+            ]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "rect": [
+                116,
+                158,
+                150,
+                307
+              ]
+            }
+          ],
+          "strength": 1.16
+        },
+        {
+          "name": "flange_plus",
+          "parts": [
+            "End flange plus",
+            "Raised face plus"
+          ],
+          "material": "steel",
+          "mode": "plane",
+          "axes": {
+            "u": [
+              -1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              0,
+              -1
+            ],
+            "n": [
+              0,
+              1,
+              0
+            ]
+          },
+          "origin": [
+            -0.01503005,
+            0,
+            -0.24448896
+          ],
+          "limits": {
+            "u": [
+              -0.186373,
+              0.186373
+            ],
+            "v": [
+              -0.186373,
+              0.186373
+            ]
+          },
+          "views": [
+            {
+              "view": "Right",
+              "rect": [
+                116,
+                510,
+                269,
+                669
+              ],
+              "exclude_ellipses": [
+                [
+                  192,
+                  590,
+                  37,
+                  37
+                ]
+              ]
+            }
+          ],
+          "strength": 1.32
+        },
+        {
+          "name": "flange_minus",
+          "parts": [
+            "End flange minus",
+            "Raised face minus"
+          ],
+          "material": "steel",
+          "mode": "plane",
+          "axes": {
+            "u": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              0,
+              -1
+            ],
+            "n": [
+              0,
+              -1,
+              0
+            ]
+          },
+          "origin": [
+            -0.01503005,
+            0,
+            -0.24448896
+          ],
+          "limits": {
+            "u": [
+              -0.186373,
+              0.186373
+            ],
+            "v": [
+              -0.186373,
+              0.186373
+            ]
+          },
+          "views": [
+            {
+              "view": "Left",
+              "rect": [
+                813,
+                158,
+                966,
+                317
+              ],
+              "exclude_ellipses": [
+                [
+                  888,
+                  239,
+                  36,
+                  37
+                ]
+              ]
+            }
+          ],
+          "strength": 1.32
+        },
+        {
+          "name": "handwheel",
+          "parts": [
+            "Handwheel rim",
+            "Handwheel hub",
+            "Handwheel spoke 1",
+            "Handwheel spoke 2",
+            "Handwheel spoke 3"
+          ],
+          "material": "blue",
+          "mode": "plane",
+          "axes": {
+            "u": [
+              0,
+              1,
+              0
+            ],
+            "v": [
+              0,
+              0,
+              -1
+            ],
+            "n": [
+              1,
+              0,
+              0
+            ]
+          },
+          "origin": [
+            0,
+            -0.003006,
+            0.2765531
+          ],
+          "limits": {
+            "u": [
+              -0.223447,
+              0.223447
+            ],
+            "v": [
+              -0.223447,
+              0.223447
+            ]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "rect": [
+                131,
+                4,
+                294,
+                162
+              ],
+              "exclude": [
+                [
+                  198,
+                  2,
+                  233,
+                  16
+                ],
+                [
+                  271,
+                  45,
+                  291,
+                  82
+                ]
+              ],
+              "exclude_ellipses": [
+                [
+                  211,
+                  85,
+                  12,
+                  12
+                ]
+              ]
+            }
+          ],
+          "strength": 1.26
+        },
+        {
+          "name": "steel_stem_collar",
+          "parts": [
+            "Stem collar"
+          ],
+          "material": "steel",
+          "mode": "cylinder",
+          "axes": {
+            "u": [
+              0,
+              1,
+              0
+            ],
+            "v": [
+              0,
+              0,
+              -1
+            ],
+            "n": [
+              1,
+              0,
+              0
+            ]
+          },
+          "origin": [
+            0,
+            -0.003006,
+            0
+          ],
+          "limits": {
+            "v": [
+              -0.03,
+              0.011
+            ]
+          },
+          "direction": "vertical",
+          "views": [
+            {
+              "view": "Front",
+              "rect": [
+                154,
+                136,
+                201,
+                161
+              ],
+              "angle": 0,
+              "exclude": [
+                [
+                  177,
+                  141,
+                  187,
+                  155
+                ]
+              ]
+            },
+            {
+              "view": "Left",
+              "rect": [
+                862,
+                137,
+                921,
+                160
+              ],
+              "angle": -90
+            },
+            {
+              "view": "Right",
+              "rect": [
+                166,
+                482,
+                226,
+                507
+              ],
+              "angle": 90
+            }
+          ],
+          "strength": 1.14
+        },
+        {
+          "name": "foot_minus",
+          "parts": [
+            "Foot base minus",
+            "Foot upright minus inner",
+            "Foot gusset minus inner",
+            "Foot upright minus outer",
+            "Foot gusset minus outer",
+            "Foot top strap minus"
+          ],
+          "material": "steel",
+          "mode": "plane",
+          "axes": {
+            "u": [
+              0,
+              1,
+              0
+            ],
+            "v": [
+              0,
+              0,
+              -1
+            ],
+            "n": [
+              1,
+              0,
+              0
+            ]
+          },
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "limits": {
+            "u": [
+              -0.314,
+              -0.143
+            ],
+            "v": [
+              0.377,
+              0.5
+            ]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "rect": [
+                70,
+                287,
+                115,
+                337
+              ]
+            }
+          ],
+          "strength": 1.12
+        },
+        {
+          "name": "foot_plus",
+          "parts": [
+            "Foot base plus",
+            "Foot upright plus inner",
+            "Foot gusset plus inner",
+            "Foot upright plus outer",
+            "Foot gusset plus outer",
+            "Foot top strap plus"
+          ],
+          "material": "steel",
+          "mode": "plane",
+          "axes": {
+            "u": [
+              0,
+              1,
+              0
+            ],
+            "v": [
+              0,
+              0,
+              -1
+            ],
+            "n": [
+              1,
+              0,
+              0
+            ]
+          },
+          "origin": [
+            0,
+            0,
+            0
+          ],
+          "limits": {
+            "u": [
+              0.137,
+              0.308
+            ],
+            "v": [
+              0.377,
+              0.5
+            ]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "rect": [
+                246,
+                287,
+                288,
+                337
+              ]
+            }
+          ],
+          "strength": 1.12
+        },
+        {
+          "name": "neck_minus",
+          "parts": [
+            "Bored neck minus"
+          ],
+          "material": "steel",
+          "mode": "cylinder",
+          "direction": "horizontal",
+          "axes": {
+            "n": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "u": [
+              0,
+              0,
+              1
+            ]
+          },
+          "origin": [
+            -0.01503005,
+            0,
+            -0.24448896
+          ],
+          "limits": {
+            "v": [
+              -0.305612,
+              -0.143286
+            ]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [
+                88,
+                196,
+                116,
+                276
+              ],
+              "flip_across": true
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [
+                449,
+                197,
+                478,
+                277
+              ],
+              "flip_across": true,
+              "reverse": true,
+              "weight": 0.75
+            }
+          ],
+          "strength": 1.22
+        },
+        {
+          "name": "neck_plus",
+          "parts": [
+            "Bored neck plus"
+          ],
+          "material": "steel",
+          "mode": "cylinder",
+          "direction": "horizontal",
+          "axes": {
+            "n": [
+              1,
+              0,
+              0
+            ],
+            "v": [
+              0,
+              1,
+              0
+            ],
+            "u": [
+              0,
+              0,
+              1
+            ]
+          },
+          "origin": [
+            -0.01503005,
+            0,
+            -0.24448896
+          ],
+          "limits": {
+            "v": [
+              0.137274,
+              0.2996
+            ]
+          },
+          "views": [
+            {
+              "view": "Front",
+              "angle": 0,
+              "rect": [
+                246,
+                196,
+                276,
+                277
+              ],
+              "flip_across": true
+            },
+            {
+              "view": "Back",
+              "angle": 180,
+              "rect": [
+                603,
+                196,
+                630,
+                277
+              ],
+              "flip_across": true,
+              "reverse": true,
+              "weight": 0.75
+            }
+          ],
+          "strength": 1.22
+        }
+      ]
+    }
+  }
+}
