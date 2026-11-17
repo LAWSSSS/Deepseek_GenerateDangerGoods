@@ -1,0 +1,67 @@
+{
+  "version": "bearing03-parametric-v1",
+  "number": 3,
+  "height": 1.0,
+  "radial_segments": 128,
+  "base_length": 1.807,
+  "base_depth": 0.526,
+  "base_thickness": 0.193,
+  "bolt_spacing": 1.3947,
+  "slot_width": 0.1754,
+  "slot_length": 0.2193,
+  "axis_height": 0.50175,
+  "dome_radius": 0.49825,
+  "body_thickness": 0.34,
+  "body_half_width": 0.6,
+  "boss_outer": 0.49,
+  "boss_thickness": 0.34,
+  "housing_bore": 0.414,
+  "outer_ring_outer": 0.3947,
+  "outer_ring_inner": 0.335,
+  "outer_ring_width": 0.2105,
+  "inner_ring_outer": 0.315,
+  "inner_ring_inner": 0.2193,
+  "inner_ring_width": 0.4526,
+  "set_screws": 2,
+  "set_screw_angles_deg": [60, 180],
+  "set_screw_x": 0.188,
+  "set_screw_hole_radius": 0.012,
+  "set_screw_head_radius": 0.021,
+  "zerk_x": 0.02,
+  "zerk_top": 1.10,
+  "label_size": 0.105,
+  "label_height": 0.102,
+  "label_y": 0.65,
+  "material_profile": {
+    "blue_paint": {
+      "roughness": 0.48,
+      "metallic": 0.03,
+      "rust_amount": 0.12
+    },
+    "bearing_steel": {
+      "roughness": 0.22,
+      "metallic": 0.98,
+      "rust_amount": 0.01
+    },
+    "dark_steel": {
+      "roughness": 0.32,
+      "metallic": 0.95,
+      "rust_amount": 0.04
+    },
+    "rusted_cast": {
+      "roughness": 0.8,
+      "metallic": 0.2,
+      "rust_amount": 0.55
+    }
+  },
+  "ratio_source": {
+    "catalog": "UCP210 / P210 / UC210 standard proportions (L 206, H 57.2, J 159, A 60, N 20, N1 25, H2 114, d 50, D 90, B 51.6, C 24 mm)",
+    "sources": [
+      "https://medias.schaeffler.us/en/product/housings/housings/radial-insert-ball-bearing-housing-units/plummer-block-housing-units/ucp210-29-j7/p/401559",
+      "https://medias.schaeffler.us/en/product/rotary/rolling-and-plain-bearings/ball-bearings/insert-ball-bearings-and-belt-tension-pulleys/insert-ball-bearings/uc210/p/358656"
+    ],
+    "note": "Catalog ratios are used only as a proportion sanity check. The user six-view image is uncalibrated and the candidate is not a measured copy."
+  },
+  "reference_note": "The six-view image is uncalibrated. Front/back panels are near-orthographic product renders; the top/bottom panels are oblique and cannot be matched to orthographic renders exactly.",
+  "texture_note": "Small patches of the supplied rust image are used as high-frequency detail. Paint wear, grease, back-side texture and hidden surfaces are inferred."
+}

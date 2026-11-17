@@ -1,0 +1,296 @@
+{
+  "version": "sealant13-parametric-v1",
+  "radial_segments": 128,
+  "shape_basis": "source_photo_with_uncalibrated_category_reference",
+  "reference_role": "category_reference_unverified",
+  "scale_note": "Working scale follows the clean-photo pixel ratio and a plausible industrial sealant-can size; it is not a measured dimension of either used can.",
+  "proportion_source": {
+    "photo": "outputs/物品高清输入-39件/原貌HD/13-密封胶罐.png",
+    "rust": "outputs/物品高清输入-39件/生锈HD/13-密封胶罐.png",
+    "reference": "references/六视图/白色塑料圆罐六视图产品展示.png",
+    "reference_note": "The six-view sheet is a single clean example of the same white round-can category. The source photo shows two used cans, so panel contours cannot be overlaid on the two-can silhouette. The sheet is used for lid/body/bottom topology only, never as a measured or identical-unit reference.",
+    "visible_structure": "Two upright white plastic cans; lid with a raised outer rim and shallow recessed top; two parallel seam lines; one lift latch on each can (front can latch seen in side profile at the left edge, rear can latch facing the camera); bottom rim, centre gate and a small moulded recycling-style mark.",
+    "pixel_ratios": "The front can is about 630 px wide and 881 px tall in the clean photo (ratio about 0.715); the rear can is partly occluded. The candidate uses diameter/height about 0.71, not a measured dimension.",
+    "status": "uncalibrated_category_reference"
+  },
+  "layout": {
+    "front_center": [
+      0.05,
+      -0.1
+    ],
+    "rear_center": [
+      -0.05,
+      0.1
+    ],
+    "front_rotation_deg": -92.0,
+    "rear_rotation_deg": -8.0,
+    "note": "The front (screen-left) can is nearer the +X source camera and offset towards -Y. Its latch is rotated to face -Y so it is seen in side profile at the left edge, as in the photo; the rear can latch faces almost +X and is visible near the front. The reference sheet shows only one can, so the two-can arrangement follows the photo."
+  },
+  "can": {
+    "total_height": 0.28,
+    "body": {
+      "z0": 0.0,
+      "z1": 0.236,
+      "profile": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.088,
+          0.0
+        ],
+        [
+          0.093,
+          0.001
+        ],
+        [
+          0.0955,
+          0.004
+        ],
+        [
+          0.096,
+          0.011
+        ],
+        [
+          0.0985,
+          0.024
+        ],
+        [
+          0.1,
+          0.216
+        ],
+        [
+          0.0998,
+          0.226
+        ],
+        [
+          0.0988,
+          0.232
+        ],
+        [
+          0.0968,
+          0.2352
+        ],
+        [
+          0.094,
+          0.236
+        ],
+        [
+          0.0,
+          0.236
+        ]
+      ],
+      "note": "Solid body with a slight outward taper and rounded bottom/top edges. The body top is hidden under the lid; no internal cavity is modelled."
+    },
+    "lid": {
+      "z0": 0.226,
+      "z1": 0.28,
+      "profile": [
+        [
+          0.0,
+          0.226
+        ],
+        [
+          0.096,
+          0.226
+        ],
+        [
+          0.101,
+          0.228
+        ],
+        [
+          0.1035,
+          0.232
+        ],
+        [
+          0.1035,
+          0.27
+        ],
+        [
+          0.1028,
+          0.2745
+        ],
+        [
+          0.101,
+          0.2775
+        ],
+        [
+          0.098,
+          0.2795
+        ],
+        [
+          0.095,
+          0.28
+        ],
+        [
+          0.0918,
+          0.2793
+        ],
+        [
+          0.0902,
+          0.2772
+        ],
+        [
+          0.0885,
+          0.275
+        ],
+        [
+          0.085,
+          0.273
+        ],
+        [
+          0.083,
+          0.271
+        ],
+        [
+          0.081,
+          0.2702
+        ],
+        [
+          0.01,
+          0.2698
+        ],
+        [
+          0.0,
+          0.2698
+        ]
+      ],
+      "note": "Lid skirt overhangs the body; the top has a raised outer rim and a deeper shallow recessed panel with a visible step. The profile is revolved as a closed solid, so no internal cavity is modelled."
+    },
+    "seam_rings": [
+      {
+        "name": "lid seam",
+        "z": 0.2295,
+        "major": 0.1037,
+        "minor": 0.0012
+      },
+      {
+        "name": "body seam",
+        "z": 0.2222,
+        "major": 0.0996,
+        "minor": 0.00105
+      }
+    ],
+    "latch": {
+      "upper_center": [
+        0.1045,
+        0.0,
+        0.2615
+      ],
+      "upper_half": [
+        0.01,
+        0.024,
+        0.01
+      ],
+      "lower_center": [
+        0.1035,
+        0.0,
+        0.238
+      ],
+      "lower_half": [
+        0.0075,
+        0.02,
+        0.0055
+      ],
+      "note": "Two-block lift latch on the lid skirt; the gap and the exact catch mechanism are hidden and inferred."
+    },
+    "bottom_tabs": {
+      "radius": 0.091,
+      "z": 0.0015,
+      "angles_deg": [
+        14.0,
+        -14.0
+      ],
+      "half": [
+        0.007,
+        0.004,
+        0.003
+      ],
+      "note": "Two small base tabs are visible at the bottom right of the rear can; they are modelled as solid feet/catches. Stability and their real function are not verified."
+    },
+    "bottom_gate": {
+      "center": [
+        0.0,
+        0.0,
+        -0.001
+      ],
+      "radius": 0.006,
+      "depth": 0.002,
+      "note": "Centre injection gate on the bottom, visible in the reference bottom panel."
+    },
+    "bottom_mark": {
+      "center": [
+        -0.03,
+        0.02
+      ],
+      "circumradius": 0.009,
+      "bar_half_length": 0.006,
+      "bar_half_width": 0.00065,
+      "thickness": 0.0004,
+      "z": -0.00045,
+      "note": "Recycling-style triangular mould mark and two small letter-like bars. The exact symbol, resin code text and engraving depth are not faithfully reproduced."
+    },
+    "recess_rings": [
+      {
+        "name": "recess rim",
+        "z": 0.2703,
+        "major": 0.0812,
+        "minor": 0.0007
+      }
+    ]
+  },
+  "material_profile": {
+    "white": {
+      "clean": {
+        "base_rgb": [
+          229,
+          228,
+          222
+        ],
+        "roughness": 0.455,
+        "metallic": 0.0,
+        "stain": 0.0
+      },
+      "weathered": {
+        "base_rgb": [
+          208,
+          205,
+          196
+        ],
+        "roughness": 0.52,
+        "metallic": 0.0,
+        "stain": 0.1
+      },
+      "stained": {
+        "base_rgb": [
+          189,
+          182,
+          169
+        ],
+        "roughness": 0.575,
+        "metallic": 0.0,
+        "stain": 0.28
+      },
+      "worn": {
+        "base_rgb": [
+          218,
+          215,
+          207
+        ],
+        "roughness": 0.475,
+        "metallic": 0.0,
+        "stain": 0.04
+      }
+    },
+    "mark": {
+      "base_rgb": [
+        112,
+        108,
+        101
+      ],
+      "roughness": 0.62,
+      "metallic": 0.0
+    }
+  }
+}

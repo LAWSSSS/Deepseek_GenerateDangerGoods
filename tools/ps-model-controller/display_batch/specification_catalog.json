@@ -1,0 +1,21 @@
+{
+  "version": "manufacturer-specifications-v1",
+  "specifications": [
+    {
+      "brand": "ASAHI",
+      "model": "P210",
+      "feature": "housing_length",
+      "length_mm": 206,
+      "dimensions": {"housing_length_L_mm":206,"housing_width_A_mm":60,"mounting_centers_J_mm":159,"axis_height_H_mm":57.2},
+      "source": {
+        "url": "https://www.asahiseiko.co.jp/system/download/datasheet/bearings/ucp.pdf",
+        "sha256": "ecfd8c53150a54df7ebe75ce7562733290a5eda5ce8edf77de1b61a870e7ffa9",
+        "page": 1,
+        "printed_pages": "20–21",
+        "row": "UCP210, standard housing P210",
+        "feature": "L: overall housing foot-to-foot length, not bearing bore or stroke",
+        "verified_on": "2026-11-12"
+      }
+    }
+  ]
+}

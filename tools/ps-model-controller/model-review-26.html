@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>26 油缸1 · 三维模型检查（待审）</title>
+<style>
+:root{--ink:#1d2320;--muted:#5f6a64;--line:#d5d9d5;--panel:#fbfcfa;--accent:#8a2f2f}
+*{box-sizing:border-box}body{margin:0;font:15px/1.65 "Microsoft YaHei",system-ui,sans-serif;color:var(--ink);background:#eef1ee}
+header{background:#3a2422;color:#f7f1ee;padding:26px 30px}header h1{margin:0 0 6px;font-size:25px}
+header p{margin:0;color:#e0cfc8}main{max-width:1180px;margin:24px auto 60px;padding:0 18px}
+section{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:20px;margin:18px 0}
+h2{margin:0 0 12px;font-size:19px;color:var(--accent)}h3{margin:16px 0 8px;font-size:16px}
+.notice{border-left:5px solid #b5762a;background:#fff7e8;padding:12px 16px;border-radius:6px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.card{display:block;background:#fff;border:1px solid var(--line);border-radius:9px;overflow:hidden;color:inherit;text-decoration:none}
+.card img{width:100%;height:210px;object-fit:contain;background:#e7eae6;display:block}
+.card span{display:block;padding:8px 10px;font-size:13px}
+.viewer{display:grid;grid-template-columns:1fr 260px;gap:18px}@media(max-width:820px){.viewer{grid-template-columns:1fr}}
+.turnbox{background:#e3e7e2;border-radius:10px;min-height:380px;display:flex;align-items:center;justify-content:center;user-select:none;touch-action:none;cursor:grab}
+.turnbox img{max-height:420px;max-width:100%}
+aside{font-size:13px;color:var(--muted)}button{font:inherit;padding:7px 13px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer}
+button:hover{border-color:var(--accent)}table{border-collapse:collapse;width:100%}th,td{text-align:left;border-bottom:1px solid var(--line);padding:8px 10px;vertical-align:top}
+th{width:460px;color:var(--muted);font-weight:500}code{background:#eef1ee;padding:1px 5px;border-radius:4px}
+ul{margin:8px 0 0 20px;padding:0}a{color:var(--accent)}.tag{display:inline-block;background:#f0e5cf;color:#77531a;border-radius:20px;padding:2px 10px;font-size:12px}
+</style></head><body>
+<header><h1>26 油缸1 · 六视图重建（cylinder26-parametric-v1） <span class="tag">manual_only · 待审</span></h1>
+<p>红色焊接式单耳环液压缸 · 耳环/衬套/套环/两个同侧油口/底端杆头/标签分部件重建 · 六视图为未标定的外观匹配参考</p></header>
+<main>
+<section><div class="notice"><b>不能进入正式合成。</b> 本候选不替换原模型，不进入自动放置或正式合成。
+所有 IoU 均为未标定诊断，不是验收通过。参考六视图存在面板矛盾；背面、内部油路、真实尺寸、落稳和现场光照仍待人工复核。
+浏览器交互检查未执行；本页用 Blender 渲染图为离线证据。</div></section>
+
+<section><h2>旋转检查（24 方向实测渲染）</h2><div class="viewer">
+<div class="turnbox" id="turnbox"><img id="turn" src="../26油缸1-六视图重建-v2/renders/turn-00.png" alt="转台"></div>
+<aside><p>拖动图片旋转；也可自动播放。</p><p><button id="play">自动旋转</button> <button id="reset">回到 000°</button></p>
+<p>当前角度：<b id="angle">000°</b></p><p>转台只覆盖外观，不证明隐藏结构、同部件装配或落稳。</p>
+<p><a href="../26油缸1-六视图重建-v2/mesh.glb">下载 GLB</a><br><a href="../26油缸1-六视图重建-v2/model.blend">下载 Blender 可编辑文件</a></p></aside></div></section>
+
+<section><h2>对照图</h2><div class="grid"><a class="card" href="../26油缸1-六视图重建-v2/六视图-新旧对照.jpg" target="_blank"><img src="../26油缸1-六视图重建-v2/六视图-新旧对照.jpg" alt="六方向新旧对照"><span>六方向新旧对照</span></a><a class="card" href="../26油缸1-六视图重建-v2/局部检查.jpg" target="_blank"><img src="../26油缸1-六视图重建-v2/局部检查.jpg" alt="关键局部"><span>关键局部</span></a><a class="card" href="../26油缸1-六视图重建-v2/分部件隔离.jpg" target="_blank"><img src="../26油缸1-六视图重建-v2/分部件隔离.jpg" alt="分部件隔离"><span>分部件隔离</span></a><a class="card" href="../26油缸1-六视图重建-v2/材质-同光照对照.jpg" target="_blank"><img src="../26油缸1-六视图重建-v2/材质-同光照对照.jpg" alt="同光照材质/灰模"><span>同光照材质/灰模</span></a><a class="card" href="../26油缸1-六视图重建-v2/金属反射-变光对照.jpg" target="_blank"><img src="../26油缸1-六视图重建-v2/金属反射-变光对照.jpg" alt="金属反射变光"><span>金属反射变光</span></a><a class="card" href="../26油缸1-六视图重建-v2/开孔-隔离检查.jpg" target="_blank"><img src="../26油缸1-六视图重建-v2/开孔-隔离检查.jpg" alt="开孔/衬套/盲孔隔离"><span>开孔/衬套/盲孔隔离</span></a><a class="card" href="../26油缸1-六视图重建-v2/原视角诊断.jpg" target="_blank"><img src="../26油缸1-六视图重建-v2/原视角诊断.jpg" alt="原视角轮廓诊断"><span>原视角轮廓诊断</span></a><a class="card" href="../26油缸1-六视图重建-v2/原照-新候选对照.jpg" target="_blank"><img src="../26油缸1-六视图重建-v2/原照-新候选对照.jpg" alt="原照/新候选/六视图参考"><span>原照/新候选/六视图参考</span></a><a class="card" href="../26油缸1-六视图重建-v2/转台-24方向.jpg" target="_blank"><img src="../26油缸1-六视图重建-v2/转台-24方向.jpg" alt="24 方向转台"><span>24 方向转台</span></a><a class="card" href="../26油缸1-六视图重建-v2/材质图集-对照.jpg" target="_blank"><img src="../26油缸1-六视图重建-v2/材质图集-对照.jpg" alt="PBR 图集"><span>PBR 图集</span></a></div></section>
+
+<section><h2>实际执行的检查</h2><table><tr><th>严格原相机轮廓 IoU（未标定，仅诊断）</th><td>0.194</td></tr><tr><th>正视图包围盒对齐 IoU（仅诊断）</th><td>0.1726</td></tr><tr><th>24 方向包围盒对齐最优 IoU（仅诊断）</th><td>0.4611</td></tr><tr><th>耳环贯穿孔</th><td>1/1</td></tr><tr><th>孔内钢衬套</th><td>1/1</td></tr><tr><th>油口数量 / 盲孔开放</th><td>2/2 · 2/2</td></tr><tr><th>杆头盲孔</th><td>通过</td></tr><tr><th>标签</th><td>存在</td></tr><tr><th>网格部件/闭合</th><td>47 / 47</td></tr><tr><th>同部件自交</th><td>0</td></tr><tr><th>贴图数值检查</th><td>True</td></tr><tr><th>金属高光随光位移动</th><td>True</td></tr><tr><th>金属高光质心位移 (px)</th><td>71.28</td></tr><tr><th>浏览器交互检查</th><td>未执行</td></tr><tr><th>原模型源图轮廓审计（旧）</th><td>IoU 0.9269，填孔 0，通过 True</td></tr></table>
+<p class="notice" style="margin-top:14px">图集检查只证明贴图数值与变化；金属变光只证明高光移动；开孔射线只覆盖耳环、两个油口和杆头几何。
+未执行项已明确写为“未执行”，不能解读为通过。</p></section>
+
+<section><h2>待人工复核</h2><ul><li>六视图参考未标定且面板互相矛盾（顶视耳环孔方向、油口对置关系与原照不一致）；工作尺度、缸径、耳环孔径、油口螺纹规格、孔深、壁厚和装配关系未实测。</li><li>原照是 3/4 视角；严格原相机与包围盒对齐 IoU 只作诊断。</li><li>背面、缸筒内部、活塞/密封内部、油口内部通道（建模为可见盲孔）、杆头连接方式和耳环衬套配合为推断。</li><li>两个油口按原照放在同一侧且轴向位置不同；参考画成同轴对置，不能同时成立。</li><li>标签文字/品牌不可辨且未复制；条形码、标志块、警告三角和文字行是近似重绘。</li><li>锈迹分布、漆面磨损和焊缝形状为近似；钢衬套/孔口环真实材料未检测。</li><li>落稳、接触、现场尺度、遮挡顺序与环境光融合未验证。</li><li>浏览器交互检查未执行（本工作树缺少本地 three.js/node_modules）；需串行整合后人工复核。</li><li>本候选不替换原模型，不进入自动放置或正式合成。</li></ul></section>
+
+<section><h2>文件与记录</h2>
+<p><a href="../26油缸1-六视图重建-v2/result.json">result.json</a> · <a href="../26油缸1-六视图重建-v2/hashes.json">hashes.json</a> ·
+<a href="../26油缸1-六视图重建-v2/source-measurements.json">原照测量</a> ·
+<a href="../26油缸1-六视图重建-v2/old-model-audit.json">旧模型审计</a> ·
+<a href="../26油缸1-六视图重建-v2/worker-result.json">Blender worker 记录</a> ·
+<a href="../26油缸1-六视图重建-v2/report.md">中文报告</a></p>
+<p>贴图：<a href="../26油缸1-六视图重建-v2/base_color.png">底色</a> ·
+<a href="../26油缸1-六视图重建-v2/metallic_roughness.png">金属/粗糙度</a> ·
+<a href="../26油缸1-六视图重建-v2/normal.png">法线</a> · <a href="../26油缸1-六视图重建-v2/材质图集-布局.jpg">图集布局</a></p>
+<p>候选为 <code>cylinder26-parametric-v1</code>，参考角色 <code>visual_match_unverified</code>；
+原始模型和共享页面未被修改。串行整合后再接入共享查看器与人工验收。</p></section>
+</main>
+<script>
+const frames=['../26油缸1-六视图重建-v2/renders/turn-00.png',
+'../26油缸1-六视图重建-v2/renders/turn-01.png',
+'../26油缸1-六视图重建-v2/renders/turn-02.png',
+'../26油缸1-六视图重建-v2/renders/turn-03.png',
+'../26油缸1-六视图重建-v2/renders/turn-04.png',
+'../26油缸1-六视图重建-v2/renders/turn-05.png',
+'../26油缸1-六视图重建-v2/renders/turn-06.png',
+'../26油缸1-六视图重建-v2/renders/turn-07.png',
+'../26油缸1-六视图重建-v2/renders/turn-08.png',
+'../26油缸1-六视图重建-v2/renders/turn-09.png',
+'../26油缸1-六视图重建-v2/renders/turn-10.png',
+'../26油缸1-六视图重建-v2/renders/turn-11.png',
+'../26油缸1-六视图重建-v2/renders/turn-12.png',
+'../26油缸1-六视图重建-v2/renders/turn-13.png',
+'../26油缸1-六视图重建-v2/renders/turn-14.png',
+'../26油缸1-六视图重建-v2/renders/turn-15.png',
+'../26油缸1-六视图重建-v2/renders/turn-16.png',
+'../26油缸1-六视图重建-v2/renders/turn-17.png',
+'../26油缸1-六视图重建-v2/renders/turn-18.png',
+'../26油缸1-六视图重建-v2/renders/turn-19.png',
+'../26油缸1-六视图重建-v2/renders/turn-20.png',
+'../26油缸1-六视图重建-v2/renders/turn-21.png',
+'../26油缸1-六视图重建-v2/renders/turn-22.png',
+'../26油缸1-六视图重建-v2/renders/turn-23.png'];
+let index=0,timer=null,dragging=false,lastX=0;
+const img=document.getElementById('turn'),angle=document.getElementById('angle'),play=document.getElementById('play');
+function draw(){img.src=frames[index];angle.textContent=String(index*15).padStart(3,'0')+'°';}
+function step(delta){index=(index+delta+24)%24;draw();}
+document.getElementById('turnbox').addEventListener('pointerdown',e=>{dragging=true;lastX=e.clientX;e.target.setPointerCapture(e.pointerId);});
+document.getElementById('turnbox').addEventListener('pointermove',e=>{if(!dragging)return;const dx=e.clientX-lastX;if(Math.abs(dx)>=12){step(dx>0?1:-1);lastX=e.clientX;}});
+document.getElementById('turnbox').addEventListener('pointerup',()=>{dragging=false;});
+document.getElementById('turnbox').addEventListener('pointercancel',()=>{dragging=false;});
+document.getElementById('reset').addEventListener('click',()=>{index=0;draw();});
+play.addEventListener('click',()=>{if(timer){clearInterval(timer);timer=null;play.textContent='自动旋转';}else{timer=setInterval(()=>step(1),180);play.textContent='停止旋转';}});
+draw();
+</script></body></html>

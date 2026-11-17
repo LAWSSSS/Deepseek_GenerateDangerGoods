@@ -1,0 +1,235 @@
+{
+  "version": "collector38-parametric-v1",
+  "radial_segments": 96,
+  "tank": {
+    "radius": 0.1875,
+    "cylinder_half_length": 0.395,
+    "head_depth": 0.105,
+    "total_half_length": 0.5,
+    "center_z": 0.3375,
+    "cylinder_end_y": 0.402,
+    "head_junction_y": 0.398,
+    "weld_seam_y": 0.39,
+    "weld_seam_major": 0.1882,
+    "weld_seam_minor": 0.0028
+  },
+  "supports": {
+    "y_positions": [
+      -0.31,
+      0.31
+    ],
+    "strap_width": 0.062,
+    "strap_inner_offset": 0.002,
+    "strap_outer_offset": 0.008,
+    "strap_theta0_deg": 180.0,
+    "strap_theta1_deg": 360.0,
+    "strap_segments": 56,
+    "leg_x": 0.148,
+    "leg_thickness": 0.009,
+    "leg_top_z": 0.225,
+    "leg_bottom_z": 0.008,
+    "leg_top_half_y": 0.035,
+    "leg_bottom_half_y": 0.018,
+    "foot_center_x": 0.195,
+    "foot_half_x": 0.05,
+    "foot_half_y": 0.038,
+    "foot_z0": 0.0,
+    "foot_z1": 0.008,
+    "hole_x": 0.215,
+    "hole_radius": 0.0095
+  },
+  "regulator": {
+    "y": -0.32,
+    "boss_z0": 0.5,
+    "boss_z1": 0.545,
+    "boss_radius": 0.032,
+    "riser_outer": 0.015,
+    "riser_inner": 0.009,
+    "riser_z0": 0.545,
+    "riser_z1": 0.57,
+    "union_z0": 0.57,
+    "union_z1": 0.586,
+    "union_radius": 0.022,
+    "body_center": [
+      0.0,
+      -0.32,
+      0.601
+    ],
+    "body_half": [
+      0.026,
+      0.045,
+      0.017
+    ],
+    "body_bevel": 0.006,
+    "front_boss_x0": 0.026,
+    "front_boss_x1": 0.038,
+    "front_boss_radius": 0.012,
+    "brass_plug_x0": 0.038,
+    "brass_plug_x1": 0.046,
+    "brass_plug_radius": 0.0055,
+    "knob_y0": -0.402,
+    "knob_y1": -0.365,
+    "knob_radius": 0.022,
+    "knob_rib_radius": 0.025,
+    "knob_stem_y0": -0.42,
+    "knob_stem_y1": -0.402,
+    "knob_stem_radius": 0.01,
+    "coupler_y0": -0.265,
+    "coupler_y1": -0.235,
+    "coupler_outer": 0.017,
+    "coupler_inner": 0.01,
+    "coupler_pipe_y0": -0.275,
+    "coupler_pipe_y1": -0.265,
+    "coupler_pipe_radius": 0.012,
+    "coupler_collar_y": -0.248,
+    "coupler_collar_major": 0.019,
+    "coupler_collar_minor": 0.003
+  },
+  "safety": {
+    "y": 0.02,
+    "boss_z0": 0.5,
+    "boss_z1": 0.545,
+    "boss_radius": 0.028,
+    "body_z0": 0.545,
+    "body_z1": 0.572,
+    "body_radius": 0.014,
+    "cap_z0": 0.572,
+    "cap_z1": 0.592,
+    "cap_radius": 0.017,
+    "nipple_z1": 0.598,
+    "nipple_radius": 0.006
+  },
+  "ports": {
+    "upper_z": 0.405,
+    "lower_z": 0.285,
+    "boss_y0": 0.48,
+    "boss_y1": 0.535,
+    "boss_radius": 0.019,
+    "cap_y0": 0.535,
+    "cap_y1": 0.558,
+    "cap_radius": 0.023,
+    "weld_y": 0.496
+  },
+  "drain": {
+    "y": 0.2,
+    "boss_z0": 0.138,
+    "boss_z1": 0.152,
+    "boss_radius": 0.028,
+    "nut_z0": 0.12,
+    "nut_z1": 0.138,
+    "nut_radius": 0.022,
+    "body_z0": 0.095,
+    "body_z1": 0.12,
+    "body_radius": 0.016,
+    "nipple_y0": 0.17,
+    "nipple_y1": 0.23,
+    "nipple_outer": 0.006,
+    "nipple_inner": 0.0032,
+    "nipple_z": 0.105,
+    "outlet_z0": 0.082,
+    "outlet_z1": 0.096,
+    "outlet_outer": 0.005,
+    "outlet_inner": 0.0026,
+    "handle_start": [
+      0.01,
+      0.2,
+      0.103
+    ],
+    "handle_end": [
+      0.04,
+      0.2,
+      0.073
+    ],
+    "handle_radius": 0.011,
+    "handle_rib_radius": 0.013
+  },
+  "label": {
+    "y0": -0.095,
+    "y1": 0.055,
+    "angle_half_deg": 12.0,
+    "r0": 0.1876,
+    "r1": 0.1881,
+    "center_z": 0.35,
+    "segments": 64
+  },
+  "material_profile": {
+    "red": {
+      "clean": {
+        "base_rgb": [
+          196,
+          22,
+          30
+        ],
+        "roughness": 0.3,
+        "metallic": 0.0,
+        "rust_amount": 0.0
+      },
+      "weathered": {
+        "base_rgb": [
+          174,
+          34,
+          34
+        ],
+        "roughness": 0.38,
+        "metallic": 0.0,
+        "rust_amount": 0.035
+      },
+      "stained": {
+        "base_rgb": [
+          143,
+          27,
+          27
+        ],
+        "roughness": 0.45,
+        "metallic": 0.0,
+        "rust_amount": 0.08
+      },
+      "rusted": {
+        "base_rgb": [
+          112,
+          44,
+          34
+        ],
+        "roughness": 0.58,
+        "metallic": 0.0,
+        "rust_amount": 0.22
+      }
+    },
+    "brass": {
+      "base_rgb": [
+        181,
+        134,
+        58
+      ],
+      "roughness": 0.3,
+      "metallic": 1.0
+    },
+    "steel": {
+      "base_rgb": [
+        186,
+        191,
+        194
+      ],
+      "roughness": 0.3,
+      "metallic": 1.0
+    },
+    "black": {
+      "base_rgb": [
+        28,
+        28,
+        30
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0
+    },
+    "label": {
+      "roughness": 0.48,
+      "metallic": 0.0
+    }
+  },
+  "proportion_source": {
+    "basis": "photo pixel ratios for a horizontal red pressure tank; not measured",
+    "reference_note": "user six-view collage is an uncalibrated visual-match product render; the original clean/rust photograph is the primary proportion and appearance source",
+    "source": "local original photo and user six-view collage; no manufacturer drawing"
+  }
+}

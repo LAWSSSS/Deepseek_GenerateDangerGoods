@@ -1,0 +1,134 @@
+{
+  "version": "tank05-parametric-v1",
+  "radial_segments": 128,
+  "diameter": 0.56,
+  "shell_bottom_z": 0.309,
+  "shell_top_z": 0.957,
+  "bottom_head_depth": 0.155,
+  "top_head_depth": 0.101,
+  "leg_count": 3,
+  "leg_angles_deg": [
+    60.0,
+    180.0,
+    300.0
+  ],
+  "leg_top_radius": 0.245,
+  "leg_top_z": 0.265,
+  "leg_bottom_radius": 0.252,
+  "leg_bottom_z": 0.01,
+  "leg_top_width": 0.082,
+  "leg_bottom_width": 0.058,
+  "leg_thickness": 0.013,
+  "foot_radius": 0.245,
+  "foot_radial_length": 0.082,
+  "foot_width": 0.076,
+  "foot_thickness": 0.012,
+  "foot_slot_radius": 0.269,
+  "foot_slot_length": 0.02,
+  "foot_slot_width": 0.014,
+  "manway_neck_outer": 0.075,
+  "manway_neck_inner": 0.062,
+  "manway_neck_z0": 1.045,
+  "manway_neck_z1": 1.078,
+  "manway_flange_outer": 0.092,
+  "manway_flange_z0": 1.074,
+  "manway_flange_z1": 1.082,
+  "manway_lid_radius": 0.084,
+  "manway_lid_z0": 1.082,
+  "manway_lid_z1": 1.1,
+  "manway_clamp_count": 6,
+  "manway_clamp_angles_deg": [
+    30.0,
+    90.0,
+    150.0,
+    210.0,
+    270.0,
+    330.0
+  ],
+  "top_nozzle_radius": 0.16,
+  "top_nozzles": [
+    {
+      "name": "Top nozzle 1",
+      "angle_deg": 45.0,
+      "kind": "ferrule",
+      "outer": 0.026,
+      "bore": 0.018,
+      "top_z": 1.086
+    },
+    {
+      "name": "Top nozzle 2",
+      "angle_deg": 135.0,
+      "kind": "flange",
+      "outer": 0.026,
+      "bore": 0.018,
+      "top_z": 1.086
+    },
+    {
+      "name": "Top nozzle 3",
+      "angle_deg": 225.0,
+      "kind": "ferrule",
+      "outer": 0.026,
+      "bore": 0.018,
+      "top_z": 1.086
+    },
+    {
+      "name": "Top nozzle 4",
+      "angle_deg": 315.0,
+      "kind": "flange",
+      "outer": 0.026,
+      "bore": 0.018,
+      "top_z": 1.086
+    }
+  ],
+  "top_flange_outer": 0.042,
+  "top_flange_thickness": 0.008,
+  "top_bolt_count": 6,
+  "upper_front_port": {
+    "z": 0.9,
+    "outer": 0.025,
+    "bore": 0.017,
+    "flange": 0.04
+  },
+  "lower_front_port": {
+    "z": 0.25,
+    "outer": 0.03,
+    "bore": 0.021,
+    "flange": 0.045
+  },
+  "side_ferrule_z": 0.93,
+  "side_ferrule_outer": 0.022,
+  "side_ferrule_bore": 0.014,
+  "drain_z_top": 0.16,
+  "drain_z_bottom": 0.105,
+  "drain_outer": 0.028,
+  "drain_bore": 0.019,
+  "drain_flange": 0.048,
+  "material_profile": {
+    "bright_stainless": {
+      "roughness": 0.27,
+      "metallic": 0.97,
+      "rust_amount": 0.045
+    },
+    "brushed_stainless": {
+      "roughness": 0.36,
+      "metallic": 0.94,
+      "rust_amount": 0.12
+    },
+    "weathered_stainless": {
+      "roughness": 0.52,
+      "metallic": 0.82,
+      "rust_amount": 0.28
+    },
+    "stained_steel": {
+      "roughness": 0.78,
+      "metallic": 0.45,
+      "rust_amount": 0.55
+    }
+  },
+  "proportion_source": {
+    "note": "Proportions come from the original 3/4 rust photo (body diameter about 830 px, total height about 1658 px) and the uncalibrated six-view sheet; they are not a measurement of the photographed unit. The working diameter of 0.56 m follows the model-library visual scale, not a catalog size.",
+    "source_photo": "outputs/物品高清输入-39件/原貌HD/05-储罐.png",
+    "six_view_reference": "references/六视图/不锈钢立式储罐六视图 каталогу.png",
+    "public_reference_note": "The three plate legs, dished heads, clamped manway and small flanged/ferrule nozzles are common sanitary vertical-tank construction; no public model is claimed to be this exact unit."
+  }
+}

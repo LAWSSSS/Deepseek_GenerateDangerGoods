@@ -1,0 +1,443 @@
+{
+  "version": "shock17-parametric-v1",
+  "shape_basis": "Single clean/rust photograph of one black AERO air shock absorber plus an uncalibrated six-view sheet matched by appearance. The candidate is a part-based rebuild with a true cylindrical air can, a real silver separator band, a real bottom machined lip, a clevis-style top eye with a through-hole, a top pedestal with a real V relief, a radial red adjuster knob with a diamond-knurl grip and smooth domed face, a tapered lower stem, and a bottom eye with a through-hole and dark bushing.",
+  "reference_role": "visual_match_unverified",
+  "proportion_source": {
+    "catalog": {
+      "category": "短行程空气减震器",
+      "major_mm": [
+        170.0,
+        225.0
+      ],
+      "minor_mm": [
+        58.0,
+        92.0
+      ],
+      "basis": "similar_catalog",
+      "source": "https://www.sram.com/en/service/models/rs-mnr-rl-c1",
+      "note": "Only a similar-catalogue order-of-magnitude check for eye-to-eye/overall length and overall width. It is not a measurement of this object and the exact model/SKU is unconfirmed."
+    },
+    "reference_note": "The six-view sheet is a generated visual reference without camera calibration. It is used only for topology and appearance; its proportions visibly differ from the photograph (fatter body, shorter lower stem) and are not used as measurements.",
+    "identity_note": "The black body carries a white triangle + AERO mark. No manufacturer plate or size code is legible, so the exact model and SKU are not claimed."
+  },
+  "dimensions": {
+    "total_height_m": 0.186,
+    "body_radius_m": 0.031,
+    "body_diameter_m": 0.062,
+    "body_z0_m": 0.067,
+    "body_z1_m": 0.1036,
+    "upper_z0_m": 0.1056,
+    "upper_z1_m": 0.1328,
+    "silver_ring_z0_m": 0.1036,
+    "silver_ring_z1_m": 0.1056,
+    "bottom_lip_z0_m": 0.0658,
+    "bottom_lip_z1_m": 0.067,
+    "lower_stem_top_z_m": 0.0658,
+    "top_hole_z_m": 0.1725,
+    "top_hole_radius_m": 0.0074,
+    "top_eye_top_z_m": 0.186,
+    "bottom_hole_z_m": 0.012,
+    "bottom_hole_radius_m": 0.0072,
+    "knob_center_z_m": 0.1445,
+    "knob_azimuth_deg": -75.0,
+    "eye_to_eye_m": 0.1605,
+    "overall_width_note": "Bounding width includes the radial knob and is checked after export; it is not a measured dimension."
+  },
+  "radial_segments": 160,
+  "profiles": {
+    "body": [
+      [
+        0.0,
+        0.067
+      ],
+      [
+        0.0302,
+        0.067
+      ],
+      [
+        0.031,
+        0.0678
+      ],
+      [
+        0.031,
+        0.1028
+      ],
+      [
+        0.0302,
+        0.1036
+      ],
+      [
+        0.0,
+        0.1036
+      ]
+    ],
+    "upper": [
+      [
+        0.0,
+        0.1056
+      ],
+      [
+        0.0302,
+        0.1056
+      ],
+      [
+        0.031,
+        0.1064
+      ],
+      [
+        0.031,
+        0.131
+      ],
+      [
+        0.0304,
+        0.1322
+      ],
+      [
+        0.0288,
+        0.1328
+      ],
+      [
+        0.0,
+        0.1328
+      ]
+    ],
+    "lower_stem": [
+      [
+        0.0,
+        0.0245
+      ],
+      [
+        0.0168,
+        0.0245
+      ],
+      [
+        0.0178,
+        0.028
+      ],
+      [
+        0.0176,
+        0.048
+      ],
+      [
+        0.018,
+        0.054
+      ],
+      [
+        0.0205,
+        0.0575
+      ],
+      [
+        0.0235,
+        0.06
+      ],
+      [
+        0.0265,
+        0.0615
+      ],
+      [
+        0.0265,
+        0.0658
+      ],
+      [
+        0.0,
+        0.0658
+      ]
+    ],
+    "knob_boss": [
+      [
+        0.0,
+        0.006
+      ],
+      [
+        0.0078,
+        0.006
+      ],
+      [
+        0.0078,
+        0.017
+      ],
+      [
+        0.0092,
+        0.018
+      ],
+      [
+        0.0092,
+        0.021
+      ],
+      [
+        0.0072,
+        0.022
+      ],
+      [
+        0.0072,
+        0.03
+      ],
+      [
+        0.0,
+        0.03
+      ]
+    ],
+    "knob_grip": [
+      [
+        0.0,
+        0.03
+      ],
+      [
+        0.0088,
+        0.03
+      ],
+      [
+        0.0092,
+        0.0315
+      ],
+      [
+        0.0092,
+        0.0375
+      ],
+      [
+        0.0088,
+        0.039
+      ],
+      [
+        0.0,
+        0.039
+      ]
+    ],
+    "knob_cap": [
+      [
+        0.0,
+        0.039
+      ],
+      [
+        0.0088,
+        0.039
+      ],
+      [
+        0.0088,
+        0.041
+      ],
+      [
+        0.0082,
+        0.0435
+      ],
+      [
+        0.0065,
+        0.0452
+      ],
+      [
+        0.0035,
+        0.046
+      ],
+      [
+        0.0,
+        0.0462
+      ]
+    ]
+  },
+  "features": {
+    "top_eye": {
+      "half_width_m": 0.0135,
+      "bottom_z_m": 0.154,
+      "x_half_thickness_m": 0.014,
+      "arc_center_z_m": 0.1725,
+      "hole_radius_m": 0.0074,
+      "bevel_m": 0.0012,
+      "rim": {
+        "inner_radius_m": 0.0074,
+        "outer_radius_m": 0.0098,
+        "x0_m": 0.014,
+        "x1_m": 0.0153,
+        "segments": 96
+      },
+      "bushing": {
+        "inner_radius_m": 0.005,
+        "outer_radius_m": 0.0072,
+        "x0_m": -0.0153,
+        "x1_m": 0.0153,
+        "segments": 96
+      }
+    },
+    "top_pedestal": {
+      "base_z0_m": 0.1328,
+      "base_z1_m": 0.1372,
+      "base_depth_x_m": 0.044,
+      "base_width_y_m": 0.042,
+      "neck_z0_m": 0.1372,
+      "neck_z1_m": 0.1565,
+      "neck_bottom_depth_x_m": 0.04,
+      "neck_top_depth_x_m": 0.032,
+      "neck_bottom_width_y_m": 0.034,
+      "neck_top_width_y_m": 0.026,
+      "v_notch": {
+        "apex_z_m": 0.141,
+        "top_z_m": 0.1565,
+        "top_half_width_y_m": 0.0115,
+        "front_x_m": 0.008,
+        "back_x_m": 0.03
+      },
+      "bevel_m": 0.0012
+    },
+    "knob": {
+      "azimuth_deg": -75.0,
+      "center_z_m": 0.1445,
+      "grip_texture_u_turns": 1.0,
+      "collar_z_m": 0.027,
+      "collar_major_radius_m": 0.0076,
+      "collar_minor_radius_m": 0.0012,
+      "seam_z_m": 0.039,
+      "seam_major_radius_m": 0.0089,
+      "seam_minor_radius_m": 0.0006
+    },
+    "bottom_eye": {
+      "capsule_half_width_m": 0.01155,
+      "capsule_center_z_m": 0.01155,
+      "flare_half_width_m": 0.015,
+      "top_z_m": 0.03,
+      "x_half_thickness_m": 0.0115,
+      "hole_radius_m": 0.0072,
+      "bevel_m": 0.0012,
+      "rim": {
+        "inner_radius_m": 0.0072,
+        "outer_radius_m": 0.0094,
+        "x0_m": 0.0115,
+        "x1_m": 0.0127,
+        "segments": 96
+      },
+      "bushing": {
+        "inner_radius_m": 0.0048,
+        "outer_radius_m": 0.007,
+        "x0_m": -0.0128,
+        "x1_m": 0.0128,
+        "segments": 96
+      }
+    }
+  },
+  "logo": {
+    "u_center": 0.625,
+    "v_center": 0.5,
+    "width_m": 0.028,
+    "height_m": 0.01,
+    "triangle_width_m": 0.02,
+    "triangle_height_m": 0.0058,
+    "text_width_m": 0.026,
+    "text_height_m": 0.0032,
+    "gap_m": 0.001,
+    "color": [
+      232,
+      232,
+      226
+    ],
+    "note": "The white triangle-and-AERO mark is redrawn from the low-resolution original photograph and the six-view sheet. Exact print size, ink gloss and registration are inferred; the faint white mark at the source photo's left silhouette was not identifiable and is not reproduced."
+  },
+  "texture_sampling": {
+    "clean_size": [
+      1254,
+      1254
+    ],
+    "photo_size": [
+      447,
+      447
+    ],
+    "body_region_px": [
+      500,
+      520,
+      840,
+      780
+    ],
+    "silver_region_px": [
+      460,
+      440,
+      875,
+      525
+    ],
+    "red_region_px": [
+      450,
+      220,
+      610,
+      340
+    ],
+    "rust_region_px": [
+      460,
+      430,
+      875,
+      545
+    ],
+    "front_u_center": 0.0,
+    "front_u_note": "Cylindrical u = -atan2(y,x)/2pi + 0.5, so the texture seam is at -X (back) and the photo-facing +X side is u=0.5."
+  },
+  "material_profile": {
+    "body": {
+      "base_rgb": [
+        46,
+        46,
+        48
+      ],
+      "metallic": 0.64,
+      "roughness": 0.33
+    },
+    "frame": {
+      "base_rgb": [
+        44,
+        44,
+        46
+      ],
+      "metallic": 0.62,
+      "roughness": 0.35
+    },
+    "machined": {
+      "base_rgb": [
+        156,
+        156,
+        154
+      ],
+      "metallic": 1.0,
+      "roughness": 0.34
+    },
+    "grip": {
+      "base_rgb": [
+        178,
+        28,
+        32
+      ],
+      "metallic": 0.55,
+      "roughness": 0.42
+    },
+    "knob_cap": {
+      "base_rgb": [
+        176,
+        26,
+        30
+      ],
+      "metallic": 0.42,
+      "roughness": 0.48
+    },
+    "bushing": {
+      "base_rgb": [
+        22,
+        22,
+        23
+      ],
+      "metallic": 0.05,
+      "roughness": 0.62
+    },
+    "logo_paint": {
+      "base_rgb": [
+        230,
+        230,
+        224
+      ],
+      "metallic": 0.0,
+      "roughness": 0.48,
+      "note": "The AERO mark is paint on the anodised body, so it is dielectric. It is part of the body texture, not a separate part."
+    }
+  },
+  "render": {
+    "world_strength": 0.62,
+    "key_energy": 300,
+    "fill_energy": 150,
+    "front_strip_energy": 140,
+    "rim_energy": 100,
+    "low_fill_energy": 60,
+    "bottom_fill_energy": 40
+  }
+}

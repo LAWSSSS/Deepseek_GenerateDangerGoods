@@ -1,0 +1,242 @@
+{
+  "version": "shock28-parametric-v1",
+  "number": 28,
+  "description": "28 号液压减震器 1（黑色弹簧式后减震器，上下双环/钢衬套安装，上缸体外露、下镀铬活塞杆）分部件重建。以原照可见结构为主，六视图仅作未标定的外观与背侧拓扑参考。",
+  "units": "meters",
+  "shape_basis": "source_photo_visible_structure+uncalibrated_six_view_cross_check",
+  "orientation": {
+    "up": "+Z",
+    "long_axis": "Z",
+    "eye_bore_axis": "X",
+    "front_side": "+X",
+    "note": "沿用模型库 Z 向上约定。减震器长轴沿 Z；上下安装环的衬套孔轴线沿 X，因此正视/背视看到环孔，左视/右视看到环体侧面。原照相机大致沿 +X 观察。"
+  },
+  "scale_note": "工作尺度按原照轮廓比例换算：源图物体高约 1257 px，总高设为 0.944 m，仅与旧模型库的归一化尺度一致；原照为单张商品图且物体在画面中倾斜约 8.7°，不能作正交测量。公开产品资料只能说明此类后减震器的一般结构，不能证明本件型号或尺寸，故未采用具体型号参数。",
+  "reference": {
+    "name": "ChatGPT 图像 2026年10月14日 10_18_28-2.png",
+    "sha256": "dcc140e00fd1878933b5fc066845f9ec64a23f3bea53e736436f5e97748922d2",
+    "role": "visual_match_unverified",
+    "note": "六视图为 AI 生成的黑色弹簧减震器拼图，未标定；正视/背视/左右视的环孔、弹簧圈数和上下环形式与原照一致。顶视/底视把环孔画成正对镜头，与长轴沿竖直的投影矛盾；候选以原照为准：环孔轴线垂直于长轴，顶视应看到环体侧面而非孔面。"
+  },
+  "dimensions": {
+    "top_eye": {
+      "center_z": 0.414,
+      "outer_radius": 0.06,
+      "axial_length": 0.09,
+      "boss_inner_radius": 0.0374,
+      "bushing_outer_radius": 0.037,
+      "bushing_inner_radius": 0.0272,
+      "sleeve_outer_radius": 0.027,
+      "sleeve_inner_radius": 0.019,
+      "saddle_center_z": 0.364,
+      "saddle_radius": 0.028,
+      "saddle_length": 0.085,
+      "neck_radius_seat": 0.03,
+      "neck_radius_eye": 0.026,
+      "neck_z0": 0.343,
+      "neck_z1": 0.361,
+      "note": "黑色外环 + 锈蚀钢衬套 + 较亮内套；中心通孔保留为真实开孔。衬套轴向略长于外环。"
+    },
+    "bottom_eye": {
+      "center_z": -0.406,
+      "outer_radius": 0.066,
+      "axial_length": 0.095,
+      "boss_inner_radius": 0.0404,
+      "bushing_outer_radius": 0.04,
+      "bushing_inner_radius": 0.0302,
+      "sleeve_outer_radius": 0.03,
+      "sleeve_inner_radius": 0.021,
+      "saddle_center_z": -0.356,
+      "saddle_radius": 0.029,
+      "saddle_length": 0.09,
+      "neck_radius_seat": 0.034,
+      "neck_radius_eye": 0.03,
+      "neck_z0": -0.329,
+      "neck_z1": -0.36,
+      "note": "下环略大于上环（原照投影亦如此）；中心通孔保留。"
+    },
+    "top_seat": {
+      "upper_radius": 0.086,
+      "middle_radius": 0.09,
+      "perch_radius": 0.09,
+      "z_top": 0.343,
+      "z_upper_mid": 0.33,
+      "z_middle_mid": 0.312,
+      "z_perch": 0.29,
+      "lip_major": 0.082,
+      "lip_minor": 0.0035,
+      "notch_width_y": 0.016,
+      "notch_depth_x": 0.024,
+      "notch_z0": 0.329,
+      "notch_z1": 0.344,
+      "note": "三层黑色座盘；上盘外缘有一处近似方形缺口（原照可见）。缺口尺寸与作用未实测。"
+    },
+    "body": {
+      "radius_top": 0.057,
+      "radius_bottom": 0.051,
+      "z_top": 0.29,
+      "z_bottom": -0.142,
+      "gland_z0": -0.158,
+      "gland_z1": -0.142,
+      "gland_radius_bottom": 0.03,
+      "wiper_major": 0.025,
+      "wiper_minor": 0.0045,
+      "wiper_z": -0.158,
+      "note": "黑色上缸体，轻微锥度；下端导向/防尘凸台与橡胶刮尘环为按原照推断。"
+    },
+    "spring": {
+      "outer_radius": 0.094,
+      "wire_radius": 0.017,
+      "mean_radius": 0.0765,
+      "z_top": 0.2725,
+      "z_bottom": -0.2605,
+      "turns": 12.0,
+      "direction": 1,
+      "segments_per_turn": 48,
+      "tube_segments": 16,
+      "phase_deg": 0.0,
+      "note": "黑色螺旋弹簧；原照约 12 圈，线径与节距按像素比例。圈间为空隙，弹簧中心轴通透；端部为切平的圆管端面。"
+    },
+    "rod": {
+      "radius": 0.0195,
+      "z_bottom": -0.312,
+      "z_top": 0.05,
+      "note": "下段镀铬活塞杆，向上插入缸体；下端穿过下座盘孔。"
+    },
+    "lower_seat": {
+      "perch_radius": 0.09,
+      "lower_radius": 0.078,
+      "inner_radius": 0.0205,
+      "z_top": -0.278,
+      "z_perch_bottom": -0.312,
+      "z_bottom": -0.329,
+      "lip_major": 0.079,
+      "lip_minor": 0.0035,
+      "bump_major": 0.04,
+      "bump_minor": 0.006,
+      "bump_z": -0.276,
+      "note": "下座为带中心孔的双层座盘，套在活塞杆上；弹簧端坐落于座盘顶面。橡胶环为推断。"
+    },
+    "overall": {
+      "height": 0.946,
+      "max_diameter": 0.188,
+      "note": "总高由上下环外缘确定；最大直径由弹簧外径确定。"
+    }
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "paint": 0,
+      "seat": 1,
+      "steel": 2,
+      "chrome": 3,
+      "rubber": 4,
+      "dark": 5,
+      "steel_ground": 6
+    },
+    "tile_names": {
+      "0": "黑色漆面（弹簧/缸体/环体）",
+      "1": "黑色座盘漆面",
+      "2": "锈蚀钢衬套",
+      "3": "镀铬活塞杆/亮内套",
+      "4": "黑色橡胶",
+      "5": "深色孔内/缝隙",
+      "6": "加工钢内套",
+      "7-15": "备用中性灰"
+    },
+    "note": "锈色取自已对齐做锈图的棕色像素中位数，纹理为程序化近似，不是逐像素投影。做锈图中两个环孔内的亮黄色斑块与原貌图不一致，判断为做锈处理产生的伪影，未复制为贴纸。"
+  },
+  "material_profile": {
+    "paint": {
+      "base_rgb": [
+        20,
+        20,
+        21
+      ],
+      "roughness": 0.26,
+      "metallic": 0.0,
+      "rust_amount": 0.42
+    },
+    "seat": {
+      "base_rgb": [
+        18,
+        18,
+        19
+      ],
+      "roughness": 0.38,
+      "metallic": 0.0,
+      "rust_amount": 0.28
+    },
+    "steel": {
+      "base_rgb": [
+        118,
+        110,
+        101
+      ],
+      "roughness": 0.44,
+      "metallic": 1.0,
+      "rust_amount": 0.6
+    },
+    "chrome": {
+      "base_rgb": [
+        205,
+        208,
+        212
+      ],
+      "roughness": 0.14,
+      "metallic": 1.0,
+      "rust_amount": 0.06
+    },
+    "rubber": {
+      "base_rgb": [
+        17,
+        17,
+        17
+      ],
+      "roughness": 0.82,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "dark": {
+      "base_rgb": [
+        13,
+        13,
+        13
+      ],
+      "roughness": 0.6,
+      "metallic": 0.55,
+      "rust_amount": 0.18
+    },
+    "steel_ground": {
+      "base_rgb": [
+        155,
+        154,
+        150
+      ],
+      "roughness": 0.24,
+      "metallic": 1.0,
+      "rust_amount": 0.1
+    }
+  },
+  "render": {
+    "six_view_resolution": 768,
+    "six_view_samples": 24,
+    "detail_resolution": 1024,
+    "detail_samples": 32,
+    "old_resolution": 512,
+    "turntable_resolution": 512,
+    "turntable_samples": 8,
+    "denoise": true
+  },
+  "limitations": [
+    "六视图未标定且顶视/底视的环孔方向与原照矛盾；候选以原照为准，背面与隐藏面仍为推断。",
+    "原照是单张商品图，物体在画面中倾斜约 8.7°；尺寸、圈数、线径、座盘厚度、孔深和装配关系未实测。",
+    "上下环的橡胶/钢衬套内部分层、内套过盈量、座盘缺口功能、橡胶缓冲环和缸体内部结构为推断。",
+    "做锈图环孔内的亮黄色斑块判断为伪影，未建模为贴纸；真实表面是否有小标签未能确认。",
+    "旧模型为单图 TripoSR 重建，弹簧与缸体粘连、两个环孔被填；本候选不复用旧网格。",
+    "落稳、接触点、现场尺度和场景光照融合未验证；候选不得进入自动放置或正式合成。"
+  ]
+}

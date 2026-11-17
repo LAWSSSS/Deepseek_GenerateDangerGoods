@@ -1,0 +1,527 @@
+{
+  "version": "cylinder20-parametric-v1",
+  "shape_basis": "One straight-on 1254 px photograph and a matching rust derivative of a tall red painted steel gas cylinder with a white vertical CCS mark, a domed valve guard with a real oval hand-hole, a collar/neck, a rounded bottom and localised rust. The uncalibrated six-view sheet is used for topology and the unseen back only.",
+  "reference_role": "visual_match_unverified",
+  "reference_name": "ChatGPT 图像 2026年10月14日 10_01_29-1.png",
+  "reference_note": "The six-view sheet is a generated visual reference without camera calibration. Its guard is narrower and its top/left/right panels show an open-looking guard that conflicts with the closed dome in the original photograph; the photograph is the primary evidence and the sheet is used only for topology and appearance.",
+  "proportion_source": {
+    "identity_note": "The cylinder carries a white CCS mark but no legible model plate or size code. CCS is treated as a printed mark on this object; no manufacturer or SKU is claimed.",
+    "catalog": {
+      "category": "tall red painted steel gas cylinder",
+      "working_height_m": 0.85,
+      "working_diameter_m": 0.14,
+      "basis": "source_photo_pixel_ratio_plus_similar_catalogue_plausibility",
+      "note": "A 140 mm body diameter and 850 mm overall height follow the photo pixel ratio (~6.07:1) and are plausible for a small CO2 cylinder. They are working dimensions, not caliper measurements."
+    }
+  },
+  "dimensions": {
+    "total_height_m": 0.85,
+    "body_radius_m": 0.07,
+    "body_diameter_m": 0.14,
+    "body_bottom_round_z1_m": 0.085,
+    "body_cylinder_z1_m": 0.6805,
+    "shoulder_z1_m": 0.7489,
+    "neck_z0_m": 0.7605,
+    "neck_z1_m": 0.7742,
+    "guard_z0_m": 0.7742,
+    "guard_z1_m": 0.85,
+    "guard_radius_m": 0.0314,
+    "guard_wall_m": 0.0022,
+    "window_center_z_m": 0.8036,
+    "window_half_width_y_m": 0.0065,
+    "window_half_height_z_m": 0.0166,
+    "window_corner_radius_m": 0.0065,
+    "window_center_y_m": 0.0042,
+    "neck_seal_z_m": 0.7744,
+    "neck_seal_major_radius_m": 0.0286,
+    "neck_seal_minor_radius_m": 0.001,
+    "valve_body_z0_m": 0.775,
+    "valve_body_z1_m": 0.793,
+    "valve_body_radius_m": 0.009,
+    "valve_hex_z0_m": 0.793,
+    "valve_hex_z1_m": 0.803,
+    "valve_hex_radius_m": 0.0105,
+    "valve_stem_z0_m": 0.803,
+    "valve_stem_z1_m": 0.818,
+    "valve_stem_radius_m": 0.004,
+    "bottom_contact_radius_m": 0.0133,
+    "letter_centers_z_m": [
+      0.5758,
+      0.4943,
+      0.412
+    ],
+    "letter_height_m": 0.058,
+    "letter_width_m": 0.04,
+    "letter_u_center": 0.4844,
+    "dimension_note": "Working dimensions are derived from the photo pixel ratio; the exact cylinder size, wall thickness, guard interior and bottom profile are not measured."
+  },
+  "radial_segments": 192,
+  "profiles": {
+    "body": [
+      [
+        0.0,
+        0.0
+      ],
+      [
+        0.006,
+        0.0002
+      ],
+      [
+        0.0133,
+        0.0007
+      ],
+      [
+        0.022,
+        0.0019
+      ],
+      [
+        0.033,
+        0.005
+      ],
+      [
+        0.045,
+        0.0105
+      ],
+      [
+        0.055,
+        0.019
+      ],
+      [
+        0.062,
+        0.03
+      ],
+      [
+        0.0665,
+        0.043
+      ],
+      [
+        0.069,
+        0.058
+      ],
+      [
+        0.07,
+        0.072
+      ],
+      [
+        0.07,
+        0.085
+      ],
+      [
+        0.07,
+        0.6805
+      ],
+      [
+        0.06983339154285802,
+        0.6872043723985419
+      ],
+      [
+        0.06933517070195178,
+        0.6938441780259031
+      ],
+      [
+        0.06851013561633443,
+        0.7003554719242052
+      ],
+      [
+        0.06736623182489053,
+        0.7066755467737721
+      ],
+      [
+        0.0659144757464531,
+        0.7127435367988982
+      ],
+      [
+        0.06416884858566807,
+        0.7185010039385408
+      ],
+      [
+        0.062146161686350704,
+        0.7238925006367933
+      ],
+      [
+        0.05986589462905455,
+        0.7288661038331599
+      ],
+      [
+        0.05735000763206213,
+        0.7333739150100113
+      ],
+      [
+        0.05462273006247824,
+        0.7373725214814941
+      ],
+      [
+        0.051710327094179526,
+        0.7408234144814275
+      ],
+      [
+        0.048640846759832115,
+        0.7436933600237721
+      ],
+      [
+        0.045443849833004396,
+        0.745954718964083
+      ],
+      [
+        0.04215012514175804,
+        0.747585713179581
+      ],
+      [
+        0.0387913930554028,
+        0.7485706353043783
+      ],
+      [
+        0.0354,
+        0.7489
+      ],
+      [
+        0.0334,
+        0.752
+      ],
+      [
+        0.0314,
+        0.7547
+      ],
+      [
+        0.0292,
+        0.758
+      ],
+      [
+        0.0281,
+        0.7605
+      ],
+      [
+        0.0281,
+        0.7742
+      ],
+      [
+        0.0,
+        0.7742
+      ]
+    ],
+    "guard_outer": [
+      [
+        0.0289,
+        0.7742
+      ],
+      [
+        0.0304,
+        0.7763
+      ],
+      [
+        0.0314,
+        0.779
+      ],
+      [
+        0.0314,
+        0.8186
+      ],
+      [
+        0.03133277018969215,
+        0.8206536582578264
+      ],
+      [
+        0.031131368647137645,
+        0.8226985224357096
+      ],
+      [
+        0.030796657804661433,
+        0.8247258361113065
+      ],
+      [
+        0.030330070945476743,
+        0.8267269180162191
+      ],
+      [
+        0.029733606066146317,
+        0.8286931992105193
+      ],
+      [
+        0.029009817320854402,
+        0.8306162597762639
+      ],
+      [
+        0.028161804084126413,
+        0.8324878648728766
+      ],
+      [
+        0.027193197678831372,
+        0.8343
+      ],
+      [
+        0.026108145826299917,
+        0.8360449053168155
+      ],
+      [
+        0.02491129488514478,
+        0.8377151088708739
+      ],
+      [
+        0.02360776995483989,
+        0.8393034585941421
+      ],
+      [
+        0.02220315292925759,
+        0.8408031529292576
+      ],
+      [
+        0.02070345859414216,
+        0.8422077699548399
+      ],
+      [
+        0.019115108870873827,
+        0.8435112948851448
+      ],
+      [
+        0.017444905316815515,
+        0.8447081458262999
+      ],
+      [
+        0.015700000000000002,
+        0.8457931976788313
+      ],
+      [
+        0.013887864872876639,
+        0.8467618040841264
+      ],
+      [
+        0.01201625977626382,
+        0.8476098173208544
+      ],
+      [
+        0.010093199210519276,
+        0.8483336060661463
+      ],
+      [
+        0.008126918016219151,
+        0.8489300709454768
+      ],
+      [
+        0.006125836111306429,
+        0.8493966578046614
+      ],
+      [
+        0.004098522435709623,
+        0.8497313686471376
+      ],
+      [
+        0.0020536582578264983,
+        0.8499327701896922
+      ],
+      [
+        1.9226954746613444e-18,
+        0.85
+      ]
+    ],
+    "guard_cavity": [
+      [
+        0.0,
+        0.765
+      ],
+      [
+        0.0263,
+        0.765
+      ],
+      [
+        0.0263,
+        0.7762
+      ],
+      [
+        0.0279,
+        0.779
+      ],
+      [
+        0.0292,
+        0.7815
+      ],
+      [
+        0.0292,
+        0.8186
+      ],
+      [
+        0.02913748055856722,
+        0.8205097713735202
+      ],
+      [
+        0.028950189952115263,
+        0.8224113648128255
+      ],
+      [
+        0.028638930187774327,
+        0.824296637402871
+      ],
+      [
+        0.028205034127640794,
+        0.8261575161169936
+      ],
+      [
+        0.027650359781257086,
+        0.8279860323868523
+      ],
+      [
+        0.026977282349329574,
+        0.8297743562250606
+      ],
+      [
+        0.0261886840527545,
+        0.8315148297543948
+      ],
+      [
+        0.02528794179050561,
+        0.8331999999999999
+      ],
+      [
+        0.02427891267923432,
+        0.8348226508041724
+      ],
+      [
+        0.023165917536504068,
+        0.8363758337270546
+      ],
+      [
+        0.02195372237838614,
+        0.837852897800922
+      ],
+      [
+        0.020647518010647188,
+        0.8392475180106472
+      ],
+      [
+        0.01925289780092201,
+        0.8405537223783861
+      ],
+      [
+        0.017775833727054643,
+        0.8417659175365041
+      ],
+      [
+        0.01622265080417239,
+        0.8428789126792343
+      ],
+      [
+        0.014600000000000004,
+        0.8438879417905056
+      ],
+      [
+        0.012914829754394836,
+        0.8447886840527545
+      ],
+      [
+        0.011174356225060623,
+        0.8455772823493296
+      ],
+      [
+        0.009386032386852322,
+        0.8462503597812571
+      ],
+      [
+        0.007557516116993606,
+        0.8468050341276407
+      ],
+      [
+        0.005696637402870948,
+        0.8472389301877743
+      ],
+      [
+        0.00381136481282551,
+        0.8475501899521153
+      ],
+      [
+        0.0019097713735201835,
+        0.8477374805585672
+      ],
+      [
+        1.7879843267551357e-18,
+        0.8478
+      ],
+      [
+        0.0,
+        0.8478
+      ]
+    ]
+  },
+  "texture_sampling": {
+    "clean_size": [
+      1254,
+      1254
+    ],
+    "body_region_px": [
+      530,
+      300,
+      724,
+      1100
+    ],
+    "guard_region_px": [
+      585,
+      42,
+      671,
+      150
+    ],
+    "rust_color_region_px": [
+      560,
+      45,
+      700,
+      300
+    ]
+  },
+  "material_profile": {
+    "body": {
+      "base_rgb": [
+        156,
+        24,
+        30
+      ],
+      "metallic": 0.04,
+      "roughness": 0.335,
+      "coat": 0.0,
+      "coat_roughness": 0.3
+    },
+    "guard": {
+      "base_rgb": [
+        154,
+        24,
+        30
+      ],
+      "metallic": 0.04,
+      "roughness": 0.335,
+      "coat": 0.0,
+      "coat_roughness": 0.3
+    },
+    "steel": {
+      "base_rgb": [
+        78,
+        80,
+        84
+      ],
+      "metallic": 1.0,
+      "roughness": 0.36
+    },
+    "brass": {
+      "base_rgb": [
+        178,
+        136,
+        66
+      ],
+      "metallic": 1.0,
+      "roughness": 0.34
+    },
+    "clay": {
+      "base_rgb": [
+        0.55,
+        0.56,
+        0.57
+      ],
+      "metallic": 0.0,
+      "roughness": 0.55
+    }
+  },
+  "render": {
+    "world_strength": 0.28,
+    "key_energy": 170,
+    "fill_energy": 75,
+    "front_strip_energy": 65,
+    "rim_energy": 50,
+    "low_fill_energy": 28,
+    "bottom_fill_energy": 18
+  }
+}

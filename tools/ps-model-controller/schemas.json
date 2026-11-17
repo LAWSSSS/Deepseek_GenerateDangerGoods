@@ -1,0 +1,821 @@
+{
+  "Task": {
+    "$defs": {
+      "Region": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "polygon": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "maxItems": 80,
+            "minItems": 3,
+            "title": "Polygon",
+            "type": "array"
+          },
+          "feather_px": {
+            "default": 8,
+            "maximum": 64,
+            "minimum": 0,
+            "title": "Feather Px",
+            "type": "number"
+          }
+        },
+        "required": [
+          "label",
+          "polygon"
+        ],
+        "title": "Region",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "maxLength": 500,
+        "minLength": 1,
+        "title": "Source",
+        "type": "string"
+      },
+      "instruction": {
+        "maxLength": 1200,
+        "minLength": 1,
+        "title": "Instruction",
+        "type": "string"
+      },
+      "targets": {
+        "maxProperties": 6,
+        "minProperties": 1,
+        "patternProperties": {
+          "^[a-zA-Z0-9_-]{1,32}$": {
+            "$ref": "#/$defs/Region"
+          }
+        },
+        "title": "Targets",
+        "type": "object"
+      },
+      "allowed_ops": {
+        "items": {
+          "enum": [
+            "brightness",
+            "warmth",
+            "saturation",
+            "blur_px"
+          ],
+          "type": "string"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "title": "Allowed Ops",
+        "type": "array"
+      },
+      "limits": {
+        "additionalProperties": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "number"
+            }
+          ],
+          "type": "array"
+        },
+        "propertyNames": {
+          "enum": [
+            "brightness",
+            "warmth",
+            "saturation",
+            "blur_px"
+          ]
+        },
+        "title": "Limits",
+        "type": "object"
+      },
+      "group": {
+        "anyOf": [
+          {
+            "maxLength": 128,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Group"
+      },
+      "hide_groups": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 12,
+        "title": "Hide Groups",
+        "type": "array"
+      },
+      "max_trials": {
+        "default": 2,
+        "maximum": 4,
+        "minimum": 1,
+        "title": "Max Trials",
+        "type": "integer"
+      },
+      "target_score": {
+        "default": 85,
+        "maximum": 100,
+        "minimum": 0,
+        "title": "Target Score",
+        "type": "integer"
+      },
+      "min_gain": {
+        "default": 4,
+        "maximum": 20,
+        "minimum": 1,
+        "title": "Min Gain",
+        "type": "integer"
+      },
+      "preview_edge": {
+        "default": 640,
+        "maximum": 896,
+        "minimum": 320,
+        "title": "Preview Edge",
+        "type": "integer"
+      },
+      "preview_rect": {
+        "anyOf": [
+          {
+            "maxItems": 4,
+            "minItems": 4,
+            "prefixItems": [
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Preview Rect"
+      }
+    },
+    "required": [
+      "source",
+      "instruction",
+      "targets",
+      "allowed_ops"
+    ],
+    "title": "Task",
+    "type": "object"
+  },
+  "Config": {
+    "$defs": {
+      "Endpoint": {
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "maxLength": 500,
+            "title": "Url",
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "key_env": {
+            "anyOf": [
+              {
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Key Env"
+          },
+          "json_mode": {
+            "default": true,
+            "title": "Json Mode",
+            "type": "boolean"
+          },
+          "token_field": {
+            "default": "max_tokens",
+            "enum": [
+              "max_tokens",
+              "max_completion_tokens"
+            ],
+            "title": "Token Field",
+            "type": "string"
+          },
+          "max_output_tokens": {
+            "default": 384,
+            "maximum": 1024,
+            "minimum": 128,
+            "title": "Max Output Tokens",
+            "type": "integer"
+          },
+          "timeout_seconds": {
+            "default": 45,
+            "maximum": 120,
+            "minimum": 5,
+            "title": "Timeout Seconds",
+            "type": "integer"
+          },
+          "reasoning_effort": {
+            "anyOf": [
+              {
+                "enum": [
+                  "none",
+                  "low",
+                  "medium",
+                  "high",
+                  "max"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reasoning Effort"
+          }
+        },
+        "required": [
+          "url",
+          "model"
+        ],
+        "title": "Endpoint",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "planner": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Endpoint"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "vision": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Endpoint"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "title": "Config",
+    "type": "object"
+  },
+  "Plan": {
+    "$defs": {
+      "Op": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+            "title": "Target",
+            "type": "string"
+          },
+          "op": {
+            "enum": [
+              "brightness",
+              "warmth",
+              "saturation",
+              "blur_px"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "target",
+          "op",
+          "value"
+        ],
+        "title": "Op",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "enum": [
+          "ready",
+          "noop",
+          "unsupported"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "ops": {
+        "items": {
+          "$ref": "#/$defs/Op"
+        },
+        "maxItems": 4,
+        "title": "Ops",
+        "type": "array"
+      },
+      "note": {
+        "maxLength": 160,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "required": [
+      "status",
+      "ops",
+      "note"
+    ],
+    "title": "Plan",
+    "type": "object"
+  },
+  "Review": {
+    "$defs": {
+      "Op": {
+        "additionalProperties": false,
+        "properties": {
+          "target": {
+            "pattern": "^[a-zA-Z0-9_-]{1,32}$",
+            "title": "Target",
+            "type": "string"
+          },
+          "op": {
+            "enum": [
+              "brightness",
+              "warmth",
+              "saturation",
+              "blur_px"
+            ],
+            "title": "Op",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "number"
+          }
+        },
+        "required": [
+          "target",
+          "op",
+          "value"
+        ],
+        "title": "Op",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "before": {
+        "maximum": 100,
+        "minimum": 0,
+        "title": "Before",
+        "type": "integer"
+      },
+      "after": {
+        "maximum": 100,
+        "minimum": 0,
+        "title": "After",
+        "type": "integer"
+      },
+      "regression": {
+        "title": "Regression",
+        "type": "boolean"
+      },
+      "next_ops": {
+        "items": {
+          "$ref": "#/$defs/Op"
+        },
+        "maxItems": 4,
+        "title": "Next Ops",
+        "type": "array"
+      },
+      "note": {
+        "maxLength": 160,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "required": [
+      "before",
+      "after",
+      "regression",
+      "next_ops",
+      "note"
+    ],
+    "title": "Review",
+    "type": "object"
+  },
+  "Placement": {
+    "additionalProperties": false,
+    "properties": {
+      "center": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        ],
+        "title": "Center",
+        "type": "array"
+      },
+      "width": {
+        "maximum": 0.5,
+        "minimum": 0.12,
+        "title": "Width",
+        "type": "number"
+      },
+      "angle": {
+        "maximum": 65,
+        "minimum": -65,
+        "title": "Angle",
+        "type": "number"
+      },
+      "exposure": {
+        "maximum": 20,
+        "minimum": -20,
+        "title": "Exposure",
+        "type": "number"
+      },
+      "shadow_opacity": {
+        "maximum": 50,
+        "minimum": 12,
+        "title": "Shadow Opacity",
+        "type": "integer"
+      },
+      "occluders": {
+        "items": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "maxItems": 2,
+        "title": "Occluders",
+        "type": "array"
+      },
+      "note": {
+        "maxLength": 150,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "required": [
+      "center",
+      "width",
+      "angle",
+      "exposure",
+      "shadow_opacity",
+      "occluders",
+      "note"
+    ],
+    "title": "Placement",
+    "type": "object"
+  },
+  "Job": {
+    "additionalProperties": false,
+    "properties": {
+      "job_id": {
+        "pattern": "^[a-zA-Z0-9_-]{1,60}$",
+        "title": "Job Id",
+        "type": "string"
+      },
+      "background": {
+        "maxLength": 600,
+        "minLength": 1,
+        "title": "Background",
+        "type": "string"
+      },
+      "objects": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "title": "Objects",
+        "type": "array"
+      },
+      "width_range": {
+        "default": [
+          0.07,
+          0.16
+        ],
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          }
+        ],
+        "title": "Width Range",
+        "type": "array"
+      }
+    },
+    "required": [
+      "job_id",
+      "background",
+      "objects"
+    ],
+    "title": "Job",
+    "type": "object"
+  },
+  "Choice": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate": {
+        "anyOf": [
+          {
+            "enum": [
+              "A",
+              "B",
+              "C"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Candidate"
+      },
+      "note": {
+        "maxLength": 240,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "required": [
+      "candidate",
+      "note"
+    ],
+    "title": "Choice",
+    "type": "object"
+  },
+  "Fix": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate": {
+        "anyOf": [
+          {
+            "enum": [
+              "A",
+              "B",
+              "C"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Candidate"
+      },
+      "brightness": {
+        "default": 0,
+        "maximum": 10,
+        "minimum": -10,
+        "title": "Brightness",
+        "type": "number"
+      },
+      "warmth": {
+        "default": 0,
+        "maximum": 6,
+        "minimum": -6,
+        "title": "Warmth",
+        "type": "number"
+      },
+      "saturation": {
+        "default": 0,
+        "maximum": 8,
+        "minimum": -12,
+        "title": "Saturation",
+        "type": "integer"
+      },
+      "blur_px": {
+        "default": 0,
+        "maximum": 1.2,
+        "minimum": 0,
+        "title": "Blur Px",
+        "type": "number"
+      }
+    },
+    "title": "Fix",
+    "type": "object"
+  },
+  "Quality": {
+    "$defs": {
+      "Fix": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate": {
+            "anyOf": [
+              {
+                "enum": [
+                  "A",
+                  "B",
+                  "C"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Candidate"
+          },
+          "brightness": {
+            "default": 0,
+            "maximum": 10,
+            "minimum": -10,
+            "title": "Brightness",
+            "type": "number"
+          },
+          "warmth": {
+            "default": 0,
+            "maximum": 6,
+            "minimum": -6,
+            "title": "Warmth",
+            "type": "number"
+          },
+          "saturation": {
+            "default": 0,
+            "maximum": 8,
+            "minimum": -12,
+            "title": "Saturation",
+            "type": "integer"
+          },
+          "blur_px": {
+            "default": 0,
+            "maximum": 1.2,
+            "minimum": 0,
+            "title": "Blur Px",
+            "type": "number"
+          }
+        },
+        "title": "Fix",
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "support": {
+        "maximum": 4,
+        "minimum": 0,
+        "title": "Support",
+        "type": "integer"
+      },
+      "occlusion": {
+        "maximum": 4,
+        "minimum": 0,
+        "title": "Occlusion",
+        "type": "integer"
+      },
+      "lighting": {
+        "maximum": 4,
+        "minimum": 0,
+        "title": "Lighting",
+        "type": "integer"
+      },
+      "edge": {
+        "maximum": 4,
+        "minimum": 0,
+        "title": "Edge",
+        "type": "integer"
+      },
+      "texture": {
+        "maximum": 4,
+        "minimum": 0,
+        "title": "Texture",
+        "type": "integer"
+      },
+      "fatal": {
+        "items": {
+          "enum": [
+            "floating",
+            "wrong_occlusion",
+            "broken_shape",
+            "halo",
+            "overlay_changed"
+          ],
+          "type": "string"
+        },
+        "maxItems": 5,
+        "title": "Fatal",
+        "type": "array"
+      },
+      "fix": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Fix"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "note": {
+        "maxLength": 240,
+        "title": "Note",
+        "type": "string"
+      }
+    },
+    "required": [
+      "support",
+      "occlusion",
+      "lighting",
+      "edge",
+      "texture",
+      "fatal",
+      "fix",
+      "note"
+    ],
+    "title": "Quality",
+    "type": "object"
+  }
+}

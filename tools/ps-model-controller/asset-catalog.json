@@ -1,0 +1,926 @@
+{
+  "schema_version": 1,
+  "source_root": "../../external/异物生成/input/objects",
+  "assets": [
+    {
+      "file": "aDN350 球阀.jpg",
+      "sha256": "5a75053223174c27ec84cf6d760d4ac97f244d00fb920ea49f9a9344884cc61f",
+      "asset_id": "asset-5a7505322317",
+      "category": "长阀杆工业阀门",
+      "model": "铸字 DN350，型号未确认",
+      "object_size": null,
+      "evidence": [
+        "https://www.avkvalves.eu/en/product-finder/gate-valves/metal-seated-gate-valves/54-3132-008"
+      ],
+      "note": "DN 是公称通径，不能推算长阀杆、手轮和壳体的整件外廓。",
+      "derivatives": []
+    },
+    {
+      "file": "aDN350 球阀1.jpg",
+      "sha256": "4984b2c3849c36b0de5631b1027d5b7f65870e0ed319b0f09efa2368e12a6c62",
+      "asset_id": "asset-4984b2c3849c",
+      "category": "齿轮操作法兰球阀",
+      "model": "铸字 DN200 / WCB",
+      "object_size": {
+        "major_mm": [
+          590.0,
+          860.0
+        ],
+        "minor_mm": [
+          390.0,
+          515.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://gaoshanvalves.com/products/q341f-worm-gear-operated-ball-valve/"
+      },
+      "evidence": [
+        "https://gaoshanvalves.com/products/q341f-worm-gear-operated-ball-valve/",
+        "https://kdvflow.com/wp-content/uploads/2020/08/br.6x.ball_.valve_.plst_.lined_.v1.1.pdf"
+      ],
+      "note": "按 DN200 同类法兰和面距，加齿轮箱与手轮的安装外廓。文件名 DN350 与铸字不同。",
+      "derivatives": []
+    },
+    {
+      "file": "a轴承座.jpg",
+      "sha256": "928d815bf44713cfbb4f17979741d6301f6f2c50a1e26582de0e1db987cfd8ff",
+      "asset_id": "asset-928d815bf447",
+      "category": "ASAHI 带座轴承",
+      "model": "ASAHI P210",
+      "object_size": {
+        "major_mm": [
+          206.0,
+          206.0
+        ],
+        "minor_mm": [
+          114.0,
+          120.0
+        ],
+        "basis": "exact_catalog",
+        "source": "https://www.asahiseiko.co.jp/english/img/cata07_stand.pdf"
+      },
+      "evidence": [
+        "https://www.asahiseiko.co.jp/english/img/cata07_stand.pdf"
+      ],
+      "note": "座体可读 ASAHI P210，原厂 UCP210 表给出座体全宽 206 mm、顶部外廓 114 mm，短轴留附件余量。",
+      "derivatives": [],
+      "features": [
+        {
+          "label": "轴承内圈",
+          "point": [
+            594,
+            492
+          ]
+        },
+        {
+          "label": "轴承外圈",
+          "point": [
+            695,
+            455
+          ]
+        }
+      ]
+    },
+    {
+      "file": "a轴承座1.jpg",
+      "sha256": "001576effd47b2fa13f98d6f725e24b53d556954d2248ab1d46f654e4667b88c",
+      "asset_id": "asset-001576effd47",
+      "category": "剖分式轴承座",
+      "model": "SN511 标字，厂牌未证实",
+      "object_size": {
+        "major_mm": [
+          245.0,
+          275.0
+        ],
+        "minor_mm": [
+          120.0,
+          150.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://cdn.skfmediahub.skf.com/api/public/0901d196801105d2/pdf_preview_medium/0901d196801105d2_pdf_preview_medium.pdf"
+      },
+      "evidence": [
+        "https://cdn.skfmediahub.skf.com/api/public/0901d196801105d2/pdf_preview_medium/0901d196801105d2_pdf_preview_medium.pdf"
+      ],
+      "note": "参照 SKF SNL511 系列底座和轴心高度，短轴计入盖体和油嘴。",
+      "derivatives": []
+    },
+    {
+      "file": "储罐.jpg",
+      "sha256": "07ba37a59259235a97520c96d095ffe5c052afc731f237e664f64179b3d5e406",
+      "asset_id": "asset-07ba37a59259",
+      "category": "立式不锈钢储罐",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          2100.0,
+          2950.0
+        ],
+        "minor_mm": [
+          1100.0,
+          1600.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.haishunmachinery.com/PROCESSING/StainlessSteelStorageTank/SinglelayerverticalstoragetankHAISHUN.html"
+      },
+      "evidence": [
+        "https://www.haishunmachinery.com/PROCESSING/StainlessSteelStorageTank/SinglelayerverticalstoragetankHAISHUN.html"
+      ],
+      "note": "外廓以相近的 1–4 m³ 支腿式罐体为参照，包含支腿和罐口。照片无容量及型号铭牌。 另关联上次做旧版本的内容哈希，沿用对应原图估算，仍需轮廓和尺度校验。",
+      "derivatives": [
+        {
+          "file": "outputs/提示词复测/素材/生锈储罐.png",
+          "sha256": "18fa18eba224b21e18f5d0d4a89cd0b2107a8ef7710847e378b20c93800ea3b1",
+          "features": [
+            {
+              "label": "罐口",
+              "point": [
+                240,
+                58
+              ]
+            },
+            {
+              "label": "罐口底座",
+              "point": [
+                236,
+                87
+              ]
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "label": "罐口",
+          "point": [
+            185,
+            50
+          ]
+        },
+        {
+          "label": "罐口底座",
+          "point": [
+            230,
+            70
+          ]
+        }
+      ]
+    },
+    {
+      "file": "储罐1.jpg",
+      "sha256": "4f235917d1aa8f03097201b081557c9c62321a7afc2d365098c86047d90df193",
+      "asset_id": "asset-4f235917d1aa",
+      "category": "卧式不锈钢储罐",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          1500.0,
+          2500.0
+        ],
+        "minor_mm": [
+          1100.0,
+          1800.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.haishunmachinery.com/PROCESSING/StainlessSteelStorageTank/Singlelayerhorizontalstoragetank.html"
+      },
+      "evidence": [
+        "https://www.haishunmachinery.com/PROCESSING/StainlessSteelStorageTank/Singlelayerhorizontalstoragetank.html"
+      ],
+      "note": "卧式带鞍座及顶部人孔。按同厂卧式同类外廓估算，短轴含底座及人孔。",
+      "derivatives": []
+    },
+    {
+      "file": "储罐2.jpg",
+      "sha256": "3a61b2b5829af1f5ff67b28a52f8196b88ca4bada6a8ddff47bc6a776fc65b6a",
+      "asset_id": "asset-3a61b2b5829a",
+      "category": "立式搅拌储罐",
+      "model": null,
+      "object_size": null,
+      "evidence": [
+        "https://www.haishunmachinery.com/PROCESSING/StainlessSteelStorageTank/SinglelayerverticalstoragetankHAISHUN.html"
+      ],
+      "note": "顶部电机、锥底和支腿与单层储罐尺寸表不同，容量和外廓待确认。",
+      "derivatives": []
+    },
+    {
+      "file": "分离过滤器.jpg",
+      "sha256": "122dfb432ec749893bc9f807418232337335effb17faa36dcfe0d9218c1f5da2",
+      "asset_id": "asset-122dfb432ec7",
+      "category": "蓝色立式分离过滤器",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          275.0,
+          510.0
+        ],
+        "minor_mm": [
+          120.0,
+          215.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.parker.com/content/dam/Parker-com/Literature/IGFG/PDF-Files/Finite_Water_Separators_1300_925_USA.pdf"
+      },
+      "evidence": [
+        "https://www.parker.com/content/dam/Parker-com/Literature/IGFG/PDF-Files/Finite_Water_Separators_1300_925_USA.pdf"
+      ],
+      "note": "按 Parker WS 中型壳体量级及照片吊环、法兰、排污端估外廓，型号未知。",
+      "derivatives": []
+    },
+    {
+      "file": "分离过滤器1.jpg",
+      "sha256": "c487c90d20242b32e615336e660ddf3dbee2e396743416dc9df9392df357be1f",
+      "asset_id": "asset-c487c90d2024",
+      "category": "不锈钢分离过滤器",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          235.0,
+          470.0
+        ],
+        "minor_mm": [
+          85.0,
+          155.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.parker.com/content/dam/Parker-com/Literature/IGFG/PDF-Files/Finite_Water_Separators_1300_925_USA.pdf"
+      },
+      "evidence": [
+        "https://www.parker.com/content/dam/Parker-com/Literature/IGFG/PDF-Files/Finite_Water_Separators_1300_925_USA.pdf"
+      ],
+      "note": "小口径分离壳体，按同类壳体区间估计，含底部排水件和顶部接口。",
+      "derivatives": []
+    },
+    {
+      "file": "千斤顶.jpg",
+      "sha256": "4f18e23e2b3818bb99c761e6b99ea083916ea933a81b730e5f50f6c4ca88633a",
+      "asset_id": "asset-4f18e23e2b38",
+      "category": "立式液压千斤顶和拆下的手柄",
+      "model": null,
+      "object_size": null,
+      "evidence": [
+        "https://www.enerpac.com/en-US/product/gbj010sa-11-ton-244-in-stroke-hydraulic-industrial-bottle-jack/p/GBJ010SA"
+      ],
+      "note": "手柄在本体旁边，不能把两件相对位置当作实物外廓。",
+      "derivatives": []
+    },
+    {
+      "file": "千斤顶1.jpg",
+      "sha256": "fecd0dbc854516510001e4047525e61065fec8a9cb4e2de0f9742651c923ae08",
+      "asset_id": "asset-fecd0dbc8545",
+      "category": "绿色立式液压千斤顶",
+      "model": null,
+      "object_size": null,
+      "evidence": [
+        "https://www.enerpac.com/en-US/product/gbj010sa-11-ton-244-in-stroke-hydraulic-industrial-bottle-jack/p/GBJ010SA"
+      ],
+      "note": "长操作杆在画面左边被裁断，且伸出状态未获实测。",
+      "derivatives": []
+    },
+    {
+      "file": "千斤顶2.jpg",
+      "sha256": "7f783ef94e503d641987d05991096fe214a3838104f6ab39ab3fad853f65e005",
+      "asset_id": "asset-7f783ef94e50",
+      "category": "卧式液压千斤顶",
+      "model": null,
+      "object_size": null,
+      "evidence": [
+        "https://www.bahco.com/int_en/dual-piston-extra-low-entrance-trolley-jack-2-t-bh12000.html"
+      ],
+      "note": "操作杆在画面右边被裁断，产品资料可参考车身长度，完整外廓未知。",
+      "derivatives": []
+    },
+    {
+      "file": "密封胶罐.jpg",
+      "sha256": "71e8dec9675d45dc2931459916f6b682a8b6badb199efc09e4f5b3c2269100ec",
+      "asset_id": "asset-71e8dec9675d",
+      "category": "双桶密封胶容器图",
+      "model": null,
+      "object_size": null,
+      "evidence": [],
+      "note": "图中两只桶相互遮挡，容量无标记，需要单只桶素材和对应容量。",
+      "derivatives": []
+    },
+    {
+      "file": "杀虫剂罐.jpg",
+      "sha256": "b0985bfda5f0e8ce4fe9d00a888276eff8776414b7165bed48acec404830d97c",
+      "asset_id": "asset-b0985bfda5f0",
+      "category": "蓝色杀虫气雾罐",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          200.0,
+          260.0
+        ],
+        "minor_mm": [
+          60.0,
+          69.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.sarten.com.tr/en/products/cosmetic/aerosol"
+      },
+      "evidence": [
+        "https://www.sarten.com.tr/en/products/cosmetic/aerosol"
+      ],
+      "note": "同类 65 mm 金属气雾罐，计入蓝色帽盖。未确认净容量。",
+      "derivatives": []
+    },
+    {
+      "file": "杀虫剂罐1.jpg",
+      "sha256": "7dc65fe4486bc6b594e2eb79ab1a8828be550c004ad220d85c9cd7b188d07646",
+      "asset_id": "asset-7dc65fe4486b",
+      "category": "Raid 杀虫气雾罐",
+      "model": "Raid，容量不可读",
+      "object_size": {
+        "major_mm": [
+          195.0,
+          255.0
+        ],
+        "minor_mm": [
+          57.0,
+          69.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.sarten.com.tr/en/products/cosmetic/aerosol"
+      },
+      "evidence": [
+        "https://www.sarten.com.tr/en/products/cosmetic/aerosol"
+      ],
+      "note": "照片为带黑色盖的细长罐，参照 Sarten 同类罐径及带盖外廓。",
+      "derivatives": []
+    },
+    {
+      "file": "杀虫剂罐2.jpg",
+      "sha256": "9568f816abd63906adf73438f12a3cbeae5e4ad7f36b1eea3b4ef3500bc0adb5",
+      "asset_id": "asset-9568f816abd6",
+      "category": "红色细身杀虫气雾罐",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          215.0,
+          270.0
+        ],
+        "minor_mm": [
+          53.0,
+          65.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.sarten.com.tr/en/products/cosmetic/aerosol"
+      },
+      "evidence": [
+        "https://www.sarten.com.tr/en/products/cosmetic/aerosol"
+      ],
+      "note": "细长外形单独估算，参照同类不同直径的长罐并计入盖。",
+      "derivatives": []
+    },
+    {
+      "file": "气压减震器.jpg",
+      "sha256": "81b00e175e785e7c93d334c39a64503f31d368012d1aad7cfbf5b4eaf2c79d72",
+      "asset_id": "asset-81b00e175e78",
+      "category": "短行程空气减震器",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          170.0,
+          225.0
+        ],
+        "minor_mm": [
+          58.0,
+          92.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.sram.com/en/service/models/rs-mnr-rl-c1"
+      },
+      "evidence": [
+        "https://www.sram.com/en/service/models/rs-mnr-rl-c1"
+      ],
+      "note": "RockShox 同类安装眼距的量级，加入端部外廓，筒径由外形约束。",
+      "derivatives": []
+    },
+    {
+      "file": "气压减震器1.jpg",
+      "sha256": "52fb28249a6a710d9c23d64b15a29a66d4d56ea18d38c408536081c63ff433fd",
+      "asset_id": "asset-52fb28249a6a",
+      "category": "带调节器空气减震器",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          180.0,
+          250.0
+        ],
+        "minor_mm": [
+          40.0,
+          65.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.sram.com/en/service/models/rs-mnr-rl-c1"
+      },
+      "evidence": [
+        "https://www.sram.com/en/service/models/rs-mnr-rl-c1"
+      ],
+      "note": "以相近眼距和照片中较细筒身估算完整包络。",
+      "derivatives": []
+    },
+    {
+      "file": "气瓶.jpg",
+      "sha256": "ba88117a74cccdabf1d88bbc9020139a896ecf49921081e0b5dddb52e8c8f26e",
+      "asset_id": "asset-ba88117a74cc",
+      "category": "多规格气瓶组合",
+      "model": null,
+      "object_size": null,
+      "evidence": [
+        "https://no.airliquide.com/gaser-alla-branscher/gasleveranser-leveransmetod/gasflaskor-och-flaskbuntar-industrigaser"
+      ],
+      "note": "六只不同气瓶，不能作为一个尺寸已知的异物。",
+      "derivatives": []
+    },
+    {
+      "file": "气瓶1.jpg",
+      "sha256": "35a5eee2eb09eb9bb7aa55fdb33211bf31d663ec6dc07d61cfa9d334894ecd89",
+      "asset_id": "asset-35a5eee2eb09",
+      "category": "高身红色工业气瓶",
+      "model": "CCS 标字，容量未知",
+      "object_size": {
+        "major_mm": [
+          1480.0,
+          1690.0
+        ],
+        "minor_mm": [
+          195.0,
+          240.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://no.airliquide.com/gaser-alla-branscher/gasleveranser-leveransmetod/gasflaskor-och-flaskbuntar-industrigaser"
+      },
+      "evidence": [
+        "https://no.airliquide.com/gaser-alla-branscher/gasleveranser-leveransmetod/gasflaskor-och-flaskbuntar-industrigaser"
+      ],
+      "note": "参考同类长型 40–50 L 钢瓶尺寸，考虑瓶帽与拍摄角度。",
+      "derivatives": []
+    },
+    {
+      "file": "气瓶2.jpg",
+      "sha256": "43e7201a6314b49aa8e0e4b1897cd1950bdb38b2f2327678984633422ae30bfc",
+      "asset_id": "asset-43e7201a6314",
+      "category": "小型不锈钢气瓶",
+      "model": null,
+      "object_size": null,
+      "evidence": [
+        "https://no.airliquide.com/gaser-alla-branscher/gasleveranser-leveransmetod/gasflaskor-och-flaskbuntar-industrigaser"
+      ],
+      "note": "瓶身无容量或型号，现有大瓶资料无法验证小瓶尺寸区间。",
+      "derivatives": []
+    },
+    {
+      "file": "气缸.png",
+      "sha256": "bb8f2fdacbcb3f7e29af41f386947e54483503bc4d3e1304605f0e2194687dcc",
+      "asset_id": "asset-bb8f2fdacbcb",
+      "category": "铝型材双作用气缸",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          220.0,
+          400.0
+        ],
+        "minor_mm": [
+          65.0,
+          100.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.smcworld.com/catalog/New-products-en/pdf/es20-242-c96.pdf"
+      },
+      "evidence": [
+        "https://www.smcworld.com/catalog/New-products-en/pdf/es20-242-c96.pdf"
+      ],
+      "note": "按 ISO C96 同类口径和缸体/活塞杆包络区间，照片伸出量单独考虑。",
+      "derivatives": []
+    },
+    {
+      "file": "气缸1.jpg",
+      "sha256": "9df7e0f11a933e6bb09106eb8ab39179891c1e908a2cb1d0e2614e2c7aa5f8f8",
+      "asset_id": "asset-9df7e0f11a93",
+      "category": "拉杆式双作用气缸",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          195.0,
+          340.0
+        ],
+        "minor_mm": [
+          85.0,
+          130.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.smcworld.com/catalog/New-products-en/pdf/es20-242-c96.pdf"
+      },
+      "evidence": [
+        "https://www.smcworld.com/catalog/New-products-en/pdf/es20-242-c96.pdf"
+      ],
+      "note": "与 ISO C96 安装尺度参照。拉杆外露，照片长宽比和杆伸出状态单独估计。",
+      "derivatives": []
+    },
+    {
+      "file": "气缸2.jpg",
+      "sha256": "f75469b0cc9414db6effb9bbb9b3742ca52a95a668ea8a6ea8ad36b4d874061a",
+      "asset_id": "asset-f75469b0cc94",
+      "category": "紧凑型材双作用气缸",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          240.0,
+          465.0
+        ],
+        "minor_mm": [
+          55.0,
+          100.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.smcworld.com/catalog/New-products-en/pdf/es20-242-c96.pdf"
+      },
+      "evidence": [
+        "https://www.smcworld.com/catalog/New-products-en/pdf/es20-242-c96.pdf"
+      ],
+      "note": "较长缸体，按同类不同缸径与行程包络估计，型号不明。",
+      "derivatives": []
+    },
+    {
+      "file": "油缸.jpg",
+      "sha256": "63ea69308c3bba738ef9ba250fb016a6e3c84715aa5ea979b3537f185d741f6b",
+      "asset_id": "asset-63ea69308c3b",
+      "category": "蓝色双耳液压油缸",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          440.0,
+          660.0
+        ],
+        "minor_mm": [
+          95.0,
+          170.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.magisterhyd.com/hydraulics-shop/product-category/hydraulic-cylinders/swivel-eye-hydraulic-cylinders/"
+      },
+      "evidence": [
+        "https://www.magisterhyd.com/hydraulics-shop/product-category/hydraulic-cylinders/swivel-eye-hydraulic-cylinders/"
+      ],
+      "note": "短缸筒与大安装眼，按相近 WSE 包络，独立于黑色 HCIC 缸。",
+      "derivatives": []
+    },
+    {
+      "file": "油缸1.jpg",
+      "sha256": "0da0ba6fbc0615b9e2cb8db26848b909367eb0b159af34b3caf181ed1584c54b",
+      "asset_id": "asset-0da0ba6fbc06",
+      "category": "红色双作用油缸",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          360.0,
+          590.0
+        ],
+        "minor_mm": [
+          85.0,
+          160.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://hchydraulic.net/products/cylinders/welded-double-acting-cylinders/"
+      },
+      "evidence": [
+        "https://hchydraulic.net/products/cylinders/welded-double-acting-cylinders/"
+      ],
+      "note": "同类焊接短行程油缸，安装眼及外置接口计入外廓。",
+      "derivatives": []
+    },
+    {
+      "file": "液压减震器.jpg",
+      "sha256": "9ade180e0f43ab3b58b52d652a2eadfe66d7e1a8055cc171834df298dd71f068",
+      "asset_id": "asset-9ade180e0f43",
+      "category": "外置气瓶弹簧减震器",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          330.0,
+          410.0
+        ],
+        "minor_mm": [
+          90.0,
+          220.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.ohlins.com/en-th/motorcycle-suspension/american-v-twin/xlh-%28sportster%29?v=harley-davidson-sportster-xl-2020"
+      },
+      "evidence": [
+        "https://www.ohlins.com/en-th/motorcycle-suspension/american-v-twin/xlh-%28sportster%29?v=harley-davidson-sportster-xl-2020"
+      ],
+      "note": "Öhlins 同类安装眼距加端部，短轴按照片的油管和外置储罐跨度估计。",
+      "derivatives": []
+    },
+    {
+      "file": "液压减震器1.jpg",
+      "sha256": "6ed78fc2fc3f6323bf215de8f1782d0c55bcb8de578c8ddf5910ac7e299902db",
+      "asset_id": "asset-6ed78fc2fc3f",
+      "category": "黑色单筒弹簧减震器",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          310.0,
+          395.0
+        ],
+        "minor_mm": [
+          50.0,
+          95.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.ohlins.com/en-us/motorcycle-suspension/scooter-performance-line/shock-absorber-hon-monkey-2018-%28s36e%29?v=honda-msz-125-monkey--2025"
+      },
+      "evidence": [
+        "https://www.ohlins.com/en-us/motorcycle-suspension/scooter-performance-line/shock-absorber-hon-monkey-2018-%28s36e%29?v=honda-msz-125-monkey--2025"
+      ],
+      "note": "参照同类摩托车减震器，计入安装眼外廓，弹簧短轴单独估计。",
+      "derivatives": []
+    },
+    {
+      "file": "液压减震器2.jpg",
+      "sha256": "0bd3fb889ff36b5a246659b26750d461d4fff9dcc97d97c9183b1f20bf48fd58",
+      "asset_id": "asset-0bd3fb889ff3",
+      "category": "红黑弹簧减震器",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          305.0,
+          390.0
+        ],
+        "minor_mm": [
+          60.0,
+          100.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.ohlins.com/en-us/motorcycle-suspension/scooter-performance-line/shock-absorber-hon-monkey-2018-%28s36e%29?v=honda-msz-125-monkey--2025"
+      },
+      "evidence": [
+        "https://www.ohlins.com/en-us/motorcycle-suspension/scooter-performance-line/shock-absorber-hon-monkey-2018-%28s36e%29?v=honda-msz-125-monkey--2025"
+      ],
+      "note": "同类眼距加端部，颜色和安装耳不足以确认具体车型或 SKU。",
+      "derivatives": []
+    },
+    {
+      "file": "液压缸.jpg",
+      "sha256": "cd0a8343411b635e615678a865dc4d1a696cc851f7792dd6d3eb7dc4a9867de0",
+      "asset_id": "asset-cd0a8343411b",
+      "category": "双耳焊接液压缸",
+      "model": "HCIC 标字，具体型号及行程未知",
+      "object_size": {
+        "major_mm": [
+          480.0,
+          720.0
+        ],
+        "minor_mm": [
+          78.0,
+          146.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://jnhcic.com/custom-hydraulic-cylinder/double-acting-hydraulic-cylinders/"
+      },
+      "evidence": [
+        "https://jnhcic.com/custom-hydraulic-cylinder/double-acting-hydraulic-cylinders/",
+        "https://www.magisterhyd.com/hydraulics-shop/product-category/hydraulic-cylinders/swivel-eye-hydraulic-cylinders/"
+      ],
+      "note": "按 WSE 2×6 至 2×12 的闭合包络及照片可见伸出量放宽，外径包含接口和安装耳。 另关联上次做旧版本的内容哈希，沿用对应原图估算，仍需轮廓和尺度校验。",
+      "derivatives": [
+        {
+          "file": "outputs/提示词复测/素材/生锈液压缸.png",
+          "sha256": "a66fda21355809a706a84a8c94f93e38fbb62e865a11c7a20e78f0306ec23da6",
+          "features": [
+            {
+              "label": "露出的活塞杆",
+              "point": [
+                693,
+                315
+              ]
+            },
+            {
+              "label": "活塞杆端安装耳",
+              "point": [
+                873,
+                57
+              ]
+            }
+          ]
+        }
+      ],
+      "features": [
+        {
+          "label": "露出的活塞杆",
+          "point": [
+            713,
+            317
+          ]
+        },
+        {
+          "label": "活塞杆端安装耳",
+          "point": [
+            914,
+            45
+          ]
+        }
+      ]
+    },
+    {
+      "file": "液压缸1.jpg",
+      "sha256": "98024781f3d29b23f06a0b837ff64819e4f2774a2094173551bf77182cf7d967",
+      "asset_id": "asset-98024781f3d2",
+      "category": "液压缸剖视示意",
+      "model": null,
+      "object_size": null,
+      "evidence": [
+        "https://jnhcic.com/custom-hydraulic-cylinder/double-acting-hydraulic-cylinders/",
+        "https://www.magisterhyd.com/hydraulics-shop/product-category/hydraulic-cylinders/swivel-eye-hydraulic-cylinders/"
+      ],
+      "note": "图片露出剖开的内部活塞和缸壁，无法用作完整外表面的实物素材。",
+      "derivatives": []
+    },
+    {
+      "file": "液压缸2.jpg",
+      "sha256": "c630b359e855b4aaff09478d8a7e8cbb84ee799f94edaaa979d3dbccbab82b16",
+      "asset_id": "asset-c630b359e855",
+      "category": "长缸筒双耳液压缸",
+      "model": null,
+      "object_size": null,
+      "evidence": [
+        "https://jnhcic.com/custom-hydraulic-cylinder/double-acting-hydraulic-cylinders/"
+      ],
+      "note": "铭牌不可读，长缸筒与上一张照片伸缩结构不同，厂家没有匹配到具体包络。",
+      "derivatives": []
+    },
+    {
+      "file": "灭火器.jpg",
+      "sha256": "0f4e037777a8477d8b3e69d7e668071d165338a9e3cfec3f20ab7cedca3da1f4",
+      "asset_id": "asset-0f4e037777a8",
+      "category": "GLORIA 带软管便携灭火器",
+      "model": "GLORIA 6 kg，子型号未证实",
+      "object_size": {
+        "major_mm": [
+          490.0,
+          555.0
+        ],
+        "minor_mm": [
+          250.0,
+          300.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.gloria.de/wp-content/uploads/2026/03/overview-portable-fire-extinguishers-2026.pdf"
+      },
+      "evidence": [
+        "https://www.gloria.de/wp-content/uploads/2026/03/overview-portable-fire-extinguishers-2026.pdf"
+      ],
+      "note": "GLORIA 6 kg PD6GA / P6EASY 型号外廓参照。短轴包含软管，不采用罐身直径。",
+      "derivatives": [],
+      "features": [
+        {
+          "label": "阀门与软管接头",
+          "point": [
+            600,
+            148
+          ]
+        },
+        {
+          "label": "红色压把",
+          "point": [
+            700,
+            58
+          ]
+        }
+      ]
+    },
+    {
+      "file": "灭火器1.jpg",
+      "sha256": "8861c44bb417fefdd8fb512b9b1a4d7bd75fc19f674c8e3776ca377e5d57dbd4",
+      "asset_id": "asset-8861c44bb417",
+      "category": "绿色带软管便携灭火器",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          430.0,
+          560.0
+        ],
+        "minor_mm": [
+          215.0,
+          300.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.gloria.de/wp-content/uploads/2026/03/overview-portable-fire-extinguishers-2026.pdf"
+      },
+      "evidence": [
+        "https://www.gloria.de/wp-content/uploads/2026/03/overview-portable-fire-extinguishers-2026.pdf"
+      ],
+      "note": "便携罐相近外廓，含软管。绿色漆与标识不足以确认厂牌、药剂或容量。",
+      "derivatives": []
+    },
+    {
+      "file": "灭火器2.jpg",
+      "sha256": "ee2ef0c2ee7346618b6a4fc44f08ce5c531455c7d8e39c06c8779be19d3d47fc",
+      "asset_id": "asset-ee2ef0c2ee73",
+      "category": "红色无外置软管便携灭火器",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          390.0,
+          545.0
+        ],
+        "minor_mm": [
+          140.0,
+          225.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.gloria.de/wp-content/uploads/2026/03/overview-portable-fire-extinguishers-2026.pdf"
+      },
+      "evidence": [
+        "https://www.gloria.de/wp-content/uploads/2026/03/overview-portable-fire-extinguishers-2026.pdf"
+      ],
+      "note": "以同类小型罐体和手柄为包络，照片没有可核实的容量或型号。",
+      "derivatives": []
+    },
+    {
+      "file": "自喷漆罐.jpg",
+      "sha256": "0211aaf5feadfd99f567d62faf47832ab3971d6ae15b2c7744acf79c09bf4ece",
+      "asset_id": "asset-0211aaf5fead",
+      "category": "Bosny 气雾喷漆罐",
+      "model": "Bosny，容量不可读",
+      "object_size": {
+        "major_mm": [
+          181.0,
+          222.0
+        ],
+        "minor_mm": [
+          62.0,
+          70.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.sarten.com.tr/en/products/cosmetic/aerosol"
+      },
+      "evidence": [
+        "https://www.sarten.com.tr/en/products/cosmetic/aerosol"
+      ],
+      "note": "按 65 mm 同类 400–500 mL 金属罐并计入灰色盖。",
+      "derivatives": []
+    },
+    {
+      "file": "集油器.jpg",
+      "sha256": "d656d54d7faac0b61534fae216e2bc3c346cc51669e0bc0e996fd102320a7089",
+      "asset_id": "asset-d656d54d7faa",
+      "category": "带散热筋的罐式部件",
+      "model": null,
+      "object_size": null,
+      "evidence": [],
+      "note": "无法从照片确认是集油器还是滤罐总成，铭牌与接口规格均不可读。",
+      "derivatives": []
+    },
+    {
+      "file": "集油器1.jpg",
+      "sha256": "539c9eac04151317fdf806c9f96be0dd969cfcd6223101203777a88365f13feb",
+      "asset_id": "asset-539c9eac0415",
+      "category": "卧式集油或储液压力罐",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          760.0,
+          1365.0
+        ],
+        "minor_mm": [
+          220.0,
+          390.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.bitzer.de/shared_media/documentation/ba-603-2-au.pdf"
+      },
+      "evidence": [
+        "https://www.bitzer.de/shared_media/documentation/ba-603-2-au.pdf"
+      ],
+      "note": "参照 Bitzer 卧式压力容器包络量级。照片功能和制造商未证实。",
+      "derivatives": []
+    },
+    {
+      "file": "集油器2.jpg",
+      "sha256": "746d7e5c509c1769fb0478ca91101e5dcd4fe414af0acbd6d7742d41d118a8ac",
+      "asset_id": "asset-746d7e5c509c",
+      "category": "立式集油或储液压力罐",
+      "model": null,
+      "object_size": {
+        "major_mm": [
+          1000.0,
+          1500.0
+        ],
+        "minor_mm": [
+          245.0,
+          310.0
+        ],
+        "basis": "similar_catalog",
+        "source": "https://www.bitzer.de/shared_media/documentation/ba-603-2-au.pdf"
+      },
+      "evidence": [
+        "https://www.bitzer.de/shared_media/documentation/ba-603-2-au.pdf"
+      ],
+      "note": "参照 Bitzer 立式压力容器，短轴为筒体量级，长轴考虑端部阀件。",
+      "derivatives": []
+    }
+  ]
+}

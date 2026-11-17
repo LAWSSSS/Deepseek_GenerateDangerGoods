@@ -1,0 +1,12 @@
+{
+  "planner": {
+    "url": "http://127.0.0.1:11434/v1/chat/completions",
+    "model": "YOUR_TEXT_MODEL",
+    "max_output_tokens": 384
+  },
+  "vision": {
+    "url": "http://127.0.0.1:11434/v1/chat/completions",
+    "model": "YOUR_VISION_MODEL",
+    "max_output_tokens": 384
+  }
+}

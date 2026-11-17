@@ -1,0 +1,266 @@
+{
+  "version": "cylinder32-parametric-v1",
+  "number": 32,
+  "description": "32 号液压缸2（长行程黑色焊接式双耳环液压缸，带黄色标签环带、镀铬活塞杆、两道黄帽侧向油口）分部件重建。以原照与做锈图可见结构为主，六视图仅作未标定的外观与同侧双油口拓扑参考。",
+  "units": "meters",
+  "shape_basis": "source_photo_visible_structure+uncalibrated_six_view_layout",
+  "orientation": {
+    "axis": "local Y",
+    "rear_end": "local -Y",
+    "rod_end": "local +Y",
+    "up": "+Z",
+    "front_camera": "+X",
+    "pose_rotation_deg_x": 133.0,
+    "pose_note": "为兼容旧模型库中 TripoSR 的原始姿态，建模后整体绕 X 轴旋转约 133°：杆端朝 -Y/+Z（画面左上），后耳环朝 +Y/-Z（画面右下），与旧网格的 PCA 主轴 [0.051, 0.681, -0.731] 一致。该姿态同时保留在原照中的斜置关系，便于原视角诊断与新旧六方向对照。",
+    "note": "库坐标约定仍为 Z 向上；局部缸体轴线沿 Y。六视图参考为未标定的竖置产品图，方向仅用于外观与同侧双油口/双耳环拓扑，不用于姿态标定。"
+  },
+  "scale_note": "按原照六视图的像素比例设置工作尺度：总长约 888 mm、缸筒外径约 110 mm、活塞杆直径约 29 mm、油口帽顶端到轴线约 107 mm。这些是按合理比例设置的工作尺度，不是对实物的测量。",
+  "dimensions": {
+    "rear_clevis": {
+      "eye_center_y": -0.315,
+      "eye_outer_radius": 0.047,
+      "eye_bore_radius": 0.030,
+      "plate_half_height": 0.042,
+      "plate_x0": -0.018,
+      "plate_x1": 0.018,
+      "neck_end_y": -0.240,
+      "bushing_outer_radius": 0.030,
+      "bushing_inner_radius": 0.020,
+      "bushing_half_x": 0.019,
+      "note": "后耳环为焊接在端盖上的厚板（板面在 Y-Z 平面），孔轴沿 X；孔内为钢衬套。原照孔内仅见金属环与阴影，未建模橡胶内套。孔径、板厚与衬套配合未实测。"
+    },
+    "rod_clevis": {
+      "eye_center_y": 0.486,
+      "eye_outer_radius": 0.040,
+      "eye_bore_radius": 0.023,
+      "plate_half_height": 0.034,
+      "plate_x0": -0.0135,
+      "plate_x1": 0.0135,
+      "neck_end_y": 0.444,
+      "bushing_outer_radius": 0.023,
+      "bushing_inner_radius": 0.015,
+      "bushing_half_x": 0.0145,
+      "note": "杆端为锻造/焊接厚板耳环，孔轴沿 X，孔内钢衬套为可见细亮环的推断。原照孔内没有可确认的橡胶内套。"
+    },
+    "rear_cap": {
+      "y0": -0.252,
+      "y1": -0.236,
+      "radius": 0.057,
+      "weld_y": -0.2365,
+      "note": "后端盖与缸筒焊接，外侧有可见环焊缝；端盖直径略大于缸筒。内部结构未建模。"
+    },
+    "barrel": {
+      "y0": -0.245,
+      "y1": 0.250,
+      "radius": 0.055,
+      "seam_y0": -0.243,
+      "seam_y1": 0.248,
+      "note": "长黑色漆面缸筒，外壁有使用划痕、掉漆和局部锈蚀。原照没有剖视窗口，因此本件为封闭缸筒；壁厚、内部结构与缸径未实测。"
+    },
+    "label_band": {
+      "y0": 0.168,
+      "y1": 0.232,
+      "r_in": 0.0548,
+      "r_out": 0.0560,
+      "text": "液压油缸",
+      "note": "靠近杆端的黄色标签环带，红色汉字按原照/六视图可见字样近似重绘；不是厂家原稿，字距、字体与磨损为推断。"
+    },
+    "front_gland": {
+      "cap_y0": 0.250,
+      "cap_y1": 0.264,
+      "cap_r_in": 0.0148,
+      "cap_r_out": 0.0570,
+      "collar_y0": 0.262,
+      "collar_y1": 0.274,
+      "collar_r_in": 0.0148,
+      "collar_r_out": 0.0590,
+      "wiper_y0": 0.272,
+      "wiper_y1": 0.2745,
+      "wiper_r_in": 0.0147,
+      "wiper_r_out": 0.0300,
+      "note": "前端盖/压盖与略大的凸缘；最外侧为钢色防尘环。台阶尺寸按原照比例设置，内部密封截面未确认。"
+    },
+    "gland_rings": [
+      {"name": "black_a", "y0": 0.2745, "y1": 0.2860, "r_in": 0.0147, "r_out": 0.0360, "tile": "black_paint"},
+      {"name": "steel_a", "y0": 0.2860, "y1": 0.2910, "r_in": 0.0147, "r_out": 0.0340, "tile": "steel"},
+      {"name": "black_b", "y0": 0.2910, "y1": 0.3020, "r_in": 0.0147, "r_out": 0.0320, "tile": "black_paint"},
+      {"name": "steel_b", "y0": 0.3020, "y1": 0.3070, "r_in": 0.0147, "r_out": 0.0300, "tile": "steel"},
+      {"name": "black_c", "y0": 0.3070, "y1": 0.3180, "r_in": 0.0147, "r_out": 0.0280, "tile": "black_paint"},
+      {"name": "black_collar", "y0": 0.3180, "y1": 0.3260, "r_in": 0.0147, "r_out": 0.0240, "tile": "black_paint"}
+    ],
+    "rod": {
+      "radius": 0.0145,
+      "y0": 0.300,
+      "y1": 0.445,
+      "note": "镀铬活塞杆；原照杆端伸出较长，六视图为较短/回缩姿态。本件按原照的伸出状态建模。杆径、螺纹和端部连接未实测。"
+    },
+    "rod_end_boss": {
+      "y0": 0.426,
+      "y1": 0.450,
+      "radius": 0.021,
+      "note": "杆端耳环前的黑色连接套；内部连接方式不可见。"
+    },
+    "ports": [
+      {
+        "name": "upper",
+        "center_y": 0.120,
+        "pad_radius": 0.0140,
+        "pad_z0": 0.050,
+        "pad_z1": 0.066,
+        "stem_radius": 0.0085,
+        "stem_z0": 0.066,
+        "stem_z1": 0.079,
+        "nut_radius": 0.0112,
+        "nut_z0": 0.079,
+        "nut_z1": 0.090,
+        "cap_radius": 0.0115,
+        "cap_z0": 0.090,
+        "cap_z1": 0.107,
+        "note": "黄色塑料帽、钢六角螺母、深色短颈和焊接凸台；位于缸筒 +Z 侧、黄色标签环带下方。内部通道被帽封闭，未建贯通孔。"
+      },
+      {
+        "name": "lower",
+        "center_y": -0.140,
+        "pad_radius": 0.0140,
+        "pad_z0": 0.050,
+        "pad_z1": 0.066,
+        "stem_radius": 0.0085,
+        "stem_z0": 0.066,
+        "stem_z1": 0.079,
+        "nut_radius": 0.0112,
+        "nut_z0": 0.079,
+        "nut_z1": 0.090,
+        "cap_radius": 0.0115,
+        "cap_z0": 0.090,
+        "cap_z1": 0.107,
+        "note": "与上油口同侧、同规格，位于缸筒下部；原照和六视图正面/背面均显示两油口在同一物理侧。"
+      }
+    ]
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "black_paint": 0,
+      "black_edge": 1,
+      "chrome": 2,
+      "steel": 3,
+      "dark_steel": 4,
+      "label": 5,
+      "yellow_plastic": 6,
+      "rubber": 7,
+      "rust": 8,
+      "weld": 9,
+      "spare10": 10,
+      "spare11": 11,
+      "spare12": 12,
+      "spare13": 13,
+      "spare14": 14,
+      "spare15": 15
+    },
+    "note": "4x4 图集，每格 512 px。R 通道保留 255；G=粗糙度；B=金属度。底色为 sRGB；不烘焙固定光照或阴影。"
+  },
+  "material_profile": {
+    "black_paint": {
+      "base_rgb": [44, 44, 41],
+      "roughness": 0.40,
+      "metallic": 0.0,
+      "rust_amount": 0.085,
+      "note": "黑色工业漆面，非金属；按原照保留使用划痕、掉漆和局部锈斑。基色保持中深灰，避免渲染发黑。"
+    },
+    "black_edge": {
+      "base_rgb": [32, 32, 30],
+      "roughness": 0.48,
+      "metallic": 0.0,
+      "rust_amount": 0.045,
+      "note": "小件/凹槽暗部黑漆；非金属，金属反射不适用。"
+    },
+    "chrome": {
+      "base_rgb": [200, 202, 208],
+      "roughness": 0.12,
+      "metallic": 1.0,
+      "rust_amount": 0.0,
+      "note": "镀铬活塞杆；原照有少量磨痕，分布为程序化近似。"
+    },
+    "steel": {
+      "base_rgb": [158, 158, 160],
+      "roughness": 0.30,
+      "metallic": 1.0,
+      "rust_amount": 0.06,
+      "note": "耳环衬套、六角螺母和密封组钢环；保留金属反射。"
+    },
+    "dark_steel": {
+      "base_rgb": [58, 57, 54],
+      "roughness": 0.42,
+      "metallic": 0.80,
+      "rust_amount": 0.07,
+      "note": "油口短颈和深色小件；金属度略低但保留金属反射。"
+    },
+    "label": {
+      "base_rgb": [232, 188, 30],
+      "roughness": 0.38,
+      "metallic": 0.0,
+      "rust_amount": 0.025,
+      "note": "黄色标签环带，非金属；红色汉字按可见字样近似重绘，不是逐像素投影。"
+    },
+    "yellow_plastic": {
+      "base_rgb": [234, 172, 20],
+      "roughness": 0.50,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "黄色塑料保护帽；非金属，金属反射不适用。"
+    },
+    "rubber": {
+      "base_rgb": [30, 29, 27],
+      "roughness": 0.85,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "黑色橡胶/弹性件；非金属，金属反射不适用。"
+    },
+    "rust": {
+      "base_rgb": [124, 88, 58],
+      "roughness": 0.85,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "锈蚀色参考；锈为电介质，金属反射不适用。"
+    },
+    "weld": {
+      "base_rgb": [96, 93, 88],
+      "roughness": 0.55,
+      "metallic": 0.55,
+      "rust_amount": 0.18,
+      "note": "端盖/油口凸台环焊缝；按原照呈灰褐色，含局部锈蚀。焊缝内部结构未确认。"
+    },
+    "spare10": {"base_rgb": [120, 122, 120], "roughness": 0.55, "metallic": 0.0, "rust_amount": 0.0},
+    "spare11": {"base_rgb": [118, 120, 118], "roughness": 0.55, "metallic": 0.0, "rust_amount": 0.0},
+    "spare12": {"base_rgb": [116, 118, 116], "roughness": 0.55, "metallic": 0.0, "rust_amount": 0.0},
+    "spare13": {"base_rgb": [114, 116, 114], "roughness": 0.55, "metallic": 0.0, "rust_amount": 0.0},
+    "spare14": {"base_rgb": [112, 114, 112], "roughness": 0.55, "metallic": 0.0, "rust_amount": 0.0},
+    "spare15": {"base_rgb": [110, 112, 110], "roughness": 0.55, "metallic": 0.0, "rust_amount": 0.0}
+  },
+  "reference": {
+    "file": "ChatGPT 图像 2026年10月14日 10_10_23-1.png",
+    "role": "visual_match_unverified",
+    "sha256": "e6b0ea89ed28ad22ebaac5058f7796b9af2717139789893a10258ea57467b9f4",
+    "note": "六视图映射把本件指向与 30 号相同的竖置液压缸产品图。该图与原照在伸出行程、缸筒长径比和个别附件上并不完全一致：原照为长杆伸出、长缸筒斜置；参考图接近短行程/回缩展示。仅用其确认双耳环、同侧双油口、黄色标签环带与黄帽外形，不视为同一实物或实测。"
+  },
+  "render": {
+    "six_view_resolution": 640,
+    "six_view_samples": 16,
+    "detail_resolution": 640,
+    "detail_samples": 16,
+    "turntable_resolution": 320,
+    "turntable_samples": 6
+  },
+  "limitations": [
+    "六视图参考未标定，且与本件原照的伸出状态、长径比不完全一致；整体尺寸、缸径/杆径、耳环孔径、壁厚和装配关系未实测。",
+    "原照是 3/4 视角，不能直接作为正交测量；旧模型库相机只用于诊断。",
+    "背面、缸孔内部、密封截面、油口内部通道和耳环衬套配合为推断。",
+    "黄色标签环带的红字为按可见字样的近似重绘，字体、字距、磨损和真实印刷范围未确认。",
+    "黑色漆面、锈迹和磨损为基于做锈图的程序化近似，不是逐像素投影。",
+    "姿态按旧网格 PCA 主轴近似恢复，不是摄影测量；旧网格本身是单图 TripoSR 的低分辨率结果。",
+    "没有安装附件或支撑；落稳、接触、现场尺度和场景光照融合未验证。"
+  ]
+}

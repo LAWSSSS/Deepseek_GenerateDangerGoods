@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Fixed-scene 3-D pilot result",
+  "type": "object",
+  "required": ["job_id", "number", "file", "signature", "status", "calls", "token_usage"],
+  "properties": {
+    "job_id": {"type": "string", "minLength": 1, "maxLength": 60},
+    "number": {"type": "integer", "enum": [3, 10, 27, 30]},
+    "file": {"type": "string"},
+    "signature": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "status": {"enum": ["review", "awaiting_structure_review", "pilot_review"]},
+    "code": {"type": "string"},
+    "reason": {"type": "string"},
+    "calls": {"type": "array", "items": {"type": "object"}},
+    "token_usage": {
+      "type": "object",
+      "required": ["api_calls", "total_tokens", "reported_tokens", "unreported_calls"],
+      "properties": {
+        "api_calls": {"type": "integer", "minimum": 0},
+        "total_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "reported_tokens": {"type": "integer", "minimum": 0},
+        "unreported_calls": {"type": "integer", "minimum": 0},
+        "prompt_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "completion_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "prompt_cache_hit_tokens": {"type": ["integer", "null"], "minimum": 0},
+        "budget_tokens": {"type": "integer", "minimum": 0}
+      }
+    },
+    "reconstruction": {
+      "type": "object",
+      "properties": {
+        "model_revision": {"type": "string"},
+        "resolution": {"type": "integer", "minimum": 1},
+        "fidelity": {
+          "type": "object",
+          "required": ["iou", "holes", "filled_holes", "narrow_recall", "passed"],
+          "properties": {
+            "iou": {"type": "number", "minimum": 0, "maximum": 1},
+            "holes": {"type": "integer", "minimum": 0},
+            "filled_holes": {"type": "integer", "minimum": 0},
+            "narrow_recall": {"type": "number", "minimum": 0, "maximum": 1},
+            "passed": {"type": "boolean"}
+          }
+        },
+        "source_camera": {"type": "object"},
+        "execution": {"type": "object"}
+      }
+    },
+    "repair": {"type": "object"},
+    "optimization": {"type": "object"},
+    "structure_review": {"type": "object"},
+    "scene_analysis": {"type": "object"},
+    "geometry_only": {
+      "type": "object",
+      "required": ["cached_camera_elevation_deg"],
+      "properties": {
+        "cached_camera_elevation_deg": {"type": "number", "minimum": 10, "maximum": 85},
+        "passing_pose_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "pose_attempts": {"type": "array", "items": {"type": "object"}},
+    "geometry": {"type": "object"},
+    "actual_pose": {"type": "object"},
+    "projection": {"type": "object"},
+    "review": {"type": "object"},
+    "recheck": {"type": "object"},
+    "preview": {"type": "string"},
+    "psd": {"type": "string"},
+    "elapsed_seconds": {"type": "number", "minimum": 0}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "pilot_review"}}, "required": ["status"]},
+      "then": {"required": ["preview", "psd", "geometry", "actual_pose", "projection", "review"]}
+    }
+  ]
+}

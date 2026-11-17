@@ -1,0 +1,232 @@
+{
+  "version": "cylinder24-parametric-v1",
+  "number": 24,
+  "description": "24 号气缸（方形型材缸筒、端面进气口的双作用气动缸）分部件重建。以原照可见结构为主，六视图仅作未标定的外观与背侧拓扑参考。",
+  "units": "meters",
+  "shape_basis": "source_photo_visible_structure+uncalibrated_six_view_layout",
+  "orientation": {
+    "axis": "Y",
+    "front_rod_end": "-Y",
+    "up": "+Z",
+    "front_side": "+X",
+    "note": "与原模型库坐标约定一致：Z 向上。缸体轴线沿 Y，活塞杆端在 -Y。标签和可见侧面朝 +X。"
+  },
+  "scale_note": "按原照与六视图的像素比例设置工作尺度，并按公开 SU/SUS 63 mm 缸径、100 mm 行程系列作合理性参照（端盖约 83 mm 见方、型材筒约 72 mm、缸体总长约 0.18 m）。这些不是对实物的测量值；原照为 3/4 视角，不能作正交测量。",
+  "dimensions": {
+    "cap": {
+      "half_x": 0.0425,
+      "half_z": 0.0425,
+      "y_front_outer": -0.091,
+      "y_front_inner": -0.059,
+      "y_rear_inner": 0.059,
+      "y_rear_outer": 0.091,
+      "bevel": 0.0035,
+      "corner_screw_x": 0.0295,
+      "corner_screw_z": 0.0295,
+      "corner_screw_washer_radius": 0.0068,
+      "corner_screw_head_radius": 0.0055,
+      "corner_screw_head_height": 0.002,
+      "port_center_x": 0.0,
+      "port_center_z": 0.0275,
+      "port_counterbore_radius": 0.0092,
+      "port_counterbore_depth": 0.0022,
+      "port_bore_radius": 0.0066,
+      "port_depth": 0.017,
+      "port_thread_radius": 0.0059,
+      "port_thread_tube": 0.00045,
+      "port_thread_pitch": 0.0015,
+      "small_screw_x": 0.022,
+      "small_screw_z": 0.006,
+      "small_screw_radius": 0.0038,
+      "small_screw_height": 0.0014,
+      "side_screw_x": 0.0425,
+      "side_screw_y_offset": 0.082,
+      "side_screw_z": 0.004,
+      "side_screw_radius": 0.0042,
+      "side_screw_height": 0.0016,
+      "rib_start_radius": 0.019,
+      "rib_end_radius": 0.0315,
+      "rib_width": 0.0065,
+      "rib_height": 0.0035,
+      "rear_boss_radius": 0.0225,
+      "rear_boss_height": 0.0018,
+      "rear_boss_groove_radius": 0.011,
+      "rear_boss_groove_minor": 0.0008,
+      "text_size": 0.0045,
+      "text_extrude": 0.00045,
+      "text_y_inset": 0.01,
+      "text_x_eb": -0.012,
+      "text_x_ea": 0.004,
+      "note": "端盖为黑色阳极氧化/铸造铝块，四角为十字槽螺钉（原照）并带银色垫圈；端面偏上有真实螺纹盲孔进气口和小十字槽螺塞。EA/EB 铸字位于顶面近外端。四角固定方式在六视图端视图中被画成内六角，原照显示十字槽，候选以原照为准。"
+    },
+    "barrel": {
+      "half": 0.036,
+      "y0": -0.0605,
+      "y1": 0.0605,
+      "corner_radius": 0.0068,
+      "groove_centers": [
+        -0.018,
+        0.0,
+        0.018
+      ],
+      "groove_radius": 0.0025,
+      "groove_depth": 0.0018,
+      "seam_y": 0.0585,
+      "seam_size": 0.0745,
+      "seam_thickness": 0.003,
+      "note": "方形挤压铝型材，四角圆角，四个面各三条纵向凹槽（形成四条凸筋）。截面与槽深为按原照比例的近似，不是挤压模具实测。"
+    },
+    "rod": {
+      "radius": 0.0112,
+      "y_inside": -0.078,
+      "y_shank_end": -0.126,
+      "thread_y0": -0.126,
+      "thread_y1": -0.1615,
+      "core_radius": 0.0102,
+      "thread_radius": 0.0106,
+      "thread_tube": 0.00055,
+      "thread_pitch": 0.0016,
+      "nut_radius": 0.0148,
+      "nut_thickness": 0.0115,
+      "nut1_y": -0.13,
+      "nut2_y": -0.146,
+      "washer_y": -0.1235,
+      "washer_radius": 0.0152,
+      "washer_thickness": 0.0016,
+      "gland_radius": 0.0175,
+      "gland_y0": -0.091,
+      "gland_y1": -0.1015,
+      "wiper_major": 0.013,
+      "wiper_minor": 0.0016,
+      "wiper_y": -0.1018,
+      "note": "镀铬活塞杆、外端公螺纹、两只六角螺母与垫圈；前端黑色防尘/导向凸台和橡胶刮尘环。螺纹牙型、螺距和螺母规格为推断。"
+    },
+    "label": {
+      "u_len": 0.064,
+      "v_len": 0.024,
+      "y_center": 0.004,
+      "z_center": 0.004,
+      "x_offset": 0.0005,
+      "note": "白色不干胶标签，红色横带、黑色右侧条块、SHAKO 商标位置文字、SUS63·100 与 MAX. PRESS. 1.0 MPa。为按原照重绘的近似标签，不是原厂印刷文件。"
+    }
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "aluminum": 0,
+      "cap": 1,
+      "chrome": 2,
+      "steel": 3,
+      "rubber": 4,
+      "thread": 5,
+      "dark": 6
+    },
+    "note": "4x4 PBR 图集，每格 512 px。底色为 sRGB；G=粗糙度；B=金属度；R 保留 255。标签另有独立 1024x384 底色贴图。"
+  },
+  "material_profile": {
+    "aluminum": {
+      "base_rgb": [
+        200,
+        200,
+        197
+      ],
+      "roughness": 0.34,
+      "metallic": 1.0,
+      "rust_amount": 0.1,
+      "note": "拉丝/阳极氧化铝型材缸筒；保留金属反射。原照有轻微褐色污渍，未过度做锈。"
+    },
+    "cap": {
+      "base_rgb": [
+        48,
+        48,
+        49
+      ],
+      "roughness": 0.55,
+      "metallic": 0.55,
+      "rust_amount": 0.1,
+      "note": "黑色阳极氧化/铸造铝端盖；金属度取中等，避免纯黑。边缘有轻微磨亮和褐色污渍。"
+    },
+    "chrome": {
+      "base_rgb": [
+        210,
+        210,
+        212
+      ],
+      "roughness": 0.1,
+      "metallic": 1.0,
+      "rust_amount": 0.02,
+      "note": "镀铬活塞杆；高反射、低粗糙度。"
+    },
+    "steel": {
+      "base_rgb": [
+        185,
+        185,
+        187
+      ],
+      "roughness": 0.25,
+      "metallic": 1.0,
+      "rust_amount": 0.1,
+      "note": "镀锌/镍钢螺母、垫圈和螺钉；保留金属反射与轻微氧化。"
+    },
+    "rubber": {
+      "base_rgb": [
+        24,
+        24,
+        25
+      ],
+      "roughness": 0.82,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "黑色橡胶刮尘环/接缝垫；非金属，金属反射检查不适用于该材料。"
+    },
+    "thread": {
+      "base_rgb": [
+        170,
+        170,
+        168
+      ],
+      "roughness": 0.3,
+      "metallic": 1.0,
+      "rust_amount": 0.12,
+      "note": "杆端外螺纹和端面进气口内螺纹；螺纹为几何近似。"
+    },
+    "dark": {
+      "base_rgb": [
+        26,
+        26,
+        27
+      ],
+      "roughness": 0.55,
+      "metallic": 0.35,
+      "rust_amount": 0.0,
+      "note": "螺塞十字槽、孔底和接缝阴影件；不是黑色涂料的实测色。"
+    }
+  },
+  "reference": {
+    "file": "气动缸六视图产品图册.png",
+    "role": "visual_match_unverified",
+    "sha256": "33506beff8d3d7aa04c6138eb19e96e17a55700f786466b912534bc44eb10a17",
+    "note": "六视图把同一缸画成 SMC SU63-100，并在正/背/顶视把端面进气口重复到侧面；原照商标为 SHAKO、型号字样为 SUS63·100，进气口与十字槽螺塞只在端面可见。候选以原照为准，六视图只用于背侧与内部拓扑参考。"
+  },
+  "render": {
+    "six_view_resolution": 512,
+    "six_view_samples": 16,
+    "detail_resolution": 448,
+    "detail_samples": 12,
+    "turntable_resolution": 320,
+    "turntable_samples": 6,
+    "old_resolution": 448,
+    "denoise": true
+  },
+  "limitations": [
+    "六视图参考未标定，且与原照品牌/型号、进气口所在面不一致；不能作为精确几何或型号证据。",
+    "原照是单张 3/4 视角，整体尺寸、端盖尺寸、孔径、孔深、螺纹规格、行程与装配关系未实测。",
+    "背面、端盖内部、活塞/密封内部、缸筒壁厚、真实气路、四角固定方式和底部结构为推断。",
+    "标签为按原照重绘的近似，商标/型号字样的字形、颜色和印刷位置不等于原厂文件；型号读作 SUS63·100 仍有辨认不确定性。",
+    "没有安装附件或支撑；落稳、接触、现场尺度和场景光照融合未验证。",
+    "网页只使用预渲染证据，没有 WebGL/GLB 实时查看器；交互检查只覆盖页面加载与图片切换。"
+  ]
+}

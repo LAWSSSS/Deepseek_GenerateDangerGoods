@@ -1,0 +1,424 @@
+{
+  "version": "cylinder31-parametric-v1",
+  "number": 31,
+  "description": "31 号液压缸1（黄色焊接式双耳环、带单侧纵向剖视窗口的液压缸）分部件重建。以原照与做锈图可见结构为主，六视图仅作未标定的外观和背侧拓扑参考。",
+  "units": "meters",
+  "shape_basis": "source_photo_visible_structure+uncalibrated_six_view_layout",
+  "orientation": {
+    "axis": "Y",
+    "rear_end": "-Y",
+    "rod_end": "+Y",
+    "up": "+Z",
+    "front_camera": "+X",
+    "note": "沿用模型库 Z 向上约定：缸体轴线沿 Y，后耳环在 -Y，杆端在 +Y。剖视窗口朝 +X，因此 +X 相机看到窗口。六视图的正面/背面两格与窗口方位一致；左/右/顶/底四格对耳环孔朝向的绘制互相矛盾（AI 拼图未标定），本件以原照和正/背视图为准，统一为两耳环孔轴线沿 X。"
+  },
+  "scale_note": "按原照与六视图的像素比例设置工作尺度：总长约 625 mm、缸筒外径约 110 mm、活塞杆直径约 29 mm。这些是按合理比例设置的工作尺度，不是对实物的测量。",
+  "dimensions": {
+    "rear_clevis": {
+      "eye_center_y": -0.175,
+      "eye_outer_radius": 0.058,
+      "eye_bore_radius": 0.039,
+      "plate_half_height": 0.056,
+      "plate_x0": -0.019,
+      "plate_x1": 0.019,
+      "neck_end_y": -0.1,
+      "bushing_outer_radius": 0.0385,
+      "bushing_inner_radius": 0.0235,
+      "bushing_half_x": 0.021,
+      "rubber_outer_radius": 0.0235,
+      "rubber_inner_radius": 0.0165,
+      "rubber_half_x": 0.028,
+      "note": "后耳环为竖立的厚板（板面在 Y-Z 平面），孔轴沿 X；孔内为钢衬套，衬套内另有黑色弹性内套（原照可见）。耳环孔径、板厚与衬套配合未实测。"
+    },
+    "rod_clevis": {
+      "eye_center_y": 0.34,
+      "eye_outer_radius": 0.052,
+      "eye_bore_radius": 0.032,
+      "plate_half_height": 0.052,
+      "plate_x0": -0.017,
+      "plate_x1": 0.017,
+      "neck_end_y": 0.286,
+      "bushing_outer_radius": 0.0315,
+      "bushing_inner_radius": 0.019,
+      "bushing_half_x": 0.0185,
+      "note": "杆端耳环为竖立厚板，孔轴沿 X；孔内为钢衬套。原照孔内仅见金属衬套，没有可确认的橡胶内套。"
+    },
+    "rear_cap": {
+      "y0": -0.125,
+      "y1": -0.103,
+      "radius": 0.055,
+      "cone_y0": -0.172,
+      "cone_y1": -0.12,
+      "cone_r0": 0.045,
+      "cone_r1": 0.052,
+      "note": "后端盖与缸筒焊接，外有锥形过渡段连接后耳环；内部结构未建模。"
+    },
+    "barrel": {
+      "y0": -0.105,
+      "y1": 0.225,
+      "radius": 0.055,
+      "inner_radius": 0.0425,
+      "seam_y0": -0.103,
+      "seam_y1": 0.223,
+      "window_center_y": 0.075,
+      "window_half_straight": 0.115,
+      "window_radius_z": 0.032,
+      "window_y0": -0.072,
+      "window_y1": 0.222,
+      "window_cutter_x0": -0.02,
+      "window_cutter_x1": 0.09,
+      "note": "缸筒为封闭厚壁管，+X 侧开一条两端半圆的纵向剖视窗口；窗口内可见深色缸孔内壁、镀铬活塞杆、后端活塞密封组和前端杆密封组。窗口尺寸按原照比例设置，实际孔径、壁厚和剖切范围未实测。"
+    },
+    "front_gland": {
+      "cap_y0": 0.225,
+      "cap_y1": 0.241,
+      "cap_r_in": 0.0185,
+      "cap_r_out": 0.055,
+      "collar_y0": 0.239,
+      "collar_y1": 0.249,
+      "collar_r_in": 0.021,
+      "collar_r_out": 0.058,
+      "wiper_y0": 0.249,
+      "wiper_y1": 0.2515,
+      "wiper_r_in": 0.0158,
+      "wiper_r_out": 0.0245,
+      "note": "前端盖为环形厚板并带略大的黄色凸缘；最外侧有一圈钢色防尘/导向环。内部密封组由青铜、钢和橡胶环组成，具体截面与数量为按可见环带的推断。"
+    },
+    "gland_rings": [
+      {
+        "name": "bronze_inner",
+        "y0": 0.196,
+        "y1": 0.2005,
+        "r_in": 0.0152,
+        "r_out": 0.039,
+        "tile": "bronze"
+      },
+      {
+        "name": "rubber_a",
+        "y0": 0.2005,
+        "y1": 0.2045,
+        "r_in": 0.0152,
+        "r_out": 0.0375,
+        "tile": "rubber"
+      },
+      {
+        "name": "bronze_mid",
+        "y0": 0.2045,
+        "y1": 0.209,
+        "r_in": 0.0152,
+        "r_out": 0.039,
+        "tile": "bronze"
+      },
+      {
+        "name": "steel_backup",
+        "y0": 0.209,
+        "y1": 0.214,
+        "r_in": 0.0152,
+        "r_out": 0.0385,
+        "tile": "steel"
+      },
+      {
+        "name": "rubber_b",
+        "y0": 0.214,
+        "y1": 0.218,
+        "r_in": 0.0152,
+        "r_out": 0.037,
+        "tile": "rubber"
+      },
+      {
+        "name": "bronze_outer",
+        "y0": 0.218,
+        "y1": 0.223,
+        "r_in": 0.0152,
+        "r_out": 0.0388,
+        "tile": "bronze"
+      }
+    ],
+    "piston": {
+      "y0": -0.098,
+      "y1": -0.054,
+      "radius": 0.0395,
+      "ring_ys": [
+        -0.095,
+        -0.086,
+        -0.077,
+        -0.068
+      ],
+      "ring_thickness": 0.0045,
+      "ring_r_in": 0.039,
+      "ring_r_out": 0.042,
+      "note": "活塞体为深色钢，外周有 4 道银色环带；环带数量和截面按原照可见部分推断，活塞内部结构与密封形式未确认。"
+    },
+    "rod": {
+      "radius": 0.0145,
+      "y0": -0.096,
+      "y1": 0.295,
+      "note": "镀铬活塞杆；杆径、端部连接与螺纹未实测。"
+    },
+    "rod_end_boss": {
+      "y0": 0.278,
+      "y1": 0.3,
+      "radius": 0.024,
+      "seal_y": 0.282,
+      "note": "杆端耳环前的黄色连接套/焊接过渡；内部连接方式不可见。"
+    },
+    "rear_port": {
+      "center_y": -0.15,
+      "pad_radius": 0.018,
+      "pad_z0": 0.045,
+      "pad_z1": 0.056,
+      "hex_radius": 0.014,
+      "hex_z0": 0.056,
+      "hex_z1": 0.064,
+      "neck_radius": 0.0095,
+      "neck_z0": 0.064,
+      "neck_z1": 0.076,
+      "cap_radius": 0.017,
+      "cap_z0": 0.076,
+      "cap_z1": 0.096,
+      "groove_zs": [
+        0.08,
+        0.084,
+        0.088,
+        0.092
+      ],
+      "note": "后部顶端为黄色六角座、细颈和带滚花的圆柱盖；结构与功能未确认，按原照可见外形建模。"
+    },
+    "tee_port": {
+      "center_y": 0.115,
+      "stem_z0": 0.046,
+      "stem_z1": 0.078,
+      "stem_radius": 0.012,
+      "bar_z": 0.079,
+      "bar_y0": 0.078,
+      "bar_y1": 0.138,
+      "bar_radius": 0.0145,
+      "counterbore_r": 0.0095,
+      "counterbore_len": 0.01,
+      "bore_r": 0.0065,
+      "liner_r_in": 0.0058,
+      "liner_r_out": 0.0064,
+      "note": "杆端上方 T 形双端口：竖向短柱焊接在缸筒顶部，横向管两端各有一个沉孔口。端口内部通道未被拆解证实；候选用真实贯通小孔表示，深度和内部阀路为推断。"
+    }
+  },
+  "texture": {
+    "size": 2048,
+    "tile": 512,
+    "columns": 4,
+    "rows": 4,
+    "tiles": {
+      "yellow": 0,
+      "yellow_dark": 1,
+      "chrome": 2,
+      "steel": 3,
+      "bronze": 4,
+      "dark_steel": 5,
+      "rubber": 6,
+      "rust": 7,
+      "bore": 8,
+      "weld": 9,
+      "spare10": 10,
+      "spare11": 11,
+      "spare12": 12,
+      "spare13": 13,
+      "spare14": 14,
+      "spare15": 15
+    },
+    "note": "4x4 图集，每格 512 px。R 通道保留 255；G=粗糙度；B=金属度。底色为 sRGB；不烘焙固定光照或阴影。"
+  },
+  "material_profile": {
+    "yellow": {
+      "base_rgb": [
+        228,
+        178,
+        24
+      ],
+      "roughness": 0.36,
+      "metallic": 0.0,
+      "rust_amount": 0.12,
+      "note": "黄色工业漆面，非金属；保留局部锈斑、掉漆和清漆高光。金属反射检查不适用于漆面本身。"
+    },
+    "yellow_dark": {
+      "base_rgb": [
+        190,
+        142,
+        20
+      ],
+      "roughness": 0.43,
+      "metallic": 0.0,
+      "rust_amount": 0.08,
+      "note": "窗口切边、凹槽和暗部漆面；非金属。"
+    },
+    "chrome": {
+      "base_rgb": [
+        200,
+        202,
+        208
+      ],
+      "roughness": 0.11,
+      "metallic": 1.0,
+      "rust_amount": 0.0,
+      "note": "镀铬活塞杆；原照有少量磨痕，分布为程序化近似。"
+    },
+    "steel": {
+      "base_rgb": [
+        158,
+        158,
+        160
+      ],
+      "roughness": 0.27,
+      "metallic": 1.0,
+      "rust_amount": 0.08,
+      "note": "耳环衬套、活塞环、密封组钢环和杆端防尘环；保留金属反射。"
+    },
+    "bronze": {
+      "base_rgb": [
+        168,
+        128,
+        86
+      ],
+      "roughness": 0.3,
+      "metallic": 1.0,
+      "rust_amount": 0.0,
+      "note": "前端密封组的青铜色环；颜色可能受光照影响，真实材质未检测。"
+    },
+    "dark_steel": {
+      "base_rgb": [
+        74,
+        72,
+        68
+      ],
+      "roughness": 0.38,
+      "metallic": 0.85,
+      "rust_amount": 0.04,
+      "note": "活塞体、端口内衬和深色小件；金属度略低但保留金属反射。"
+    },
+    "rubber": {
+      "base_rgb": [
+        34,
+        33,
+        31
+      ],
+      "roughness": 0.83,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "黑色橡胶密封圈和后耳环弹性内套；非金属，金属反射不适用。"
+    },
+    "rust": {
+      "base_rgb": [
+        124,
+        88,
+        58
+      ],
+      "roughness": 0.85,
+      "metallic": 0.0,
+      "rust_amount": 0.0,
+      "note": "锈蚀色参考；锈为电介质，金属反射不适用。"
+    },
+    "bore": {
+      "base_rgb": [
+        68,
+        65,
+        58
+      ],
+      "roughness": 0.38,
+      "metallic": 0.8,
+      "rust_amount": 0.0,
+      "note": "窗口内可见的深色缸孔内壁；为免发黑，基色保持中深灰并保留弱金属反射。真实表面处理未确认。"
+    },
+    "weld": {
+      "base_rgb": [
+        204,
+        158,
+        26
+      ],
+      "roughness": 0.44,
+      "metallic": 0.0,
+      "rust_amount": 0.06,
+      "note": "焊缝/接缝漆面；非金属。"
+    },
+    "spare10": {
+      "base_rgb": [
+        120,
+        122,
+        120
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare11": {
+      "base_rgb": [
+        118,
+        120,
+        118
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare12": {
+      "base_rgb": [
+        116,
+        118,
+        116
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare13": {
+      "base_rgb": [
+        114,
+        116,
+        114
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare14": {
+      "base_rgb": [
+        112,
+        114,
+        112
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    },
+    "spare15": {
+      "base_rgb": [
+        110,
+        112,
+        110
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0,
+      "rust_amount": 0.0
+    }
+  },
+  "reference": {
+    "file": "ChatGPT 图像 2026年10月14日 10_10_24-2.png",
+    "role": "visual_match_unverified",
+    "sha256": "7290a81f89e40a7989b52ecaf0450ffcd1abe9529eb849ce08817e5ac2809ade",
+    "note": "按外观匹配的黄色剖视液压缸六视图；图片未提供相机标定，结构不能视为实测。正/背视图与窗口方位一致；左/右/顶/底四格对耳环孔朝向的绘制互相矛盾，本件以原照和正/背视图为准。"
+  },
+  "render": {
+    "six_view_resolution": 640,
+    "six_view_samples": 16,
+    "detail_resolution": 640,
+    "detail_samples": 16,
+    "turntable_resolution": 320,
+    "turntable_samples": 6
+  },
+  "limitations": [
+    "六视图参考未标定，且拼图各格不是一致的转台；整体尺寸、缸径/杆径、耳环孔径、壁厚和装配关系未实测。",
+    "原照是 3/4 视角，不能直接作为正交测量；旧模型库相机只用于诊断。",
+    "背面、缸孔内部、活塞与密封截面、端口内部通道和后耳环弹性内套的配合为推断。",
+    "剖视窗口是产品展示结构，真实缸体是否开窗及其尺寸未得到厂家资料证实；候选按原照可见窗口建模。",
+    "T 形双端口的功能与内部通道未确认；候选用贯通小孔表示，不能当作实测内部结构。",
+    "黄色漆面、锈迹分布和磨损为基于做锈图的程序化近似，不是逐像素投影。",
+    "没有安装附件或支撑；落稳、接触、现场尺度和场景光照融合未验证。"
+  ]
+}

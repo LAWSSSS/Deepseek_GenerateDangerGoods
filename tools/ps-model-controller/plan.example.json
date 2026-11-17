@@ -1,0 +1,16 @@
+{
+  "status": "ready",
+  "ops": [
+    {
+      "target": "tank",
+      "op": "brightness",
+      "value": 14
+    },
+    {
+      "target": "tank",
+      "op": "saturation",
+      "value": -9
+    }
+  ],
+  "note": "离线验证用计划"
+}

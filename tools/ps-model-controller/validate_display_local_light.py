@@ -1,0 +1,489 @@
+"""Five objects × two scenes: half paint dust, local lighting and stronger independent optics."""
+import argparse
+import asyncio
+import html
+import json
+import os
+from pathlib import Path
+import tempfile
+import time
+
+import numpy as np
+from PIL import Image
+
+from display_batch.ai import Vision
+from display_batch.common import HERE, atomic_json, file_hash, load_catalog, resolve
+from display_batch.compose import compose, cv2, sample_environment
+from display_batch.costs import cumulative
+from display_batch.framing import final_resolution
+from display_batch.local import foreground_dust
+from display_batch.local_light import estimate_local_light, receiver_calibration, reconstruct_probe
+from display_batch.photography import linear, LUMA
+from display_batch.pipeline import batch_lock
+from display_batch.rendering import RenderCache, render_dependencies
+from display_batch.scene import Scenes
+from display_batch.schema import BatchConfig
+from display_batch.surface_maps import prepare_uv_masks
+from display_batch.worker import Blender
+from feedback_rollback import BASELINE, ROLLBACK, SIZED, audit_png, placement_masks
+from validate_display_dust import ASSETS, frozen_passes, read_rgb
+from validate_display_gradients import (apply_camera, export_effect, frame_stats, full_preview,
+                                       limit_matte_brightness, specular_p99)
+from validate_display_local import read, records
+from validate_display_scanned import geometry_check
+
+
+OUTPUT = 'outputs/加强池化薄雾与局部受光-20261111-v3'
+PREVIOUS = 'outputs/薄雾池化梯度与积灰哑光-20261111-v2'
+PROFILE = {'version': 'half-paint-dust-v1', 'paint_dust_scale': .5, 'single_deposit': True}
+POOL = (2, 4, 6)
+FOG = (.12, .24, .36)
+WIDE_OUTPUT = 'outputs/大梯度池化薄雾与均值光场-20261111'
+WIDE_PREVIOUS = OUTPUT
+WIDE_POOL = (16,32,64)
+WIDE_FOG = (.30,.60,.85)
+FINE_OUTPUT = 'outputs/细梯度薄雾12格池化与全图均光-20261111'
+FINE_POOL = (12,)
+FINE_FOG = (.25,.30,.35,.40,.45,.50,.55)
+COMBINED_OUTPUT = 'outputs/6格池化叠加35薄雾-20261111'
+
+
+def combined_output(kernel):
+    if not isinstance(kernel,int) or not 1 <= kernel <= 64:
+        raise ValueError('invalid_combined_pool_kernel')
+    return f'outputs/{kernel}格池化叠加35薄雾-20261111'
+
+
+def dust_output(scale):
+    if not np.isfinite(scale) or not 0 <= scale <= 1:
+        raise ValueError('invalid_surface_dust_scale')
+    return f'outputs/浮灰{scale:g}-3格池化35薄雾-20261111-v2'
+
+
+def frame(image, title, bounds, core):
+    pixels = read_rgb(image)
+    preview = Path(image).with_suffix('.jpg')
+    full_preview(pixels, preview)
+    return {'image': str(image), 'preview': str(preview), 'title': title,
+            'image_hash': file_hash(image), 'size': [pixels.shape[1], pixels.shape[0]],
+            **frame_stats(pixels, bounds, core)}
+
+
+async def render_fixed(row, asset, scene, source, archived, renders, cache, photo_env, masks, local=False,matte_profile=None):
+    legacy = row['archived_window'] is None
+    resolution = archived['resolution'] if legacy else final_resolution(row['pose'])
+    environment = photo_env if local or not legacy else sample_environment(scene, row['pose'])[0]
+    environment = {**environment, 'dust_color': photo_env['dust_color'], 'haze': 0.}
+    partitions = None
+    if row['asset_id'] != '13':
+        partitions, _ = await asyncio.to_thread(prepare_uv_masks, asset, cache/'scanned-uv')
+    directory, meta, hit = await renders.get(asset, row['pose'], row['params'], environment,
+        scene['size'], resolution, appearance='local', full_frame=legacy, matte_partitions=partitions,
+        matte_profile=(matte_profile or PROFILE) if partitions else None, object_only=not local)
+    geo = geometry_check(row['pose'], meta, archived, masks[0], row['baseline']['edit_bounds'], directory, masks[3])
+    if not geo['pass']:
+        raise ValueError(f'changed_geometry: {geo}')
+    if partitions and not meta.get('matte_materials'):
+        raise ValueError('missing_matte_materials')
+    meta.update(anchor_uv=archived['anchor_uv'], contact_polygons=archived['contact_polygons'])
+    if not local:
+        meta['shadow_window'] = archived.get('shadow_window')
+        for part in ('with_shadow', 'without_shadow'):
+            meta['part_paths'][part] = archived.get('part_paths', {}).get(part, str(source))
+    # Preserve the original sample grid for geometry; new shadow EXR has its own grid.
+    meta['legacy_grid'] = legacy
+    return directory, meta, {'geometry': geo, 'cache_hit': hit, 'timings': meta['render_timings'],
+        'partition': partitions, 'render_dir': str(directory), 'render_meta': meta}
+
+
+def audit_geometry(result, row, scene, masks):
+    alpha, foreground, visible, offset = masks
+    audit = audit_png(scene, result, alpha, foreground, visible, row['pose'], offset)
+    if not audit['pass'] or any(result[k] != row['baseline'][k] for k in
+                               ('alpha_hash','visible_alpha_hash','foreground_mask_hash')):
+        raise ValueError('geometry_or_pixel_protection_failed')
+    return audit
+
+
+def compose_all(folder, row, scene, source, archived, shadow_hash, old_render, light_render,
+                environment, samples, new_env, light_samples, masks, previous):
+    started = time.monotonic()
+    bounds = row['baseline']['edit_bounds']
+    visible = masks[2]
+    core = cv2.erode((visible > .9).astype(np.uint8), np.ones((5,5),np.uint8)) > 0
+    original = read_rgb(row['image'])
+    pose = {**row['pose'], 'fixed_alpha_dir': str(source), 'fixed_alpha_window': row['archived_window']}
+    with tempfile.TemporaryDirectory(prefix='replay-', dir=folder) as temporary:
+        a = compose(scene,row['pose'],source,archived,environment,samples,row['params'],row['seed'],
+                    Path(temporary)/'A.png',capture_local=True)
+        if not np.array_equal(read_rgb(a['image']),original) or a['shadow_hash']!=shadow_hash:
+            raise ValueError('archived_replay_changed')
+        audit_geometry(a,row,scene,masks)
+        layers = a.pop('local_layers')
+        old_info = None
+        if old_render:
+            directory,meta,old_info = old_render
+            material = compose(scene,pose,directory,meta,environment,samples,row['params'],row['seed'],
+                Path(temporary)/'material.png',capture_local=True,fixed_tone=a['photo'])
+            audit_geometry(material,row,scene,masks)
+            appearance = material.pop('local_layers')
+            appearance,attenuation = limit_matte_brightness(layers,appearance,environment,row['params'],
+                row['seed'],core,frame_stats(original,bounds,core)['luma_p95'])
+            delta = linear(appearance['rgb'])-linear(layers['rgb'])
+            material_frame = export_effect(folder,'paint-half','漆面积灰减半 · 原受光',original,a,layers,delta,
+                                           bounds,environment,row['params'],row['seed'],core)
+            old_info['brightness_limiter'] = attenuation
+        else:
+            material_frame = previous['groups']['pool'][0]
+        directory,meta,light_info = light_render
+        calibration = receiver_calibration(directory,meta,new_env)
+        new_env = {**new_env, 'calibration': calibration}
+        # Preserve colour restraint. Exposure comes from the receiver, not the object.
+        tone = {**a['photo'], 'exposure_ev': calibration['exposure_ev'], 'contrast_gain': 1.}
+        light = compose(scene,pose,directory,meta,new_env,samples,row['params'],row['seed'],
+                        folder/'local-light.png',capture_local=True,fixed_tone=tone)
+        audit = audit_geometry(light,row,scene,masks)
+        light_layers = light.pop('local_layers')
+        # Keep the same sensor response across both lights and every effect level.
+        # compose's optical noise estimator may respond to the new object, so replay
+        # its new shaded background with the original noise-estimation RGB.
+        sensor_layers = {**layers, 'shaded': light_layers['shaded'], 'fixed_sensor': a['photo']}
+        light_delta = linear(light_layers['rgb'])-linear(layers['rgb'])
+        zero_pixels,_ = apply_camera(sensor_layers,light_delta,environment,row['params'],row['seed'])
+        lx,ly,rx,by = bounds
+        # Start from the validated new shadow frame; change only visible object RGB.
+        complete = read_rgb(light['image']).copy()
+        complete[ly:by,lx:rx][visible>0] = zero_pixels[visible>0]
+        Image.fromarray(complete).save(light['image'],compress_level=2)
+        audit = audit_geometry(light,row,scene,masks)
+        zero = frame(light['image'],'局部受光 · 池化关闭 · 附加薄雾关闭',bounds,core)
+        zero.update(pool_kernel=1,pool_weight=0.,fog_weight=0.,fog_extra=0.,fog_total=layers['air']['amount'])
+        groups = {'pool':[zero], 'fog':[zero]}
+        for kind,levels in (('pool',POOL),('fog',FOG)):
+            for i,value in enumerate(levels,1):
+                kernel,weight,fog = (value,1.,0.) if kind=='pool' else (1,0.,value)
+                effect,details = foreground_dust(light_layers['clear_rgb'],light_layers['rgb'],visible,
+                    environment,layers['air'],row['pose']['target_px'],pool_weight=weight,pool_kernel=kernel,
+                    fog_fraction=0.,fog_weight=fog)
+                title = f'完整 {kernel}×{kernel} 池化' if kind=='pool' else f'附加薄雾 {fog:.0%} 档'
+                item = export_effect(folder,f'{kind}-{i}',title,complete,a,sensor_layers,light_delta+effect,
+                                      bounds,environment,row['params'],row['seed'],core)
+                item.update(pool_kernel=kernel,pool_weight=details['pool_weight_max'],fog_weight=fog,
+                    fog_extra=details['fog_extra_max'],fog_total=details['fog_total_median'],effects=details)
+                groups[kind].append(item)
+            if len({v['image_hash'] for v in groups[kind]}) != 4:
+                raise ValueError('effect_levels_not_distinct')
+        initial = previous['groups']['pool'][0]
+        diagnostics = np.asarray(scene['frame']).copy()
+        diagnostics[light_samples] = np.uint8(.6*diagnostics[light_samples]+.4*np.array([30,210,140]))
+        full_preview(diagnostics,folder/'light-samples.jpg')
+        material_info = {'profile': PROFILE if old_render else None, 'old_light': old_info,
+                         'new_light': light_info, 'calibration': calibration}
+        if old_render:
+            material_info['specular_p99'] = specular_p99(directory,meta,row['pose'],masks[3],bounds,visible)
+        result = {'number':row['number'],'asset_id':row['asset_id'],'name':row['name'],'background':row['background'],
+            'previous':initial,'material':material_frame,'groups':groups,'audit':audit,'status':'review',
+            'light_evidence':new_env['local_irradiance'],'light_samples':str(folder/'light-samples.jpg'),
+            'material_info':material_info,'photo':light['photo'],'checks':light['checks'],
+            'seconds':round(time.monotonic()-started,3)}
+    atomic_json(folder/'result.json',result)
+    return result
+
+
+def frames(case):
+    values = [case['previous'],case['material']]
+    if case.get('pool_comparison'):values.append(case['pool_comparison'])
+    for group in case['groups'].values():
+        values.extend(group)
+    return {v['image']:v for v in values}
+
+
+def report(out,cases,summary):
+    wide=summary.get('experiment')=='wide'
+    fine=summary.get('experiment')=='fine'
+    combined=summary.get('experiment')=='combined'
+    dust=summary.get('experiment')=='dust'
+    pool_kernel=summary.get('pool_kernel',6)
+    def link(path):
+        return html.escape(Path(os.path.relpath(path,out)).as_posix(),quote=True)
+    def picture(item):
+        return (f'<figure><a href="{link(item["image"])}"><img loading="lazy" src="{link(item["preview"])}" '
+                f'width="1600" height="900" alt="完整监控画面"></a><figcaption>{html.escape(item["title"])} '
+                f'<a href="{link(item["image"])}">3840×2160 原图</a></figcaption></figure>')
+    parts = []
+    for bg in sorted({c['background'] for c in cases},key=lambda b:min(c['number'] for c in cases if c['background']==b)):
+        parts.append(f'<h2>{html.escape(Path(bg).name)}</h2>')
+        for c in sorted((c for c in cases if c['background']==bg),key=lambda c:c['number']):
+            parts.append(f'<section id="sample-{c["number"]:02d}"><h3>{c["number"]:02d} · {html.escape(c["name"])}</h3>')
+            if c.get('error'):
+                parts.append(f'<p>{html.escape(c["error"])}</p></section>');continue
+            if dust:
+                parts.append('<div class="frames">'+picture({**c['previous'],'title':'已确认成像 · 原浮灰覆盖'})+
+                             picture(c['material'])+'</div>')
+                parts.append('<p>3×3 池化、35% 追加薄雾与全图均光一致。'+
+                    (f'仅将额外表面粉尘层的覆盖乘 {c["surface_dust"]["relative_scale"]:g}。' if c['surface_dust']['applied'] else '塑料没有额外粉尘层，本组保持原样。')+
+                    '</p></section>')
+                continue
+            if combined:
+                control=c.get('pool_comparison',{**c['material'],'title':'仅追加 35% 薄雾 · 不池化'})
+                parts.append('<div class="frames">'+picture(control)+
+                             picture(c['groups']['combined'][-1])+'</div>')
+                if c.get('pool_comparison'):
+                    parts.append('<details><summary>仅追加 35% 薄雾 · 不池化</summary>'+picture(c['material'])+'</details>')
+                parts.append('<details><summary>全图均光零档 · 无池化和追加雾层</summary>'+picture(c['previous'])+'</details>')
+                parts.append(f'<p>组合档实际追加雾量 {c["groups"]["combined"][-1]["fog_extra"]:.1%}，'
+                             f'总雾量 {c["groups"]["combined"][-1]["fog_total"]:.1%}。</p></section>')
+                continue
+            if fine:
+                parts.append('<details open><summary>局部均值与全图均值 · 相同光源方向和材质</summary><div class="frames">'+
+                    picture({**c['previous'],'title':'上一轮扩大范围局部均值'})+picture(c['material'])+'</div></details>')
+            elif wide:
+                parts.append('<details open><summary>扩大范围并改用均值 · 相同材质</summary><div class="frames">'+
+                    picture({**c['previous'],'title':'上一轮局部光照'})+picture(c['material'])+'</div></details>')
+            elif c['material_info']['profile']:
+                parts.append('<details><summary>材质对照 · 相同原受光</summary><div class="frames">'+
+                             picture({**c['previous'],'title':'上一轮积灰哑光'})+picture(c['material'])+'</div></details>')
+            if not fine:
+                light_title='均值照明与近似光场重建 · 相同采样' if wide else '局部受光对照 · 相同新材质'
+                parts.append(f'<details open><summary>{light_title}</summary><div class="frames">'+
+                             picture({**c['material'],'title':'扩大范围均值照明' if wide else '原受光'})+
+                             picture(c['groups']['pool'][0])+'</div></details>')
+            for kind,title in (('pool','池化加强 · 附加薄雾关闭'),('fog','薄雾加强 · 池化关闭')):
+                images = []
+                for item in c['groups'][kind]:
+                    caption = item['title']
+                    if kind=='fog':
+                        caption += f' · 实际追加峰值 {item["fog_extra"]:.1%} · 总雾量中位数 {item["fog_total"]:.1%}'
+                    images.append(picture({**item,'title':caption}))
+                parts.append(f'<details><summary>{title}</summary><div class="frames">'+''.join(images)+'</div></details>')
+            sample_title='全图平均取样范围' if fine else '局部光照取样范围'
+            sample_caption=('全部原背景像素参与均值。黄色框为旧局部范围，绿色框为全图。平均值只控制亮度与色偏，光向沿用局部对照。' if fine else
+                            '绿色为同层局部中性表面样本。光向证据不足时使用柔和环境光。')
+            parts.append(f'<details><summary>{sample_title}</summary><img src="{link(c["light_samples"])}" '
+                         f'loading="lazy" width="1600" height="900"><p>{sample_caption}</p></details></section>')
+    head = ('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width">'
+        '<title>加强池化薄雾与局部受光</title><style>body{font:16px system-ui;background:#192329;color:#edf3f5;margin:24px}'
+        'a{color:#a9dfca}section{max-width:1800px;border-bottom:1px solid #41555d;padding:12px 0}'
+        '.frames{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}figure{margin:0}'
+        'img{width:100%;height:auto;object-fit:contain;display:block}figcaption,summary{padding:8px 0}'
+        'summary{cursor:pointer}h2{overflow-wrap:anywhere;font-size:1.1rem}@media(max-width:850px){.frames{grid-template-columns:1fr}}</style>'
+        '<h1>加强池化薄雾与局部受光</h1><p>五件物品 × 两张背景。全部展示完整画面，点击查看原尺寸图。</p>'
+        '<p>先比较材质和受光，再分别查看池化、薄雾。两个梯度的零档相同；每组只改变一个因素。</p>'
+        '<p>漆面粉尘覆盖系数减半，漆面保持粗糙；裸金属保留哑光粉尘，塑料保持原材质。局部光照和尺度仍为估计。</p>'
+        f'<p>{summary["cases_pass"]}/10 组程序检查通过，{summary["full_frames"]} 张全景。API ¥0；本机时间见账本。</p>'
+        '<p><a href="cost-ledger.json">累计成本与耗时</a> · <a href="results.json">完整参数和检查</a></p>')
+    if wide:
+        head=head.replace('加强池化薄雾与局部受光','16/32/64 均匀池化、大梯度薄雾与均值光场')
+        head=head.replace('先比较材质和受光','先比较扩大范围均值照明和近似光场重建')
+        head+=('<p>池化档位是最终原图上的 16×16、32×32、64×64 像素，100% 等权平均处理。'
+               '附加雾层为 30%、60%、85%，按原透明度过渡。最高档用于检查强度上限。</p>'
+               '<p>照明采样边距扩大到 1.75 倍，使用有效像素算术均值。'
+               '光场重建属于局部低频估计，未恢复实测 HDR 或不可见光源。</p>')
+    if fine:
+        head=head.replace('加强池化薄雾与局部受光','25%–55% 细梯度薄雾、12×12 池化与全图均光')
+        head=head.replace('先比较材质和受光','先比较局部均值和全图均值受光')
+        head+=('<p>薄雾为追加层的实际 25%、30%、35%、40%、45%、50%、55%，池化关闭。'
+               '池化组单独比较关闭与 12×12 全强度均匀池化，追加薄雾关闭。</p>'
+               '<p>全图每个像素等权参与解码线性均值，包括料斗外区域及文字；不按深度、材质或亮度筛选。'
+               '仅改变平均亮度和色偏，光源方向与柔和度沿用局部均值对照。它是试验估计，不是实测光照。</p>')
+    if combined:
+        head=head.replace('加强池化薄雾与局部受光',f'{pool_kernel}×{pool_kernel} 均匀池化 ＋ 35% 薄雾')
+        head=head.replace('先比较材质和受光，再分别查看池化、薄雾。两个梯度的零档相同；每组只改变一个因素。',
+                          f'固定上一轮全图均光与 35% 追加雾层，测试 {pool_kernel}×{pool_kernel} 全强度均匀池化。'+
+                          ('主对照为上一轮 6×6 与本轮池化，雾量一致。' if pool_kernel!=6 else '主对照为仅加雾与池化叠雾。'))
+        head+='<p>复用上一轮物体和阴影渲染。位置、尺寸、相机、材质与前景遮挡一致；本轮只重做合成。</p>'
+    if dust:
+        scale=summary['surface_dust_scale']
+        head=head.replace('加强池化薄雾与局部受光',f'表面浮灰 ×{scale:g} · 保持 3×3 池化与35%薄雾')
+        head=head.replace('先比较材质和受光，再分别查看池化、薄雾。两个梯度的零档相同；每组只改变一个因素。',
+                          '用户已确认上一轮成像效果。本轮只改变表面浮灰覆盖，让原材质更多露出；空气薄雾、池化、光照和摄影参数均固定。')
+        head+='<p>金属重新渲染对应材质及阴影，塑料作为原样对照。旧材质和源模型保留，新浮灰效果待点评。</p>'
+    (out/'index.html').write_text(head+''.join(parts),encoding='utf8')
+
+
+async def run(args):
+    experiment=getattr(args,'experiment','local')
+    kernel=getattr(args,'pool_kernel',6)
+    scale=getattr(args,'dust_scale',.5)
+    start = time.monotonic();out = resolve(args.out or {'wide':WIDE_OUTPUT,'fine':FINE_OUTPUT,'combined':combined_output(kernel),
+                                                     'dust':dust_output(scale),'local':OUTPUT}[experiment])
+    if out.exists() and any(out.iterdir()) and not (out/'inputs.json').is_file():
+        raise ValueError('fresh_output_directory_required')
+    out.mkdir(parents=True,exist_ok=True)
+    with batch_lock(out):
+        return await run_locked(args,out,start)
+
+
+async def run_locked(args,out,start):
+    wide=getattr(args,'experiment','local')=='wide'
+    fine=getattr(args,'experiment','local')=='fine'
+    combined=getattr(args,'experiment','local')=='combined'
+    dust=getattr(args,'experiment','local')=='dust'
+    scale=getattr(args,'dust_scale',.5)
+    kernel=getattr(args,'pool_kernel',6)
+    experiment='dust' if dust else 'combined' if combined else 'fine' if fine else 'wide' if wide else 'local'
+    previous_root=resolve(combined_output(3) if dust else FINE_OUTPUT if combined else WIDE_OUTPUT if fine else WIDE_PREVIOUS if wide else PREVIOUS)
+    if combined and read(previous_root/'inputs.json')['renderer']!=render_dependencies():
+        raise ValueError('cached_renderer_changed')
+    rollback = resolve(ROLLBACK)
+    config = BatchConfig(backgrounds='.',output=str(out),offline=True,render_device=args.device,
+                         photo_style='dusty_scrap',max_iterations=0)
+    cache = resolve(config.cache)
+    catalog = load_catalog();hashes = {k:v['mesh_hash'] for k,v in catalog.items() if v['available']}
+    if hashes!=read(rollback/'validation.json')['source_hashes']:
+        raise ValueError('source_models_changed')
+    rows = [r for r in read(rollback/'cases.json') if r['asset_id'] in ASSETS]
+    backgrounds = {r['background'] for r in rows}
+    if len(rows)!=10 or len(backgrounds)!=2 or {(r['asset_id'],r['background']) for r in rows}!={
+            (asset,bg) for asset in ASSETS for bg in backgrounds}:
+        raise ValueError('expected_five_by_two_frozen_cohort')
+    history = {int(r['job_id'].split('-')[0]):r for r in records(resolve(BASELINE))}
+    passes = {r['number']:frozen_passes(r,history,resolve(SIZED),cache) for r in rows}
+    previous = {r['number']:r for r in read(previous_root/'results.json')}
+    comparison_rows={r['number']:r for r in read(resolve(COMBINED_OUTPUT)/'results.json')} if combined and kernel!=6 else {}
+    pool_levels=(3,) if dust else (kernel,) if combined else FINE_POOL if fine else WIDE_POOL if wide else POOL
+    fog_levels=(.35,) if combined or dust else FINE_FOG if fine else WIDE_FOG if wide else FOG
+    inputs = {'cohort':file_hash(rollback/'cases.json'),'pool':pool_levels,
+        'fog':fog_levels,'profile':PROFILE,'experiment':experiment,
+        'device':args.device,'renderer':render_dependencies(),'sources':{name:file_hash(HERE/name) for name in
+        (Path(__file__).name,'display_batch/compose.py','display_batch/local.py','display_batch/local_light.py',
+         'display_batch/photography.py','display_batch/surface_maps.py','validate_display_gradients.py','display_batch/wide_trial.py')},
+        'passes':{str(i):v[3] for i,v in passes.items()},'previous':file_hash(previous_root/'results.json')}
+    if fine:inputs['sources']['display_batch/global_light.py']=file_hash(HERE/'display_batch/global_light.py')
+    if dust:
+        from display_batch.surface_dust_trial import dust_profile
+        inputs['profile']=dust_profile(scale)
+        for name in ('display_batch/global_light.py','display_batch/surface_dust_trial.py'):
+            inputs['sources'][name]=file_hash(HERE/name)
+        inputs['user_confirmed_style']={'pool_kernel':3,'fog_extra':.35}
+    if combined:
+        for name in ('display_batch/global_light.py','display_batch/combined_trial.py'):
+            inputs['sources'][name]=file_hash(HERE/name)
+        if comparison_rows:inputs['pool_comparison']=file_hash(resolve(COMBINED_OUTPUT)/'results.json')
+    inputs = json.loads(json.dumps(inputs))
+    if (out/'inputs.json').is_file() and read(out/'inputs.json')!=inputs:
+        raise ValueError('frozen_inputs_changed_use_new_directory')
+    atomic_json(out/'inputs.json',inputs)
+    run_id = time.time_ns()
+    vision = Vision(config,cache/'vision',out/f'usage-{run_id}.json')
+    scenes = Scenes(cache,vision)
+    worker = Blender(out/f'worker-{run_id}',args.device);renders = RenderCache(cache,worker)
+    cases,reused = [],0
+    try:
+        for row in sorted(rows,key=lambda r:(int(r['asset_id']),r['number'])):
+            number = row['number'];folder = out/'cases'/f'{number:02d}';folder.mkdir(parents=True,exist_ok=True)
+            try:
+                if file_hash(row['image'])!=row['image_hash'] or file_hash(row['background'])!=row['background_hash']:
+                    raise ValueError('original_image_changed')
+                asset = read(cache/'assets'/row['asset_signature']/'result.json')
+                if asset['mesh_hash']!=hashes[row['asset_id']]:raise ValueError('asset_metadata_changed')
+                row['pose']['material_classes'] = asset['semantic']['material_classes']
+                if (folder/'result.json').is_file():
+                    case = read(folder/'result.json')
+                    if any(file_hash(v['image'])!=v['image_hash'] for v in frames(case).values()):
+                        raise ValueError('saved_png_changed')
+                    reused += 1
+                else:
+                    scene = await scenes.prepare(row['background'])
+                    source,archived,shadow_hash,_ = passes[number]
+                    masks = placement_masks(scene,row['pose'],source,row['archived_window'],archived,row['baseline']['edit_bounds'])
+                    environment,samples = sample_environment(scene,row['pose'],local=True)
+                    if dust:
+                        from display_batch.surface_dust_trial import compose_surface_dust,frozen_environment
+                        lighting=frozen_environment(scene,row,environment,previous[number])
+                        rendered=None
+                        if row['asset_id']!='13':
+                            rendered=await render_fixed(row,asset,scene,source,archived,renders,cache,lighting,masks,
+                                                        local=True,matte_profile=dust_profile(scale))
+                        case=await asyncio.to_thread(compose_surface_dust,folder,row,scene,source,archived,shadow_hash,
+                            environment,samples,masks,previous[number],lighting,rendered,scale)
+                    elif combined:
+                        from display_batch.combined_trial import compose_combined
+                        case=await asyncio.to_thread(compose_combined,folder,row,scene,source,archived,shadow_hash,
+                            environment,samples,masks,previous[number],kernel,
+                            comparison_rows[number]['groups']['combined'][-1] if comparison_rows else None)
+                    elif wide or fine:
+                        from display_batch.wide_trial import compose_wide
+                        mean_env,light_samples=estimate_local_light(scene,row['pose'],environment,statistic='mean',margin_scale=1.75)
+                        if fine:
+                            from display_batch.global_light import estimate_global_mean
+                            global_env,light_samples=estimate_global_mean(scene,mean_env)
+                            planned=(('global',global_env),)
+                        else:
+                            probe_env=reconstruct_probe(mean_env,row['pose'])
+                            planned=(('mean',mean_env),('probe',probe_env))
+                        variants={}
+                        for label,env in planned:
+                            rendered=await render_fixed(row,asset,scene,source,archived,renders,cache,env,masks,local=True)
+                            variants[label]=(env,rendered)
+                        case=await asyncio.to_thread(compose_wide,folder,row,scene,source,archived,shadow_hash,
+                            variants,environment,samples,light_samples,masks,previous[number],pool_levels,fog_levels,experiment)
+                    else:
+                        new_env,light_samples = estimate_local_light(scene,row['pose'],environment)
+                        old_render = None
+                        if row['asset_id']!='13':
+                            old_render = await render_fixed(row,asset,scene,source,archived,renders,cache,environment,masks)
+                        light_render = await render_fixed(row,asset,scene,source,archived,renders,cache,new_env,masks,local=True)
+                        case = await asyncio.to_thread(compose_all,folder,row,scene,source,archived,shadow_hash,
+                            old_render,light_render,environment,samples,new_env,light_samples,masks,previous[number])
+            except (ValueError,OSError,RuntimeError,cv2.error) as error:
+                case = {k:row[k] for k in ('number','asset_id','name','background')}
+                case.update(status='failed',error=str(error))
+            cases.append(case)
+            print(json.dumps({'sample':number,'status':case['status'],'error':case.get('error')},ensure_ascii=False),flush=True)
+    finally:
+        await worker.close();await vision.close()
+    if hashes!={k:file_hash(v['mesh']) for k,v in catalog.items() if v['available']}:
+        raise ValueError('source_model_changed')
+    complete = [c for c in cases if c['status']=='review']
+    all_frames = {p:v for c in complete for p,v in frames(c).items()}
+    summary = {'cases_pass':len(complete),'full_frames':len(all_frames),'experiment':experiment,
+        'new_pngs':sum(Path(p).is_relative_to(out) for p in all_frames),'source_models':len(hashes),
+        'render_counts':dict(renders.totals),'timings':dict(renders.timings),
+        'seconds':round(time.monotonic()-start,3),'composition_cache_hits':reused,'cost_total':cumulative(out)}
+    if combined:summary['pool_kernel']=kernel
+    if dust:summary['surface_dust_scale']=scale
+    atomic_json(out/f'run-{run_id}.json',summary)
+    runs = [read(p) for p in out.glob('run-*.json')]
+    ledger = {'runs':len(runs),'seconds':sum(r['seconds'] for r in runs),'cost_total':cumulative(out),
+        'render_counts':{k:sum(r['render_counts'].get(k,0) for r in runs) for k in
+                         ('object_renders','with_shadow_renders','without_shadow_renders','object_hits','asset_imports')},
+        'timings':{k:sum(r['timings'].get(k,0) for r in runs) for k in
+                   ('object_seconds','with_shadow_seconds','without_shadow_seconds','asset_import_seconds')},
+        'local_compute_price':None,'comparison_only':True}
+    # Repair attempts remain in their own directories; carry their actual cost forward.
+    saved_ledger=read(out/'cost-ledger.json') if (out/'cost-ledger.json').is_file() else {}
+    prior_paths=getattr(args,'cost_prior',[]) or [p['output'] for p in saved_ledger.get('prior_attempts',[])]
+    prior=[]
+    for path in dict.fromkeys(str(resolve(p)) for p in prior_paths):
+        if resolve(path)==out:raise ValueError('cost_prior_cannot_reference_current_output')
+        entry=read(resolve(path)/'cost-ledger.json')
+        total=entry.get('task_totals',entry)
+        prior.append({'output':path,**{k:total[k] for k in ('seconds','render_counts','cost_total')}})
+    if prior:
+        totals=[ledger,*prior]
+        costs=[v['cost_total'] for v in totals]
+        task_cost={**ledger['cost_total'],
+            **{k:sum(v.get(k,0) for v in costs) for k in
+               ('actual_requests','reported_tokens','unpriced_or_unreported_calls','estimated_api_min','estimated_api_max')},
+            'complete':all(v.get('complete',False) for v in costs)}
+        ledger.update(prior_attempts=prior,task_totals={'seconds':sum(v['seconds'] for v in totals),
+            'render_counts':{k:sum(v['render_counts'].get(k,0) for v in totals) for k in ledger['render_counts']},
+            'cost_total':task_cost})
+    atomic_json(out/'cost-ledger.json',ledger);atomic_json(out/'summary.json',summary);atomic_json(out/'results.json',cases)
+    report(out,cases,summary)
+    return summary
+
+
+if __name__=='__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--out')
+    parser.add_argument('--experiment',choices=('local','wide','fine','combined','dust'),default='local')
+    parser.add_argument('--pool-kernel',type=int,choices=range(1,65),default=6,metavar='1..64',
+                        help='combined 模式的均匀池化格大小，默认 6')
+    parser.add_argument('--dust-scale',type=float,default=.5,help='dust 模式的表面粉尘覆盖倍率，默认 0.5')
+    parser.add_argument('--cost-prior',action='append',default=[],help='将既有尝试的成本账本计入本轮总成本')
+    parser.add_argument('--device',choices=('OPTIX','CUDA','CPU'),default='OPTIX')
+    result = asyncio.run(run(parser.parse_args()))
+    print(json.dumps(result,ensure_ascii=False))
+    raise SystemExit(int(result['cases_pass']!=10))
