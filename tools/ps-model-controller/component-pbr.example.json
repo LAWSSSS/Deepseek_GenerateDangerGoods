@@ -274,7 +274,8 @@
           "package": "cast_steel",
           "oxide": "iron_oxide",
           "wear": 0.93,
-          "relief_gain": 0.73
+          "relief_gain": 0.73,
+          "oxide_spread": 0.86
         },
         {
           "parts": [
@@ -337,7 +338,8 @@
           "oxide": "iron_oxide",
           "wear": 0.52,
           "parent_roughness": 0.43,
-          "relief_gain": 0.77
+          "relief_gain": 0.77,
+          "oxide_spread": 0.82
         },
         {
           "parts": [
@@ -358,7 +360,8 @@
           "oxide": "iron_oxide",
           "wear": 0.75,
           "paint_loss_um": 26,
-          "scuff_strength": 0.66
+          "scuff_strength": 0.66,
+          "oxide_spread": 0.77
         }
       ],
       "evidence": {
@@ -433,7 +436,8 @@
           "oxide": "iron_oxide",
           "wear": 0.94,
           "paint_loss_um": 26,
-          "scuff_strength": 0.77
+          "scuff_strength": 0.77,
+          "oxide_spread": 0.98
         },
         {
           "parts": [
@@ -518,7 +522,8 @@
           "package": "cast_steel",
           "oxide": "iron_oxide",
           "wear": 0.4,
-          "parent_roughness": 0.49
+          "parent_roughness": 0.49,
+          "oxide_spread": 0.86
         },
         {
           "parts": [
@@ -565,7 +570,8 @@
           "wear": 0.84,
           "preserve_print": "white_on_red",
           "paint_loss_um": 23,
-          "scuff_strength": 0.81
+          "scuff_strength": 0.81,
+          "oxide_spread": 0.97
         },
         {
           "parts": [
@@ -579,7 +585,8 @@
           "oxide": "iron_oxide",
           "wear": 0.75,
           "paint_loss_um": 23,
-          "scuff_strength": 0.64
+          "scuff_strength": 0.64,
+          "oxide_spread": 0.92
         },
         {
           "parts": [

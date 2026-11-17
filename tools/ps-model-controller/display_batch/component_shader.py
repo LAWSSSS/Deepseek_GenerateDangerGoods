@@ -87,6 +87,19 @@ def machining_highlights(tree, principled, profile):
     assign(tree, tangent.outputs[0], principled.inputs['Tangent'])
 
 
+def oxide_spread_field(tree, donor_mask, coarse, cavity, coating_wear):
+    """Extend oxide in mottled patches, with paint breach and recess bias."""
+    brown = ramp(tree, donor_mask, .045, 3.6)
+    clusters = ramp(tree, add(tree, coarse, mul(tree, cavity, .47)), .34, 3.9)
+    spread = mul(tree, brown, clusters)
+    if coating_wear is not None:
+        breaches = mul(tree, ramp(tree, coating_wear, .025, 3.8), 1.34)
+        recesses = mul(tree, cavity, .80)
+        spots = mul(tree, ramp(tree, coarse, .445, 4.), .80)
+        spread = mul(tree, spread, bounded(tree, add(tree, add(tree, breaches, recesses), spots)))
+    return spread
+
+
 def response(tree, tag, fields, spec, size_m, source_normal, controls, *, region=None, film_loss=None,
              scuff=None):
     region = region or {}
@@ -216,6 +229,10 @@ def finish_surface(material, shader, finish, strength):
             edge = add(tree, mul(tree, paint, 1.8), mul(tree, cavity, .32))
             rim = mul(tree, ramp(tree, coarse, .57, 4.5), .94)
             oxide_cue = mul(tree, oxide_cue, bounded(tree, add(tree, edge, rim)))
+        if amount := region.get('oxide_spread', 0.):
+            coating_wear = pack['wear'] if 'substrate' in region else None
+            expanded = oxide_spread_field(tree, oxide_pack['wear'], coarse, cavity, coating_wear)
+            oxide_cue = math_node(tree, 'MAXIMUM', oxide_cue, mul(tree, expanded, amount))
         rust = bounded(tree, mul(tree, oxide_cue, wear * controls.get('oxide_gain', 1.)), 0., .98)
         surface = layer_mix(tree, 'Component dielectric iron oxide', surface, rust_surface, rust)
         metallic = mul(tree, metallic, math_node(tree, 'SUBTRACT', 1., rust))

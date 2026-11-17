@@ -88,9 +88,11 @@ def validate(reference, base=None):
         number(region.get('wear', 1.), 0., 1., 'wear')
         for field, lo, hi in (('parent_roughness', .08, .95), ('relief_gain', 0., 1.),
                               ('paint_loss_um', 0., 40.), ('scuff_strength', 0., 1.),
-                              ('source_roughness_mix', 0., .75)):
+                              ('source_roughness_mix', 0., .75), ('oxide_spread', 0., 1.)):
             if field in region:
                 number(region[field], lo, hi, field)
+        if region.get('oxide_spread', 0.) and not oxidized:
+            raise ValueError('Oxide spread requires an audited ferrous oxide layer')
         if region.get('paint_loss_um', 0.) and not steel:
             raise ValueError('Paint film relief requires a separate underlying steel layer')
         if region.get('scuff_strength', 0.) and not steel:

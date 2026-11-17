@@ -55,6 +55,21 @@ class ComponentPbrTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'paint_loss_um'):
                 validate(payload, base)
 
+    def test_oxide_spread_is_bounded_and_requires_an_existing_oxide_layer(self):
+        with TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            payload = self.fixture(base)
+            coated, rubber = payload['component_regions']
+            coated['oxide_spread'] = .85
+            self.assertEqual(validate(payload, base)['component_regions'][0]['oxide_spread'], .85)
+            rubber['oxide_spread'] = .4
+            with self.assertRaisesRegex(ValueError, 'requires an audited ferrous oxide layer'):
+                validate(payload, base)
+            rubber.pop('oxide_spread')
+            coated['oxide_spread'] = 1.3
+            with self.assertRaisesRegex(ValueError, 'oxide_spread outside'):
+                validate(payload, base)
+
     def test_snapshot_detects_changed_rubber_map(self):
         with TemporaryDirectory() as tmp:
             base = Path(tmp)
