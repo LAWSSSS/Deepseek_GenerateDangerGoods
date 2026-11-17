@@ -1,0 +1,98 @@
+{
+  "version": "reference-mesh-detail-v1",
+  "coordinate_frame": "normalized-render-mesh",
+  "assets": {
+    "1": {
+      "operations": [
+        {
+          "kind": "thread",
+          "part": "Tapered blue bonnet",
+          "center_xy": [0, -0.052604],
+          "span_z": [0.285, 0.411],
+          "core_profile": [
+            [0.272917, 0.040548],
+            [0.420833, 0.033333]
+          ],
+          "pitch": 0.0075,
+          "height": 0.00215
+        }
+      ],
+      "detail_view": {
+        "center": [0.0, -0.052604, 0.34],
+        "span": 0.215,
+        "direction": [1, 0.2, 0.15],
+        "up": [0, 0, 1]
+      }
+    },
+    "25": {
+      "operations": [
+        {
+          "kind": "bushing",
+          "part": "base_bushing",
+          "center_yz": [-0.409366, -0.035498],
+          "half_x": 0.052367,
+          "inner": 0.03625,
+          "outer": 0.043303,
+          "bevel": 0.00081,
+          "groove": 0.00017
+        },
+        {
+          "kind": "bushing",
+          "part": "rod_bushing",
+          "center_yz": [0.42145, -0.035498],
+          "half_x": 0.050352,
+          "inner": 0.03122,
+          "outer": 0.037261,
+          "bevel": 0.0008,
+          "groove": 0.00017
+        }
+      ],
+      "detail_view": {
+        "center": [0.0, -0.41, -0.037],
+        "span": 0.238,
+        "direction": [1, 0.28, 0.19],
+        "up": [0, 0, 1]
+      }
+    },
+    "33": {
+      "operations": [
+        {
+          "kind": "shoulder",
+          "part": "body",
+          "seam": "body_shoulder_seam",
+          "height_profile": [
+            [0.126, 0.126],
+            [0.135171, 0.1972],
+            [0.13731, 0.2015],
+            [0.139442, 0.2031],
+            [0.1551, 0.2178],
+            [0.1729, 0.2301],
+            [0.1907, 0.2407],
+            [0.20671, 0.2479],
+            [0.22095, 0.2527],
+            [0.23341, 0.2563],
+            [0.24587, 0.2586],
+            [0.25477, 0.2602],
+            [0.25981, 0.26128],
+            [0.26128, 0.26167],
+            [0.261885, 0.261885]
+          ]
+        },
+        {
+          "kind": "gauge",
+          "center": [0.058, 0.03271, 0.354],
+          "normal": [1, 0, 0.16],
+          "radius": 0.0355,
+          "dial_pixels_1080_by_720": [185.5, 56.5, 9.5, 9.7],
+          "reference_sha256": "14d2f409804aa4cdcd78eb0b032187633717b31314975ffc57510aa21d87333d"
+        }
+      ],
+      "detail_view": {
+        "center": [0.038, 0.04, 0.334],
+        "span": 0.222,
+        "direction": [1, 0.08, 0.18],
+        "up": [0, 0, 1]
+      }
+    }
+  }
+}

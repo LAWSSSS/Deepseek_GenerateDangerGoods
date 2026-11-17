@@ -23,18 +23,21 @@ def cameras(registration):
             'Right':(-side,-axial), 'Top':(-axial,-front), 'Bottom':(axial,front)}
 
 
-def rig(scene, subject, outward, up):
+def rig(scene, subject, outward, up, focus=None):
     right = up.cross(outward)
-    points = [vertex.co for vertex in subject.data.vertices]
     axes = (right, up, outward)
-    bounds = [[min(p.dot(a) for p in points),max(p.dot(a) for p in points)] for a in axes]
-    center = sum((a * ((lo+hi)*.5) for a,(lo,hi) in zip(axes,bounds)), Vector((0,0,0)))
-    extent = max(hi-lo for lo,hi in bounds[:2])
+    if focus:
+        center, span = Vector(focus['center']), focus['span']
+    else:
+        points = [vertex.co for vertex in subject.data.vertices]
+        bounds = [[min(p.dot(a) for p in points),max(p.dot(a) for p in points)] for a in axes]
+        center = sum((a * ((lo+hi)*.5) for a,(lo,hi) in zip(axes,bounds)), Vector((0,0,0)))
+        span = 1.16 * max(hi-lo for lo,hi in bounds[:2])
     camera = scene.camera
     camera.location = center + 5. * outward
     camera.rotation_euler = Matrix(axes).transposed().to_euler()
     camera.data.type = 'ORTHO'
-    camera.data.ortho_scale = 1.16 * extent
+    camera.data.ortho_scale = span
     for light in list(scene.objects):
         if light.type == 'LIGHT':
             bpy.data.objects.remove(light, do_unlink=True)
@@ -50,7 +53,7 @@ def rig(scene, subject, outward, up):
         light.rotation_euler = (center-light.location).to_track_quat('-Z','Y').to_euler()
 
 
-def render(candidate, views, output, resolution, expected_axis):
+def render(candidate, views, output, resolution, expected_axis, detail=None):
     bpy.ops.wm.open_mainfile(filepath=str(candidate))
     scene = bpy.context.scene
     objects = [obj for obj in scene.objects if obj.type == 'MESH']
@@ -88,7 +91,7 @@ def render(candidate, views, output, resolution, expected_axis):
     output.mkdir(parents=True, exist_ok=True)
     paths = []
     for name,(outward,up) in views.items():
-        rig(scene, subject, outward, up)
+        rig(scene, subject, outward, up, detail if name == 'Detail' else None)
         path = output / f'{name.lower()}.png'
         if path.exists():
             raise FileExistsError(path)
@@ -103,11 +106,13 @@ def main():
     parser.add_argument('--registration', type=Path, required=True)
     parser.add_argument('--candidates', type=Path, required=True)
     parser.add_argument('--baseline', type=Path)
+    parser.add_argument('--detail-recipe', type=Path, help='Also render the fixed close-up specified per asset')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--resolution', type=int, choices=(512,1024,2048), default=1024)
     parser.add_argument('--views', nargs='+', choices=('Front','Back','Left','Right','Top','Bottom'))
     args = parser.parse_args(sys.argv[sys.argv.index('--')+1:])
     assets = json.loads(args.registration.read_text(encoding='utf8'))['assets']
+    details = json.loads(args.detail_recipe.read_text(encoding='utf8'))['assets'] if args.detail_recipe else {}
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
     started = time.monotonic()
@@ -121,13 +126,20 @@ def main():
             outward, up = views[label]
             views[label] = (math.cos(pitch)*outward + math.sin(pitch)*up,
                             math.cos(pitch)*up - math.sin(pitch)*outward)
-        if args.baseline:
-            results.extend(render((args.baseline/aid/'candidate.blend').resolve(),
-                                  {'Front':views['Front']}, output/aid/'baseline', args.resolution, expected_axis))
+        prior_views = {'Front':views['Front']}
         if args.views:
             views = {name:views[name] for name in args.views}
+        detail = details.get(aid, {}).get('detail_view')
+        if detail:
+            direction = Vector(detail['direction']).normalized()
+            up = Vector(detail['up'])
+            up = (up - direction.dot(up)*direction).normalized()
+            views['Detail'] = prior_views['Detail'] = (direction, up)
+        if args.baseline:
+            results.extend(render((args.baseline/aid/'candidate.blend').resolve(),
+                                  prior_views, output/aid/'baseline', args.resolution, expected_axis, detail))
         results.extend(render((args.candidates/aid/'candidate.blend').resolve(), views, output/aid, args.resolution,
-                              expected_axis))
+                              expected_axis, detail))
     (output/'render-log.json').write_text(json.dumps({'files':results, 'resolution':args.resolution,
         'renders':len(results), 'seconds':round(time.monotonic()-started,3),'api_calls':0}, ensure_ascii=False, indent=2),
         encoding='utf8')

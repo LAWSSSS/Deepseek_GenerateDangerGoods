@@ -18,6 +18,17 @@
 
 降采样预检使用 `--resolution 512`。`render_six_view_review.py --baseline <上一版候选目录>` 会按同样的相机和灯光增加每件的上一版正面。候选重开校验包含所有对位图集的散列、材质连接以及源几何和 UV 的指纹。
 
+### 局部细网格
+
+`refine_six_view_meshes.py` 从已验证的六视图 `.blend` 生成独立几何候选。[示例配置](../tools/ps-model-controller/six-view-mesh-detail.example.json) 绑定零件、归一化坐标和原视图散列。01 增加连续螺纹，25 以实测模型孔径重做两侧钢衬套的细圆弧和唇口，33 缩短筒肩并增加从参考正面取表盘的压力表。细分与补件限定在显式部位。 [Blender BMesh 局部细分](https://docs.blender.org/api/4.5/bmesh.ops.html#bmesh.ops.subdivide_edges)
+
+```powershell
+& work/blender45/blender-4.5.3-windows-x64/blender.exe -b --factory-startup --python-exit-code 1 --python tools/ps-model-controller/refine_six_view_meshes.py -- --baseline outputs/six-view-models --recipe tools/ps-model-controller/six-view-mesh-detail.example.json --output outputs/six-view-fine-mesh
+& work/blender45/blender-4.5.3-windows-x64/blender.exe -b --factory-startup --python-exit-code 1 --python tools/ps-model-controller/render_six_view_review.py -- --registration tools/ps-model-controller/six-view-oxide.example.json --candidates outputs/six-view-fine-mesh --baseline outputs/six-view-models --detail-recipe tools/ps-model-controller/six-view-mesh-detail.example.json --output outputs/six-view-fine-mesh/review-views --views Front Left Top
+```
+
+检查比对未编辑面的位置和 UV，回填其原法线，重开后核对贴图像素来源和原材质图片字节。两处衬套都用穿孔射线验证，新增表盘视线用局部射线检查原阀头遮挡。螺距、筒肩曲线和表壳尺寸为外观估计。几何候选用于外观点评，现场接触和投影需另行复验。
+
 ## 准备与绑定
 
 `prepare_reference_textures.py` 有两种输入。普通六视图提取用于审计局部样本及结构污染风险；`--flat-master` 用于已经检查过的无结构表面母图。不能因为六视图提取有输出文件就自动当作合格纹理。
