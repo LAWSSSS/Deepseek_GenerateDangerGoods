@@ -1,0 +1,61 @@
+/* Shared navigation for the three local workbenches. */
+:root {
+  color-scheme: dark;
+  accent-color: #8edbb9;
+  scrollbar-color: #4c5c60 #151d20;
+}
+.workbench-header, .workbench-header * { box-sizing: border-box; }
+header.workbench-header {
+  min-height: 62px;
+  height: auto;
+  padding: 0 clamp(18px, 3vw, 48px);
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: clamp(26px, 5vw, 74px);
+  background: #151e20;
+  color: #e8f1ee;
+  border: 0;
+  border-bottom: 1px solid #364346;
+  font: 14px/1.45 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+.workbench-header .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 13px;
+  font-size: 16px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+.workbench-header .brand::before {
+  content: "";
+  width: 24px;
+  height: 27px;
+  background: #9be5c0;
+  clip-path: polygon(50% 0, 96% 23%, 50% 47%, 4% 23%, 50% 0,
+    50% 35%, 96% 12%, 96% 27%, 50% 51%, 4% 28%, 4% 43%, 50% 67%,
+    96% 43%, 96% 58%, 50% 82%, 4% 58%, 4% 73%, 50% 97%, 96% 73%, 96% 87%, 50% 100%, 0 74%, 0 23%);
+}
+.workbench-header nav { display: flex; align-items: stretch; gap: clamp(12px, 2.5vw, 40px); flex-wrap: nowrap; }
+.workbench-header nav a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  border-bottom: 2px solid transparent;
+  color: #b2c1bf;
+  font-size: 14px;
+  text-decoration: none;
+}
+.workbench-header nav a:hover { color: #e5f8ef; }
+.workbench-header nav a[aria-current="page"] { color: #a6e9c8; border-bottom-color: #97e1bb; font-weight: 650; }
+:focus-visible { outline: 2px solid #a9f5d2; outline-offset: 3px; }
+::selection { background: #a3e3c3; color: #152820; }
+[hidden] { display: none !important; }
+@media (max-width: 640px) {
+  header.workbench-header { display: grid; gap: 0; padding: 12px 18px 0; }
+  .workbench-header .brand { font-size: 15px; }
+  .workbench-header .brand::before { width: 19px; height: 22px; }
+  .workbench-header nav { gap: 22px; }
+  .workbench-header nav a { min-height: 42px; font-size: 13px; }
+}

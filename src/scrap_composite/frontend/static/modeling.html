@@ -3,48 +3,74 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>建模工作台</title>
+  <title>建模工作台 · 废钢场景合成</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/modeling.css">
+  <link rel="stylesheet" href="/static/workbench.css">
 </head>
-<body>
-  <header><strong>建模工作台</strong><nav><a href="/">手动摆放</a> <a href="/batch">批量生成</a></nav></header>
+<body class="modeling-page">
+  <header class="workbench-header">
+    <div class="brand">废钢场景合成</div>
+    <nav aria-label="工作台导航"><a href="/">放置工作台</a><a href="/batch">批量生成</a><a href="/modeling" aria-current="page">建模工作台</a></nav>
+  </header>
   <main class="modeling-workbench">
-    <section class="modeling-panel">
-      <h1>物品与素材</h1>
-      <form id="build">
-        <label>物品<select name="asset_id" id="assets"><option value="">新增物品</option></select></label>
-        <label id="name-field">新物品名称<input name="name" id="asset-name" maxlength="100" required></label>
-        <label>建模操作<select id="operation"><option value="rebuild">导入或重建</option><option value="retexture">重贴图</option><option value="verify">重新验证</option></select></label>
-        <label>主素材<input type="file" name="source" accept=".png,.jpg,.jpeg,.webp,.glb,.blend" id="source"></label>
-        <label>Blender 主体<input id="subject" placeholder="object:名称 或 collection:名称"></label>
-        <label>长轴尺寸 (mm)<input type="number" id="major-mm" min="0.01" step="any"></label>
-        <label>尺寸来源<input id="dimension-source" maxlength="500" placeholder="铭牌、实测记录或说明"></label>
-        <label>部件材质库<input id="material-library" placeholder="本地已验证材质库 JSON 路径"></label>
-        <details class="view-fields"><summary>添加六视图参考</summary>
-          <div>
-            <label>正面<input type="file" name="front" accept="image/png,image/jpeg,image/webp"></label>
-            <label>背面<input type="file" name="back" accept="image/png,image/jpeg,image/webp"></label>
-            <label>左侧<input type="file" name="left" accept="image/png,image/jpeg,image/webp"></label>
-            <label>右侧<input type="file" name="right" accept="image/png,image/jpeg,image/webp"></label>
-            <label>顶面<input type="file" name="top" accept="image/png,image/jpeg,image/webp"></label>
-            <label>底面<input type="file" name="bottom" accept="image/png,image/jpeg,image/webp"></label>
+    <div class="modeling-title">
+      <h1>建模工作台</h1>
+      <p>用实物照片或三维文件创建候选，核对模型后发布到物品库。</p>
+    </div>
+    <div class="modeling-columns">
+      <section class="modeling-panel" aria-labelledby="materials-heading">
+        <h2 id="materials-heading">物品与素材</h2>
+        <form id="build">
+          <div class="modeling-pair">
+            <label>物品<select name="asset_id" id="assets"><option value="">新增物品</option></select></label>
+            <label>建模操作<select id="operation"><option value="rebuild">导入或重建</option><option value="retexture">重贴图</option><option value="verify">重新验证</option></select></label>
           </div>
-        </details>
-        <button id="submit" type="submit">创建候选</button>
-      </form>
-    </section>
-    <section class="modeling-panel">
-      <h2>候选与发布</h2>
-      <label>建模记录<select id="history"></select></label>
-      <p id="message" role="status" aria-live="polite"></p>
-      <img id="board" class="modeling-board" alt="候选模型完整视图" hidden>
-      <div id="downloads" class="modeling-actions"></div>
-      <div class="modeling-actions"><button id="resume" type="button" hidden>继续建模</button>
-      <button id="publish" type="button" hidden>发布此版本</button></div>
-      <details id="verification" hidden><summary>结构与材质检查</summary><pre id="checks"></pre></details>
-    </section>
+          <label id="name-field">新物品名称<input name="name" id="asset-name" maxlength="100" placeholder="例如：阀门" required></label>
+          <label>主素材<input type="file" name="source" accept=".png,.jpg,.jpeg,.webp,.glb,.blend" id="source" aria-describedby="source-help" required></label>
+          <p id="source-help" class="field-help">支持 PNG、JPG、WebP、GLB 和 Blender 文件。</p>
+          <div class="modeling-pair">
+            <label>长轴尺寸（mm）<input type="number" id="major-mm" min="0.01" step="any" placeholder="选填"></label>
+            <label>尺寸来源<input id="dimension-source" maxlength="500" placeholder="铭牌或实测记录"></label>
+          </div>
+          <details class="modeling-disclosure" id="material-settings">
+            <summary>Blender 主体与部件材质</summary>
+            <div class="modeling-extra">
+              <label>Blender 主体<input id="subject" maxlength="250" placeholder="object:名称 或 collection:名称"></label>
+              <label>部件材质库<input id="material-library" placeholder="仓库内已验证的材质库 JSON 路径"></label>
+            </div>
+          </details>
+          <details class="modeling-disclosure view-fields"><summary>六视图参考</summary>
+            <div class="modeling-extra modeling-pair">
+              <label>正面<input type="file" name="front" accept="image/png,image/jpeg,image/webp"></label>
+              <label>背面<input type="file" name="back" accept="image/png,image/jpeg,image/webp"></label>
+              <label>左侧<input type="file" name="left" accept="image/png,image/jpeg,image/webp"></label>
+              <label>右侧<input type="file" name="right" accept="image/png,image/jpeg,image/webp"></label>
+              <label>顶面<input type="file" name="top" accept="image/png,image/jpeg,image/webp"></label>
+              <label>底面<input type="file" name="bottom" accept="image/png,image/jpeg,image/webp"></label>
+            </div>
+          </details>
+          <button id="submit" type="submit">创建候选</button>
+          <p id="build-feedback" class="modeling-feedback" role="status"></p>
+        </form>
+      </section>
+      <section class="modeling-panel candidate-panel" aria-labelledby="candidate-heading">
+        <div class="modeling-section-title"><h2 id="candidate-heading">候选与发布</h2><span id="candidate-status" class="candidate-status" hidden></span></div>
+        <label>建模记录<select id="history" disabled><option value="">暂无建模记录</option></select></label>
+        <div class="modeling-canvas">
+          <div class="modeling-placeholder" id="preview-placeholder">
+            <svg width="52" height="52" viewBox="0 0 52 52" fill="none" aria-hidden="true" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M26 8 42 17v18l-16 9-16-9V17Z"/><path d="m10 17 16 9 16-9M26 26v18"/><path d="m18 12.5 16 9" opacity=".55"/></svg>
+            <strong id="preview-title">尚无候选预览</strong>
+            <p id="preview-hint">创建候选或选择已有物品，查看模型的正面与斜侧视图。</p>
+          </div>
+          <img id="board" class="modeling-board" alt="候选模型的正面、斜侧面及已上传的参考视图" hidden>
+        </div>
+        <p id="message" class="modeling-feedback" role="status"></p>
+        <div id="downloads" class="modeling-downloads"></div>
+        <details class="modeling-disclosure" id="verification" hidden><summary>结构与材质检查</summary><pre id="checks"></pre></details>
+        <div class="modeling-actions"><button id="resume" type="button" hidden>继续建模</button><button id="publish" type="button" hidden>发布此版本</button></div>
+      </section>
+    </div>
   </main>
   <script type="module" src="/static/modeling.js"></script>
 </body>
