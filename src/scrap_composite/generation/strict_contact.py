@@ -5,7 +5,7 @@ import re
 import time
 from pathlib import Path
 import numpy as np
-from .common import signature, atomic_json, file_hash
+from .common import HERE, signature, atomic_json, file_hash
 from .metric_physics import VERSION, tolerances
 from .geometry import project
 from scrap_composite.photo_evidence import contradiction, physical_evidence_issue
@@ -100,7 +100,7 @@ async def simulate(asset,blender,matrices,receiver=None,normal=(0,0,1)):
     key=signature(VERSION,asset['physics_signature'],profile['signature'],matrices,receiver,normal,
                   file_hash(Path(__file__).with_name('metric_physics.py')),
                   file_hash(Path(__file__).with_name('contact_audit.py')),
-                  file_hash(Path(__file__).parents[1]/'blender_display_worker.py'))
+                  file_hash(HERE/'blender_display_worker.py'))
     path=Path(asset['folder'])/'metric-physics'/(key+'.json')
     if path.is_file():return {**json.loads(path.read_text(encoding='utf8')),'cache_hit':True}
     request={'geometry':asset['geometry'],'proxy':asset.get('proxy',str(Path(asset['folder'])/'collision.json')),

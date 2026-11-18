@@ -256,7 +256,6 @@ class StrictLoopTests(unittest.IsolatedAsyncioTestCase):
         candidates=[{'id':chr(65+i),'target_px':200,'score':3-i} for i in range(alternatives)]
         with patch('checks_display_batch.BatchConfig',side_effect=lambda **kw:original(**kw,contact_mode='strict')),\
              patch.object(Pipeline,'choose_placements',new=AsyncMock(return_value=(candidates,[]))),\
-             patch('display_batch.pipeline.file_hash',side_effect=lambda p:Path(p).stem),\
              patch('display_batch.pipeline.diagnostic'):
             return await LoopTests().run_loop(2,reviews,alternatives=alternatives)
 

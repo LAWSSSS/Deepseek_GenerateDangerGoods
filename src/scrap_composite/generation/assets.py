@@ -132,8 +132,12 @@ async def prepare(row, root, blender, vision,strict=False):
                               {'name':row['name'],'extents':reviewed['extents'],
                                'material_names':[m['name'] for m in reviewed['materials']]},previews)
     atomic_json(folder/'semantic.json',semantic.model_dump())
+    details = semantic.model_dump()
+    dimension = row.get('dimension')
+    if dimension:
+        details['major_mm'] = [dimension['major_mm']] * 2
     result={**row,'folder':str(folder),'geometry':str(geometry),'inspection':exported,
-            'semantic':semantic.model_dump(),'signature':key,'poses':[]}
+            'semantic':details,'signature':key,'poses':[]}
     if semantic.assembly in ('loose_parts','unknown'):
         result['reason']='assembly_relationship_unknown_or_loose'
         atomic_json(folder/('result-strict.json' if strict else 'result.json'),result);return result

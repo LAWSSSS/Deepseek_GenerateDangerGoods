@@ -1,7 +1,7 @@
 // Run with node checks_anchor.js. Geometry and final-pixel anchor regressions.
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import {groundReference, projectedReference, anchoredCenter} from './contact_anchor.js';
+import {groundReference, projectedReference, anchoredCenter} from '../../../src/scrap_composite/frontend/static/contact_anchor.js';
 
 const group = new THREE.Group();
 group.add(new THREE.Mesh(new THREE.BoxGeometry(1.35,.7,.5)));

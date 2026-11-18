@@ -50,7 +50,7 @@ class PlacementChecks(unittest.TestCase):
         response = self.client.get('/api/assets?view=placement')
         self.assertEqual(response.status_code, 200)
         rows = response.json()
-        self.assertEqual(len(rows), 44)
+        self.assertEqual(len(rows), 39)
         self.assertEqual([row['id'] for row in rows if row['number'] == 19],
                          [f'19-{index}' for index in range(1, 7)])
         self.assertTrue(all(row['available'] for row in rows))
@@ -66,7 +66,7 @@ class PlacementChecks(unittest.TestCase):
         self.assertEqual(len(baseline),39)
         self.assertEqual(sum(not r.get('reconstruction',{}).get('fidelity',{}).get('passed') for r in baseline),15)
         hidden={r['number'] for r in baseline if r.get('superseded_by_feedback')}
-        self.assertEqual({r['number'] for r in original},set(range(1,40))-hidden)
+        self.assertEqual({r['number'] for r in original},set(range(1,40))-hidden-{5,6,7,38,39})
         self.assertEqual(self.client.get('/api/assets',headers={'origin':'https://evil.example'}).status_code,403)
         self.assertEqual(self.client.get('/api/assets',headers={'host':'evil.example'}).status_code,403)
 

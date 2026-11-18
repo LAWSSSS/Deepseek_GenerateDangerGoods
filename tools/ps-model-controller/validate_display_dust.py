@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image
 from pydantic import Field
 
+from display_batch.rendering import source_path
 from display_batch.ai import ProviderUnavailable, Vision
 from display_batch.common import HERE, atomic_json, file_hash, load_catalog, resolve, signature
 from display_batch.compose import compose, cv2, sample_environment
@@ -279,7 +280,7 @@ async def run_locked(args, start, out, rollback, old, sized):
         row["pose"]["material_classes"] = asset["semantic"]["material_classes"]
     passes = {row["number"]: frozen_passes(row, history, sized, cache) for row in rows}
     inputs = {"cohort": file_hash(rollback / "cases.json"),
-              "sources": {name: file_hash(HERE / name) for name in
+              "sources": {name: file_hash(source_path(name)) for name in
                           (Path(__file__).name, "display_batch/compose.py", "display_batch/local.py",
                            "display_batch/photography.py")},
               "provider": file_hash(args.provider_config or HERE / "batch-config.example.json"),

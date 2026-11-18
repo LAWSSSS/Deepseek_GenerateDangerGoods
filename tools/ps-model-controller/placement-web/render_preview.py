@@ -83,7 +83,11 @@ def ambient_dome(scene, color, strength):
 request = json.loads(Path(sys.argv[sys.argv.index('--') + 1]).read_text(encoding='utf8'))
 scene = worker.setup_scene('CPU', 1024)
 scene.view_settings.view_transform = 'AgX'
-obj = worker.load_mesh(request['mesh'])
+if request.get('packed_subject'):
+    from blender_display_worker import append_packed_subject
+    obj = append_packed_subject(request['render_mesh'], request['packed_subject'], request['render_sha256'])
+else:
+    obj = worker.load_mesh(request['mesh'])
 points = worker.world_vertices(obj)
 low = Vector([min(p[i] for p in points) for i in range(3)])
 high = Vector([max(p[i] for p in points) for i in range(3)])

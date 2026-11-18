@@ -11,6 +11,7 @@ import time
 import numpy as np
 from PIL import Image
 
+from display_batch.rendering import source_path
 from display_batch.ai import Vision
 from display_batch.common import HERE, atomic_json, file_hash, load_catalog, resolve
 from display_batch.compose import compose, cv2, object_window, sample_environment, srgb, warp
@@ -308,7 +309,7 @@ async def run_locked(args, start, out):
         row["pose"]["material_classes"] = asset["semantic"]["material_classes"]
     inputs = {"cohort": file_hash(rollback / "cases.json"), "pool": list(POOL), "fog": list(FOG),
               "device": args.device, "renderer": render_dependencies(),
-              "sources": {name: file_hash(HERE / name) for name in
+              "sources": {name: file_hash(source_path(name)) for name in
                           (Path(__file__).name, "display_batch/compose.py", "display_batch/local.py",
                            "display_batch/photography.py", "display_batch/surface_maps.py")},
               "passes": {str(i): v[3] for i, v in passes.items()}}

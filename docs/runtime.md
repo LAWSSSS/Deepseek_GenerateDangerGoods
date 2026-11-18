@@ -17,9 +17,9 @@
 
 渲染环境使用控制器目录下的 `requirements-v2.txt` 和 `display-batch-requirements.txt`。依图形设备设置 `render_device` 为 `CPU`、`CUDA` 或 `OPTIX`。安装 Bootstrap 所需资源时，`setup_v2.ps1` 会校验分割和深度权重。已有 Windows 迁移包可以用 `setup_handoff.ps1` 初始化路径与共享环境，安装步骤需要该包的 `vendor/` 和 Blender 文件。
 
-主要入口和相对依赖如下。
+统一入口、发布和 Photoshop 参数见[建模与生成工作台](architecture.md)。以下命令为兼容入口。
 
-- `batch_display.py run` 执行批量 PNG 合成。`batch_display.py diagnose` 读取同一配置做离线诊断。
+- `batch_display.py run` 执行批量合成。`batch_display.py diagnose` 读取同一配置做离线诊断。
 - `placement-web/server.py` 启动本地工作台。`placement-web/review_viewer.py` 单独浏览本地模型库。
 - `python -m scrap_composite.photoshop_cli --help` 查询 Photoshop 导出选项。需要 Windows Photoshop 和本机 Photoshop MCP。
 - `python -m scrap_composite.knowledge_cli --help` 查询本地参数资料库的录入和查询选项。

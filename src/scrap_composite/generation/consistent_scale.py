@@ -25,11 +25,13 @@ def asset_profile(asset, factor=1.):
     previous = asset.get('physical_size', {})
     lo, hi = previous.get('source_interval_mm', asset['semantic']['major_mm'])
     measured = asset.get('measured_major_mm')
+    provided = asset.get('dimension')
     nominal = float(measured or math.sqrt(lo * hi))
     return {'version': VERSION, 'source_interval_mm': [lo, hi],
             'source_nominal_mm': nominal, 'nominal_mm': nominal * factor,
             'interval_mm': [lo * factor, hi * factor], 'user_factor': factor,
-            'basis': 'measured_asset_length' if measured else 'cached_semantic_geometric_midpoint',
+            'basis': 'measured_asset_length' if measured else ('user_supplied_length' if provided else 'cached_semantic_geometric_midpoint'),
+            **({'source':provided.get('source')} if provided else {}),
             'user_basis': 'explicit_user_size_preference_not_a_measurement',
             'status': 'pass' if measured and factor == 1 else 'unknown'}
 

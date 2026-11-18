@@ -7,6 +7,7 @@
   "count": 100,
   "seed": 20261110,
   "max_iterations": 2,
+  "photoshop_mode": "off",
   "render_device": "OPTIX",
   "cache": "work/display-batch-cache",
   "ai_concurrency": 2,

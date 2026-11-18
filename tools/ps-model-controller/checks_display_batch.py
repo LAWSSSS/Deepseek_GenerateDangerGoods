@@ -411,13 +411,13 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
             pipe.render=render
             candidates=[{'id':chr(65+i),'target_px':200,'score':3-i} for i in range(alternatives)]
             def compose(*args):
-                path=args[-1];Image.new('RGB',(12,12),({'scene':40,'darker':80,'cooler':100}.get(args[-3]['tone'],120),0,0)).save(path)
+                path=args[-1];Image.new('RGB',(12,12),({'scene':40,'darker':80,'cooler':100}.get(args[-3]['tone'],120),ord(args[-3]['candidate']),0)).save(path)
                 crop=path.with_suffix('.crop.jpg');Image.new('RGB',(12,12)).save(crop)
                 status='fail' if args[-3]['candidate'] in bad_ids else hard_pass
                 if isinstance(status,bool):status='pass' if status else 'fail'
                 return {'checks':{'support':{'status':status}},
                         'image':str(path),'crop':str(crop),'preview':str(crop),'measured_major_px':200}
-            with patch('display_batch.pipeline.choose_candidates',return_value=(candidates,[])),patch('display_batch.pipeline.compose',side_effect=compose):
+            with patch('scrap_composite.generation.placement.choose_candidates',return_value=(candidates,[])),patch('display_batch.pipeline.compose',side_effect=compose):
                 result=await pipe.job(job)
             calls=len(pipe.vision.calls);pipe.store.close()
             if result.get('image'):result['_copied_hash']=file_hash(result['image'])

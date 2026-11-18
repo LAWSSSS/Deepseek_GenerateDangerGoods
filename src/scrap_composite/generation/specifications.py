@@ -8,7 +8,9 @@ from .common import atomic_json, file_hash, signature, resolve
 from .schema import Strict
 
 VERSION = 'dimension-evidence-v1'
-CATALOG = Path(__file__).with_name('specification_catalog.json')
+from scrap_composite import data
+
+CATALOG = Path(data.__file__).with_name('specification_catalog.json')
 
 
 class Identification(Strict):
@@ -91,6 +93,11 @@ def profile(asset, identification, registry=None):
                       source_nominal_mm=value, interval_mm=[value,value], source_interval_mm=[value,value],
                       feature=row['feature'], source=source, reasons=[], dimensions=row.get('dimensions', {}))
         break
+    if result['status'] == 'unknown' and (provided := asset.get('dimension')):
+        length = provided['major_mm']
+        result.update(basis='user_supplied_length', nominal_mm=length, source_nominal_mm=length,
+                      interval_mm=[length,length], source_interval_mm=[length,length],
+                      source=provided.get('source'), reasons=['local_projection_or_dimension_evidence_unverified'])
     result['signature'] = signature(VERSION, asset['mesh_hash'], identity, catalog, result)
     return result
 

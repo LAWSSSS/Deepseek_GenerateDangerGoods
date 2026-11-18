@@ -4,7 +4,7 @@ from typing import Annotated, Literal, Union
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, create_model, model_validator
 
 
-from .inventory import STORAGE_TANK_IDS
+from scrap_composite.data.inventory import STORAGE_TANK_IDS
 
 
 class Strict(BaseModel):
@@ -77,6 +77,7 @@ class BatchConfig(Strict):
     backgrounds: str
     output: str
     assets: list[str] = Field(default_factory=list)
+    background_files: list[str] = Field(default_factory=list)
     excluded_assets: list[str] = Field(default_factory=lambda:sorted(STORAGE_TANK_IDS, key=int))
     asset_scale_factors: dict[str, Annotated[float, Field(ge=.1, le=2.)]] = Field(default_factory=lambda:{'31':.375,'33':.25})
     count: int = Field(default=100, ge=1, le=1000)
@@ -117,6 +118,7 @@ class BatchConfig(Strict):
     review_profile: Literal['legacy', 'photographer'] = 'legacy'
     knowledge_db: str | None = None
     prepare_photoshop: bool = False
+    photoshop_mode: Literal['off', 'always', 'on_issue'] = 'off'
     _requested: dict = PrivateAttr(default_factory=dict)
     _resolution_notes: dict = PrivateAttr(default_factory=dict)
 
@@ -137,6 +139,9 @@ class BatchConfig(Strict):
         photographer_workflow = self.review_profile == 'photographer' and 'workflow' not in self._requested
         if photographer_workflow:
             self.workflow = 'evidence_v1'
+        if self.photoshop_mode != 'off':
+            self.workflow = 'evidence_v1'
+            self.prepare_photoshop = True
         if self.review_profile == 'photographer':
             from importlib.util import find_spec
             if self.workflow != 'evidence_v1':
@@ -150,6 +155,8 @@ class BatchConfig(Strict):
             resolved, self._resolution_notes = evidence_settings(self.model_dump(), self.model_fields_set)
             if photographer_workflow:
                 self._resolution_notes['workflow'] = 'photographer review uses the structured workflow'
+            if self.photoshop_mode != 'off':
+                self._resolution_notes['workflow'] = 'Photoshop uses the verified composition layers'
             for field in ('integration_mode', 'camera_pipeline', 'support_geometry'):
                 setattr(self, field, resolved[field])
             self.effects = EffectSettings.model_validate(resolved['effects'])

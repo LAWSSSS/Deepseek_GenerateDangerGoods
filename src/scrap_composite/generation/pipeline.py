@@ -19,22 +19,27 @@ from .assets import prepare as prepare_asset
 from .common import ROOT, HERE, atomic_json, file_hash, load_catalog, resolve, signature, implementation_manifest
 from .estimated_scale import allows_estimate, prepare_preview_scale
 from .compose import compose, sample_environment
-from .scene import Scenes, choose_candidates, projection_geometry, fitted_masks, fit_checks
+from .scene import Scenes
+from .placement import Placement
 from .schema import (Review, FusionReview, EffectsReview, Probe, PHOTO_CONTROLS, StructureConfirmation, version_rank)
-from .pile import support_union, diagnostic, receiver_mesh
-from .geometry import contact_support
-from .store import Store
+from .pile import diagnostic, receiver_mesh
+from scrap_composite.data.store import Store
 from .worker import Blender, RenderUnavailable
 from .framing import edit_bounds, final_resolution
 from .rendering import RenderCache, RENDER_VERSION
-from .review import allowed_actions, evidence_status, fusion_actions, inspect, repair, PLACEMENT_DEFECTS
+from .review import allowed_actions, evidence_status, PLACEMENT_DEFECTS
+from .execution import PhotoshopExecutor, PhotoshopUnavailable, needs_photoshop, photoshop_plan, pixel_hash
+from .gate.review import review_frame, review_record
+from .gate.feedback import geometry_issue, next_frame
 from .materials import material_kind, SURFACE_DUST
 from .atmosphere import Atmospheres
 from .costs import cumulative, estimate, tariff, label as cost_label
-from .policy import asset_id, resize_candidate
-from .inventory import STORAGE_TANK_IDS
+from .policy import asset_id
+from scrap_composite.data.inventory import STORAGE_TANK_IDS
 from .effects import parameters as effect_parameters, render_identity
 from .reference_material import ReferenceInputChanged
+from scrap_composite.data.backgrounds import background_files
+from scrap_composite.data.snapshot import mismatched_inputs, read_snapshot, save_snapshot, snapshot
 
 COMPOSE_VERSION='scrap-gray-pile-v6-window'
 
@@ -89,9 +94,9 @@ def make_jobs(config,catalog):
         if not isinstance(jobs,list) or not 1<=len(jobs)<=1000:raise ValueError('invalid manifest size')
     else:
         directory=resolve(config.backgrounds)
-        backgrounds=sorted(p for p in directory.iterdir() if p.suffix.lower() in ('.jpg','.jpeg','.png','.webp'))
+        backgrounds=background_files(directory, config.background_files)
         if not backgrounds:raise ValueError('没有可读取背景')
-        ids=config.assets or list(catalog)
+        ids=config.assets or [key for key, row in catalog.items() if row.get('available', True)]
         ids=[asset_id(k) for k in ids if asset_id(k) not in excluded]
         if not ids:raise ValueError('所选模型均已移出生成名单')
         rng=random.Random(config.seed);rng.shuffle(backgrounds);rng.shuffle(ids)
@@ -102,11 +107,13 @@ def make_jobs(config,catalog):
         k=asset_id(job['asset_id']);path=resolve(job['background'])
         if k in excluded:continue
         if k not in catalog:raise ValueError('未知模型编号：'+k)
+        if not catalog[k].get('available', True):raise ValueError('模型不可用：'+k)
         if not path.is_file():raise ValueError('背景不存在：'+str(path))
         seed=job.get('seed',config.seed+i)
         if type(seed) is not int or seed<0:raise ValueError('invalid manifest seed')
         result.append({**job,'background':str(path),'asset_id':k,'background_hash':file_hash(path),
-                       'mesh_hash':catalog[k]['mesh_hash'],'seed':seed})
+                       'mesh_hash':catalog[k]['mesh_hash'],'seed':seed,
+                       **({'model_version':catalog[k]['version']} if catalog[k].get('version') else {})})
     if not result:raise ValueError('任务清单只包含已移出的模型')
     return result
 
@@ -154,6 +161,9 @@ def write_summary(out,store,usage=None,run=None):
              'seconds_p95':sorted(times)[min(len(times)-1,math.ceil(len(times)*.95)-1)] if times else None,
              'generated_pngs':sum(bool(r.get('image')) for r in records),
              'reused_pngs':sum(bool(r.get('reused_from') and r.get('image')) for r in records),
+             'photoshop_exports':sum(r.get('cost',{}).get('photoshop_exports',0) for r in records),
+             'photoshop_cache_hits':sum(r.get('cost',{}).get('photoshop_cache_hits',0) for r in records),
+             'photoshop_seconds':round(sum(r.get('timings',{}).get('photoshop_seconds',0.) for r in records),3),
              'photo_pass':sum(r.get('photo_status')=='pass' for r in records),
              'visual_pass':sum(r.get('visual_status')=='pass' for r in records),
              'image_rate':sum(bool(r.get('image')) for r in records)/max(1,len(rows))}
@@ -165,6 +175,7 @@ def write_summary(out,store,usage=None,run=None):
     for r in records:
         image=Path(r['image']).relative_to(out).as_posix() if r.get('image') else None
         crop=Path(r['crop']).relative_to(out).as_posix() if r.get('crop') else None
+        psd=Path(r['psd']).relative_to(out).as_posix() if r.get('psd') else None
         name=f"{r['job_id']} · {r['asset_id']} · {r['status']}"
         trace={'none':'未见插入痕迹','uncertain':'插入痕迹不确定','visible':'可见插入痕迹'}.get(r.get('insertion_trace'),'')
         history=[]
@@ -182,6 +193,7 @@ def write_summary(out,store,usage=None,run=None):
         sections.append('<section><h2>'+html.escape(name)+'</h2><p>'+html.escape(' · '.join(x for x in (trace,r.get('reason','')) if x))+'</p>'+
                         (f'<a href="{image}"><img src="{image}" loading="lazy"></a>' if image else '')+
                         (f'<p><a href="{crop}">局部检查图</a></p>' if crop else '')+
+                        (f'<p><a href="{psd}">同版本分层 PSD</a></p>' if psd else '')+
                         ('<details><summary>每轮完整画面与实际参数</summary>'+''.join(history)+'</details>' if history else '')+'</section>')
     page='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>多背景批量结果</title><style>body{background:#172128;color:#eee;font:15px sans-serif;margin:30px auto;max-width:1600px;padding:16px}section{border-top:1px solid #456;padding:15px}img{display:block;width:100%;height:auto}a{color:#b1dfce}h2{font-size:16px}</style><h1>多背景批量展示结果</h1><p>完整画面可点击查看原尺寸。场景依据为估计，展示合格不等于旧流程正式验收。</p><pre>'+html.escape(json.dumps(summary['counts'],ensure_ascii=False))+'</pre>'+''.join(sections)
     page=page.replace('<h1>多背景批量展示结果</h1>','<h1>多背景批量展示结果</h1><p>'+html.escape(cost_label(summary['cost_total']))+'</p>')
@@ -240,7 +252,7 @@ class Pipeline:
                 # run the same doomed decomposition or malformed asset request repeatedly.
                 row=self.catalog[k]
                 key=signature('asset-preparation-failure-v1',row['mesh_hash'],
-                    file_hash(row['board']) if row.get('board') else None,
+                    file_hash(row['board']) if row.get('board') else None, row.get('dimension'),
                     self.vision.endpoint.model_dump(),implementation_manifest(),self.config.contact_mode)
                 failure_path=self.cache/'asset-failures'/(key+'.json')
                 if failure_path.is_file():
@@ -394,200 +406,15 @@ class Pipeline:
         if self.config.appearance=='local':return 'local'
         return 'scene' if self.config.appearance in ('materials','scene') else 'reference'
 
-    async def choose_placements(self,asset,scene,seed):
-        preview='estimated_preview_scale' in scene
-        if self.config.geometry_preset=='rebuild' and not preview:
-            from .vehicle_scale import prepare as prepare_vehicle, projection_preflight
-            observation_mode='audited' if self.config.integration_mode=='coherent' else 'legacy'
-            if ('vehicle_scale' not in scene or
-                    scene['vehicle_scale'].get('observation_mode','legacy')!=observation_mode):
-                scene['vehicle_scale']=await prepare_vehicle(scene,self.config.vehicle_reference,self.vision,self.cache,
-                    observation_mode=observation_mode)
-            scene['vehicle_scale']['enforce_projection_preflight']=self.config.integration_mode=='coherent'
-            gate=scene['vehicle_scale'].get('projection_preflight') or projection_preflight(scene['vehicle_scale']['calibration'])
-            if self.config.integration_mode=='coherent' and not gate['allow_expensive_steps']:
-                atomic_json(self.out/'scale-scenes'/(scene['key']+'.json'),{'vehicle_scale':scene['vehicle_scale'],
-                    'projection_preflight':gate})
-                return [],[{'reason':'high_risk_vehicle_projection','evidence':gate}]
-        if self.config.scale_mode=='reference_projection' or self.config.contact_mode=='strict':
-            from .specifications import identify, scene_observations
-            from .reference_projection import audit
-            from .strict_contact import simulate
-            from .assets import initial_poses
-            async with self.prepare_lock:
-                if 'physical_size' not in asset:
-                    asset['physical_size']=await identify(asset,self.vision,self.cache,self.config.dimension_registry)
-                if self.config.contact_mode=='strict' and not asset.get('metric_prepared'):
-                    data=np.load(asset['geometry']);_,initial=initial_poses(data['vertices'])
-                    physics=await simulate(asset,self.blender,initial)
-                    poses=[p for p in physics['poses'] if p['stable']]
-                    unique=[]
-                    for p in sorted(poses,key=lambda q:q['height']):
-                        if not any(np.linalg.norm(np.asarray(p['matrix'])[:3,:3]-np.asarray(q['matrix'])[:3,:3])<.05 for q in unique):unique.append(p)
-                    poses=unique
-                    ext=sorted(asset['inspection']['extents'])
-                    if poses and ext[-1]/max(ext[-2],1e-6)<1.5:
-                        low=min(p['height'] for p in poses);poses=[p for p in poses if p['height']<=low*1.15]
-                    asset.update(poses=poses,metric_prepared=True,metric_physics=physics)
-                    atomic_json(self.out/'physics-models'/(str(asset['id'])+'.json'),physics)
-            scene['reference_audit']=audit(scene,self.config.scene_reference_registry)
-            if preview:
-                scene['reference_audit']['preview_scale']=scene['estimated_preview_scale']
-            else:
-                scene['reference_audit']['visual_observations']=await scene_observations(scene,self.vision,self.cache)
-            if self.config.geometry_preset=='rebuild' and not preview:
-                from .vehicle_scale import prepare as prepare_vehicle
-                if 'vehicle_scale' not in scene:
-                    scene['vehicle_scale']=await prepare_vehicle(scene,self.config.vehicle_reference,self.vision,self.cache)
-                scene['reference_audit']['vehicle_scale']=scene['vehicle_scale']
-            atomic_json(self.out/'scale-models'/(str(asset['id'])+'.json'),asset['physical_size'])
-            atomic_json(self.out/'scale-scenes'/(scene['key']+'.json'),scene['reference_audit'])
-            if not asset['poses']:
-                return [],[{'reason':'no_valid_metric_lying_pose','evidence':asset.get('metric_physics')}]
-            return await asyncio.to_thread(choose_candidates,asset,scene,seed,self.config)
-        if self.config.scale_mode == 'physical_consistent':
-            from .consistent_scale import scaled_asset, scene_calibration
-            asset = scaled_asset(asset,self.config.asset_scale_factors.get(str(asset.get('id','')),1.))
-            atomic_json(self.out/'scale-models'/(str(asset['id'])+'.json'),asset['physical_size'])
-            atomic_json(self.out/'scale-scenes'/(scene['key']+'.json'),scene_calibration(scene))
-            return await asyncio.to_thread(choose_candidates,asset,scene,seed,self.config)
-        candidates,rejected=await asyncio.to_thread(choose_candidates,asset,scene,seed,self.config)
-        factor=self.config.asset_scale_factors.get(str(asset.get('id','')),1.)
-        if factor!=1:
-            candidates=[await asyncio.to_thread(resize_candidate,asset,scene,c,factor) for c in candidates]
-        return candidates,rejected
+    def placement_service(self):
+        return Placement(self.config, self.out, getattr(self,'cache',self.out), self.vision,
+                         getattr(self,'blender',None), getattr(self,'prepare_lock',None))
 
-    async def validate_local_pose(self,asset,scene,candidate):
-        if candidate.get('placement'):
-            return await self.validate_pile_pose(asset,scene,candidate)
-        normal=candidate['plane_normal']
-        key=signature('terrain-physics-v1',asset['physics_signature'],candidate['matrix'],normal)
-        path=Path(asset['folder'])/'terrain'/(key+'.json')
-        hit=path.is_file()
-        if hit:physics=json.loads(path.read_text(encoding='utf8'))
-        else:
-            physics=await self.blender.ask('settle',{'geometry':asset['geometry'],
-                'proxy':str(Path(asset['folder'])/'collision.json'),'axis':asset['axis'],
-                'initial_matrices':[candidate['matrix']],'assembly':asset['semantic']['assembly'],
-                'plane_normal':normal},timeout=90)
-            atomic_json(path,physics)
-        pose=physics['poses'][0]
-        if not pose['stable']:raise ValueError('local_plane_'+','.join(pose['failure_codes']))
-        data=np.load(asset['geometry']);candidate=dict(candidate);candidate['matrix']=pose['matrix']
-        site=next(s for s in scene['supports'] if s['id']==candidate['site_id'])
-        minimum=1.;middle=candidate['elevation'];world_ppm=candidate['scale']['world_pixels_per_unit']
-        for elevation in sorted(set([*candidate['elevation_interval'],middle])):
-            geom=projection_geometry(data['vertices'],data['faces'],pose,0,elevation,normal)
-            distance=np.linalg.norm(np.array(geom['camera']['eye'])-geom['camera']['target'])
-            full_px=world_ppm*2*distance*math.tan(math.radians(geom['camera']['fov']/2))
-            fit=fitted_masks(geom,candidate['anchor_px'],full_px,scene)
-            if fit is None:raise ValueError('local_plane_out_of_frame')
-            covers,protected,inside,occluded=fit_checks(fit,site,scene)
-            if not covers or min(covers)<.9 or not protected or inside<.98 or occluded>.3:
-                raise ValueError('local_plane_contact_or_clearance_failed')
-            minimum=min(minimum,min(covers))
-            if elevation==middle:
-                x,y,r,b=fit['bounds']
-                candidate.update(full_px=full_px,target_px=max(r-x,b-y),offset=fit['offset'],
-                                 bounds=fit['bounds'],anchor_uv=geom['anchor'].tolist(),
-                                 expected_major_px=float(np.ptp(geom['uv'],axis=0).max()*full_px))
-        candidate.update(contact_min=minimum,terrain_physics={**pose,'signature':key,'cache_hit':hit,
-                         'plane_normal':normal,'basis':candidate['plane_basis']})
-        return candidate
+    async def choose_placements(self, asset, scene, seed):
+        return await self.placement_service().choose_placements(asset, scene, seed)
 
-    async def validate_pile_pose(self,asset,scene,candidate):
-        from .geometry import transformed,horizontal_angle
-        candidate=dict(candidate);candidate['allow_uncertain']=self.config.uncertain_policy=='render_review'
-        strict=self.config.contact_mode=='strict'
-        receiver=candidate['receiver'];data=np.load(asset['geometry'])
-        original=transformed(data['vertices'],candidate['matrix'])
-        if not strict and original[:,2].min()<-.004:raise ValueError('confirmed_initial_ground_penetration')
-        key=signature('finite-support-physics-v1',asset['physics_signature'],candidate['matrix'],receiver['signature'])
-        path=Path(asset['folder'])/'terrain'/(key+'.json');hit=path.is_file()
-        if strict:
-            from .strict_contact import simulate, validate_receiver, projected_gap
-            from .metric_physics import tolerances
-            validate_receiver(candidate)
-            physics=await simulate(asset,self.blender,[candidate['matrix']],receiver,candidate['plane_normal'])
-            simulated=physics['poses'][0];key=physics['signature'];hit=physics['cache_hit']
-            if not simulated['stable']:
-                raise ValueError('strict_contact_'+','.join(simulated['failure_codes']))
-            gap=projected_gap(simulated,candidate)
-            candidate['contact_gap']=gap
-            if gap.get('contact_evidence_version'):
-                atomic_json(self.out/'contact-evidence'/(signature(key,candidate.get('id'))+'.json'),
-                    {'candidate_id':candidate.get('id'),'physics_signature':key,'contact_gap':gap})
-            if gap['status']=='fail':
-                raise ValueError('visible_contact_support_below_90pct' if
-                    gap.get('visible_support',{}).get('status')=='fail' else 'visible_contact_gap_over_2px')
-            unit=asset['physical_size']['nominal_mm']/1000
-            candidate['contact_band']=tolerances(unit)['contact_m']/unit
-        elif receiver['patches']:
-            if hit:physics=json.loads(path.read_text(encoding='utf8'))
-            else:
-                physics=await self.blender.ask('settle',{'geometry':asset['geometry'],
-                    'proxy':str(Path(asset['folder'])/'collision.json'),'axis':asset['axis'],
-                    'initial_matrices':[candidate['matrix']],'assembly':asset['semantic']['assembly'],
-                    'plane_normal':[0,0,1],'receiver':receiver},timeout=90)
-                atomic_json(path,physics)
-            simulated=physics['poses'][0]
-        else:simulated={'stable':False,'failure_codes':['receiver_geometry_insufficient']}
-        pose={'matrix':candidate['matrix'],'stable':False,'status':'unknown','axis_angle_deg':candidate['axis_angle_deg']}
-        if simulated['stable']:
-            pose=simulated
-        elif not candidate['allow_uncertain']:
-            raise ValueError('estimated_support_simulation_'+','.join(simulated['failure_codes']))
-        else:
-            candidate['uncertainties']=list(candidate['uncertainties'])+['hidden_support_or_height_unknown']
-        # Keep the scene camera fixed when a simulated object moves; update the contact pixel.
-        middle=candidate['elevation'];camera=candidate['camera'];full=candidate['full_px']
-        geom=projection_geometry(data['vertices'],data['faces'],pose,0,middle,
-                                 candidate['plane_normal'] if strict else (0,0,1),camera=camera,
-                                 contact_band=candidate.get('contact_band',.008),receiver=receiver if strict else None)
-        if geom['anchor'] is None:raise ValueError('no_visible_contact_geometry')
-        anchor=(np.asarray(candidate['offset'])+geom['anchor']*full).tolist()
-        fit=fitted_masks(geom,anchor,full,scene)
-        if fit is None:raise ValueError('local_pose_outside_image')
-        x,y,r,b=fit['bounds'];mask=fit['hull']
-        if np.any(mask&scene['protected'][y:b,x:r]):raise ValueError('protected_region_conflict')
-        if (mask&scene['allowed'][y:b,x:r]).sum()/max(1,mask.sum())<.98:raise ValueError('local_pose_outside_hopper')
-        cover=contact_support(
-            fit['contact'],support_union(scene,candidate['support_ids'],fit['bounds']))
-        if not cover or min(cover)<.9:
-            if strict or not candidate['allow_uncertain']:raise ValueError('support_coverage_insufficient')
-            candidate['uncertainties']=list(candidate['uncertainties'])+['support_coverage_insufficient']
-        tilt=horizontal_angle(asset['axis'],pose['matrix'])
-        if tilt>15:raise ValueError('confirmed_non_horizontal_pose')
-        candidate.update(matrix=pose['matrix'],anchor_px=anchor,offset=fit['offset'],bounds=fit['bounds'],
-            target_px=max(r-x,b-y),expected_major_px=float(np.ptp(geom['uv'],axis=0).max()*full),
-            anchor_uv=geom['anchor'].tolist(),contact_polygons=[p.tolist() for p in geom['contacts']],
-            contact_min=min(cover) if cover else 0,axis_angle_deg=tilt)
-        endpoint_risks=[]
-        for elevation in ([] if candidate['scale'].get('calibration',{}).get('projectable') else candidate['elevation_interval']):
-            endpoint=projection_geometry(data['vertices'],data['faces'],pose,0,elevation,
-                                         candidate['plane_normal'] if strict else (0,0,1),
-                                         contact_band=candidate.get('contact_band',.008),receiver=receiver if strict else None)
-            other=fitted_masks(endpoint,anchor,full,scene)
-            if other is None:endpoint_risks.append({'elevation':elevation,'reason':'outside_image'});continue
-            ox,oy,rr,bb=other['bounds'];m=other['hull']
-            coverage=contact_support(
-                other['contact'],support_union(scene,candidate['support_ids'],other['bounds']))
-            if np.any(m&scene['protected'][oy:bb,ox:rr]) or not coverage or min(coverage)<.9:
-                endpoint_risks.append({'elevation':elevation,'reason':'support_or_clearance_uncertain'})
-        candidate['camera_risks']=endpoint_risks
-        if candidate['scale'].get('version','').startswith('vehicle-width-projection'):
-            from .vehicle_scale import check_projection_interval
-            interval=check_projection_interval(scene,candidate,pose,data['vertices'],data['faces'])
-            candidate['camera_interval_check']=interval
-            candidate['camera_risks']=[{'reason':interval['reason']}]+[
-                r for r in interval['checks'] if r['status']!='pass']
-        if endpoint_risks and not candidate['allow_uncertain']:raise ValueError('camera_interval_uncertain')
-        if receiver['height_confidence']=='unknown':
-            candidate['uncertainties']=list(candidate['uncertainties'])+['support_heights_uncertain']
-        candidate['terrain_physics']={**pose,'signature':key,'cache_hit':hit,'simulation':simulated,
-            'status':'pass' if pose.get('stable') and (receiver['height_confidence']=='measured' if strict else receiver['height_confidence']!='unknown') else 'unknown',
-            'basis':receiver['basis'],'hidden_heights':receiver['hidden_heights']}
-        return candidate
+    async def validate_local_pose(self, asset, scene, candidate):
+        return await self.placement_service().validate_local_pose(asset, scene, candidate)
 
     async def confirm_structure(self,asset,candidate,scene,defects):
         # One cached, independent unoccluded orbit check per model; no single composite quarantines it.
@@ -627,6 +454,11 @@ class Pipeline:
     @staticmethod
     def finish_image(out,ident,result,best):
         if best.get('deliverable') is False:raise ValueError('physical_failure_is_not_deliverable')
+        receipt = best.get('photoshop')
+        if receipt:
+            model_psd = receipt['outputs']['psd']
+            if file_hash(model_psd['path']) != model_psd['sha256'] or file_hash(best['image']) != best['image_hash']:
+                raise ValueError('photoshop_artifacts_changed_before_delivery')
         unreviewed=best.get('review_status')=='unknown' and best.get('review') is None
         if unreviewed:
             if evidence_status(best['checks'])=='fail':
@@ -653,6 +485,11 @@ class Pipeline:
                       photo_status=('pass' if review.photo_passes() else 'fail') if review is not None else 'unknown',
                       visual_status=('pass' if review.passes() else 'fail') if review is not None else 'unknown')
         if isinstance(review,(FusionReview,EffectsReview)):result['insertion_trace']=review.trace
+        if receipt:
+            psd=dest/(ident+'.psd')
+            shutil.copy2(receipt['outputs']['psd']['path'], psd)
+            result.update(psd=str(psd), photoshop={'psd_sha256':file_hash(psd),
+                'png_sha256':file_hash(final), 'readback':receipt['readback'], 'receipt':receipt.get('receipt')})
 
     async def job(self,job):
         ident=job['id'];payload=job['payload'];start=time.monotonic()
@@ -665,8 +502,15 @@ class Pipeline:
                 'cost':{'logical_reviews':0,'renders':{},'render_cache_hits':{},'asset_imports':0},
                 'actions':[]}
         if payload.get('background_hash'):result['background_hash']=payload['background_hash']
+        if payload.get('model_version'):result['model_version']=payload['model_version']
         best=None;draft=None
+        ps_mode = getattr(getattr(self,'config',None),'photoshop_mode','off')
+        result['photoshop_mode'] = ps_mode
         try:
+            if getattr(self,'input_snapshot',None):
+                issue = await asyncio.to_thread(mismatched_inputs, self.input_snapshot, payload)
+                if issue:
+                    raise ReferenceInputChanged(issue)
             if getattr(self,'reference_snapshot',None) is not None:
                 await asyncio.to_thread(self.assert_reference_inputs)
             held=getattr(self,'model_review',{}).get(payload['asset_id'])
@@ -738,8 +582,11 @@ class Pipeline:
                            asset['semantic'].get('material_classes',[])) in adjusted_classes
                            for m in asset.get('inspection',{}).get('materials',[]))
             iteration=0;previous_candidate=None;rendered_parts={};recipe_checked=set()
+            ps_pending = None
+            ps_base = None
+            ps_seen = set()
             while iteration<=self.config.max_iterations:
-                psig=signature(params)
+                psig=signature(params, ps_pending['actions']) if ps_pending else signature(params)
                 if psig in seen:reason='repeated_parameters';break
                 seen.add(psig);cid=params['candidate']
                 if cid not in ready:
@@ -760,48 +607,54 @@ class Pipeline:
                 if cid not in invalid:
                     candidate=ready[cid]
                     candidate['material_classes']=asset.get('semantic',{}).get('material_classes',[])
-                    render_options={}
-                    if structured and cid not in recipe_checked:
-                        from .structured import initial_recipe
-                        sampled=await asyncio.to_thread(sample_environment,scene,candidate,local=True)
-                        params,recommendation=initial_recipe(resolve(self.config.knowledge_db or 'work/knowledge/history-v2.sqlite'),
-                                                             asset,candidate,sampled[0],params)
-                        result['parameter_recommendation']={**recommendation,'candidate':cid}
-                        recipe_checked.add(cid)
-                        seen.add(signature(params))
-                        render_options['sampled']=sampled
-                    rkey=render_identity(params,self.render_style)
-                    if getattr(self,'reference_snapshot',None) is not None:
-                        await asyncio.to_thread(self.assert_reference_inputs)
-                    if rkey not in rendered_parts:
-                        before=time.monotonic()
-                        rendered=await self.render(asset,scene,candidate,params,final_resolution(candidate),**render_options)
-                        result['timings']['render_stage_seconds']=result['timings'].get('render_stage_seconds',0)+time.monotonic()-before
-                        rendered_parts[rkey]=rendered
-                        for part,info in rendered[1].get('render_cache',{}).items():
-                            tally=result['cost']['render_cache_hits' if info['hit'] else 'renders']
-                            tally[part]=tally.get(part,0)+1
-                        for key,value in rendered[1].get('render_timings',{}).items():
-                            result['timings'][key]=result['timings'].get(key,0)+value
-                        result['cost']['asset_imports']+=rendered[1].get('asset_imports',0)
-                    else:result['cost']['photo_only_reuse']=result['cost'].get('photo_only_reuse',0)+1
-                    folder_render,meta,environment,samples,hit=rendered_parts[rkey]
-                    image=folder/f'iteration-{iteration}.png'
-                    before=time.monotonic()
-                    try:
-                        async with self.cpu:
-                            layer_options={}
-                            if structured and self.config.prepare_photoshop:
-                                layer_options['layer_output']=folder/f'layers-{iteration}'
-                            comp=await asyncio.to_thread(compose,scene,candidate,folder_render,meta,environment,samples,
-                                                         params,payload['seed'],image,**layer_options)
-                    except ValueError as failure:
-                        if str(failure) not in ('object_fully_occluded','object_too_small'):raise
-                        invalid.add(cid);rejected.append({'candidate':cid,'reason':str(failure)})
+                    if ps_pending:
+                        meta, folder_render, hit = ps_pending.pop('meta')
+                        comp = await self._ps_frame(ident, folder, ps_base, result, iteration, **ps_pending)
+                        image = Path(comp['image'])
+                        ps_pending = None
                     else:
-                        if evidence_status(comp['checks'])=='fail':
-                            invalid.add(cid);rejected.append({'candidate':cid,'reason':'final_program_checks_failed','checks':comp['checks']})
-                    result['timings']['compose_seconds']=result['timings'].get('compose_seconds',0)+time.monotonic()-before
+                        render_options={}
+                        if structured and cid not in recipe_checked:
+                            from .structured import initial_recipe
+                            sampled=await asyncio.to_thread(sample_environment,scene,candidate,local=True)
+                            params,recommendation=initial_recipe(resolve(self.config.knowledge_db or 'work/knowledge/history-v2.sqlite'),
+                                                                 asset,candidate,sampled[0],params)
+                            result['parameter_recommendation']={**recommendation,'candidate':cid}
+                            recipe_checked.add(cid)
+                            seen.add(signature(params))
+                            render_options['sampled']=sampled
+                        rkey=render_identity(params,self.render_style)
+                        if getattr(self,'reference_snapshot',None) is not None:
+                            await asyncio.to_thread(self.assert_reference_inputs)
+                        if rkey not in rendered_parts:
+                            before=time.monotonic()
+                            rendered=await self.render(asset,scene,candidate,params,final_resolution(candidate),**render_options)
+                            result['timings']['render_stage_seconds']=result['timings'].get('render_stage_seconds',0)+time.monotonic()-before
+                            rendered_parts[rkey]=rendered
+                            for part,info in rendered[1].get('render_cache',{}).items():
+                                tally=result['cost']['render_cache_hits' if info['hit'] else 'renders']
+                                tally[part]=tally.get(part,0)+1
+                            for key,value in rendered[1].get('render_timings',{}).items():
+                                result['timings'][key]=result['timings'].get(key,0)+value
+                            result['cost']['asset_imports']+=rendered[1].get('asset_imports',0)
+                        else:result['cost']['photo_only_reuse']=result['cost'].get('photo_only_reuse',0)+1
+                        folder_render,meta,environment,samples,hit=rendered_parts[rkey]
+                        image=folder/f'iteration-{iteration}.png'
+                        before=time.monotonic()
+                        try:
+                            async with self.cpu:
+                                layer_options={}
+                                if structured and self.config.prepare_photoshop:
+                                    layer_options['layer_output']=folder/f'layers-{iteration}'
+                                comp=await asyncio.to_thread(compose,scene,candidate,folder_render,meta,environment,samples,
+                                                             params,payload['seed'],image,**layer_options)
+                        except ValueError as failure:
+                            if str(failure) not in ('object_fully_occluded','object_too_small'):raise
+                            invalid.add(cid);rejected.append({'candidate':cid,'reason':str(failure)})
+                        else:
+                            if evidence_status(comp['checks'])=='fail':
+                                invalid.add(cid);rejected.append({'candidate':cid,'reason':'final_program_checks_failed','checks':comp['checks']})
+                        result['timings']['compose_seconds']=result['timings'].get('compose_seconds',0)+time.monotonic()-before
                 if cid in invalid:
                     save_candidates()
                     fallback=next((c['id'] for c in candidates if c['id'] not in invalid and c['id'] not in ready),None)
@@ -810,6 +663,14 @@ class Pipeline:
                     reason='no_candidate_survived_program_checks'
                     if best is None:result.update(status='failed',evidence_status='fail')
                     break
+                if not comp.get('photoshop'):
+                    ps_base = comp
+                    ps_seen = set()
+                    if needs_photoshop(ps_mode):
+                        comp = await self._ps_frame(ident, folder, comp, result, iteration)
+                        image = Path(comp['image'])
+                if comp.get('photoshop'):
+                    ps_seen.add(signature(comp['execution_state']['parameters']))
                 draft={**comp,'iteration':iteration,'params':params.copy(),'render_cache_hit':hit,
                        'render_cache':meta.get('render_cache',{}),'render_resolution':meta.get('resolution'),
                        'image_hash':file_hash(image)}
@@ -818,13 +679,19 @@ class Pipeline:
                 if structured:
                     from .structured import algorithm_versions
                     draft['algorithm_versions']=algorithm_versions(params,comp['photo'].get('version'))
+                pixels = pixel_hash(image) if comp.get('photoshop') else draft['image_hash']
+                same_pixels = False
+                if comp.get('photoshop') and result['iterations']:
+                    same_pixels = pixels == pixel_hash(result['iterations'][-1]['image'])
+                repeated = same_pixels or pixels in seen_images
                 if result['actions'] and result['actions'][-1]['iteration']==iteration-1:
+                    prior = result['iterations'][-1]
                     result['actions'][-1]['effect']={'params':params.copy(),'image_hash':draft['image_hash'],
-                        'changed_pixels':draft['image_hash']!=result['iterations'][-1]['image_hash'],
-                        'repeated_image':draft['image_hash'] in seen_images}
-                if draft['image_hash'] in seen_images:
+                        'changed_pixels':not same_pixels and draft['image_hash']!=prior['image_hash'],
+                        'repeated_image':repeated}
+                if repeated:
                     reason='no_effective_image_change';break
-                seen_images.add(draft['image_hash'])
+                seen_images.add(pixels)
                 atomic_json(folder/f'draft-{iteration}.json',draft)
                 self.store.checkpoint(ident,'review_request',{'last_iteration':iteration,
                     'params':params,'draft':str(folder/f'draft-{iteration}.json')})
@@ -833,34 +700,18 @@ class Pipeline:
                 allowed=allowed_actions(params,comp,ids,render_style=self.render_style,adjustable=adjustable)
                 geometry_board=folder/(cid+'-geometry.jpg') if previous_candidate and previous_candidate!=cid and candidate.get('placement') else None
                 result['cost']['logical_reviews']+=1
-                observation=None
-                if structured:
-                    from .structured import inspect_frame
-                    profile=getattr(self.config,'review_profile','legacy')
-                    observation,review=await inspect_frame(self.vision,asset,comp,draft['image_hash'],
-                                                           profile=profile,parameters=params)
-                else:
-                    review=await inspect(self.vision,REVIEW_PROMPT,asset,comp,params,allowed,folder_render,
-                        compact=self.config.review_format=='compact',geometry_board=geometry_board,
-                        candidate_evidence=[{'id':c['id'],'placement':c.get('placement'),
-                                             'uncertainties':c.get('uncertainties',[])} for c in choices])
+                profile=getattr(self.config,'review_profile','legacy')
+                observation,review=await review_frame(self.vision,asset,comp,draft['image_hash'],params,allowed,
+                    structured=structured,profile=profile,prompt=REVIEW_PROMPT,render_dir=folder_render,
+                    compact=self.config.review_format=='compact',geometry_board=geometry_board,choices=choices)
                 previous_candidate=cid
-                entry={**draft,'review':review.model_dump()}
-                if observation is not None:
-                    if profile=='photographer':
-                        entry['photography_diagnosis']=observation.model_dump(mode='json')
-                        entry['visual_evidence']=observation.legacy().model_dump(mode='json')
-                    else:
-                        entry['visual_evidence']=observation.model_dump(mode='json')
-                if self.config.contact_mode=='strict' or (structured and profile=='photographer'):
-                    from .strict_contact import visual_veto
-                    veto=visual_veto(review);entry['deliverable']=not veto
-                    entry['physical_visual_veto']=veto
+                entry={**draft, **review_record(observation,review,enforce_physics=(
+                    self.config.contact_mode=='strict' or structured and profile=='photographer' or ps_mode!='off'))}
                 result['iterations'].append(entry)
                 atomic_json(folder/f'iteration-{iteration}.json',entry)
                 self.store.checkpoint(ident,'review',{'last_iteration':iteration,'params':params,'record':str(folder/f'iteration-{iteration}.json')})
                 if entry.get('deliverable') is False:
-                    invalid.add(cid);rejected.append({'candidate':cid,'reason':'visual_physical_failure','defects':veto})
+                    invalid.add(cid);rejected.append({'candidate':cid,'reason':'visual_physical_failure','defects':entry['physical_visual_veto']})
                     for previous in result['iterations']:
                         if previous['params']['candidate']==cid:previous['deliverable']=False
                     # A later view can expose the same candidate's earlier hidden physical fault.
@@ -874,8 +725,8 @@ class Pipeline:
                     reason='no_deliverable_candidate_after_physical_veto'
                     if best is None:result.update(status='failed',evidence_status='fail')
                     break
-                if (structured and profile=='photographer' and any(d.visibility=='visible' and d.code in
-                        ('floating','penetration','occlusion','upright','scale','camera') for d in review.defects)):
+                needs_placement = (profile=='photographer' or ps_mode!='off') and geometry_issue(review)
+                if needs_placement:
                     alternative=next((c['id'] for c in choices if c['id']!=cid and c['id'] not in ready),None)
                     if alternative and iteration<self.config.max_iterations:
                         result['actions'].append({'iteration':iteration,'decisions':[{
@@ -915,18 +766,27 @@ class Pipeline:
                         reason='visual_ok_evidence_unresolved';break
                 if iteration>=self.config.max_iterations:break
                 if no_gain>=2:reason='no_improvement';break
-                if structured:
-                    from .structured import plan_frame
-                    updated,actions,plan=await plan_frame(self.vision,observation,review,comp,params,allowed,ids,
-                        lambda p:signature(p) in seen,dust_in_shader=self.render_style in ('scene','native'),
-                        recommendation=result.get('parameter_recommendation'))
-                    result['actions'].append({'iteration':iteration,'decisions':actions,'execution_plan':plan})
-                else:
-                    suggestions=fusion_actions(review,comp,allowed) if isinstance(review,FusionReview) else review.actions
-                    if not suggestions:reason='no_valid_action';break
-                    updated,actions=repair(params,review,allowed,ids,lambda p:signature(p) in seen,
-                                           dust_in_shader=self.render_style in ('scene','native'),suggestions=suggestions)
-                    result['actions'].append({'iteration':iteration,'decisions':actions})
+                if not needs_placement and needs_photoshop(ps_mode, observation=observation,
+                                                          remaining=self.config.max_iterations-iteration):
+                    current = comp.get('execution_state', {}).get('parameters') if comp.get('photoshop') else None
+                    if current is None:
+                        from scrap_composite.photoshop import LIMITS
+                        current = dict.fromkeys(LIMITS, 0)
+                    ps_seen.add(signature(current))
+                    updates, ps_plan = await photoshop_plan(self.vision, observation, comp, current, ps_seen)
+                    if updates:
+                        result['actions'].append({'iteration':iteration,'execution_plan':ps_plan,'backend':'photoshop'})
+                        ps_pending = {'actions':updates, 'prior':comp.get('photoshop'),
+                                      'reviewed':entry, 'meta':(meta,folder_render,hit)}
+                        iteration+=1
+                        continue
+                    if ps_plan:
+                        result['photoshop_plan_disposition'] = ps_plan
+                updated,actions,plan=await next_frame(self.vision,observation,review,comp,params,allowed,ids,
+                    lambda p:signature(p) in seen,structured=structured,
+                    dust_in_shader=self.render_style in ('scene','native'),
+                    recommendation=result.get('parameter_recommendation'))
+                result['actions'].append({'iteration':iteration,'decisions':actions,'execution_plan':plan})
                 if updated is None:
                     if structured and profile=='photographer' and plan:
                         reason=plan['reason']
@@ -937,11 +797,18 @@ class Pipeline:
             if getattr(self,'reference_snapshot',None) is not None:
                 await asyncio.to_thread(self.assert_reference_inputs)
             if best:
+                if getattr(self,'input_snapshot',None):
+                    issue = await asyncio.to_thread(mismatched_inputs, self.input_snapshot, payload)
+                    if issue:
+                        raise ReferenceInputChanged(issue)
                 self.finish_image(self.out,ident,result,best)
             elif self.config.contact_mode=='strict':
                 result.update(status='failed',evidence_status='fail')
             result['reason']=reason
             return result
+        except PhotoshopUnavailable as error:
+            result.update(reason=str(error), status='review', execution_paused=True)
+            raise
         except (ProviderUnavailable,RenderUnavailable,ReferenceInputChanged):
             raise
         except Exception as error:
@@ -950,7 +817,7 @@ class Pipeline:
                 result.update(status='review',visual_status='unknown',photo_status='unknown',
                               reason='review_invalid_after_one_repair')
             if best:
-                if self.config.contact_mode=='strict':result['status']='review'
+                if self.config.contact_mode=='strict' or ps_mode!='off':result['status']='review'
                 self.finish_image(self.out,ident,result,best)
             elif draft:
                 result.update(checks=draft['checks'],draft_record=str(folder/f"draft-{draft['iteration']}.json"),
@@ -977,6 +844,20 @@ class Pipeline:
             result['cost_total_at_output']=cumulative(self.out,self.vision.usage() if calls else None)
             result['timings']['api_seconds']=round(sum(c.get('seconds',0) for c in calls),3)
             atomic_json(folder/'result.json',result)
+
+    async def _ps_frame(self, ident, folder, source, result, iteration, *, actions=None, prior=None,
+                        reviewed=None):
+        self.store.checkpoint(ident, 'photoshop', {
+            'iteration':iteration, 'composition':source.get('composition_manifest'),
+            'reviewed_image_sha256':reviewed.get('image_hash') if reviewed else None,
+            'actions':actions or {}})
+        comp = await PhotoshopExecutor().execute(source, folder/'photoshop', actions=actions,
+                                                prior=prior, reviewed=reviewed)
+        result['timings']['photoshop_seconds'] = (
+            result['timings'].get('photoshop_seconds',0.) + comp['photoshop_seconds'])
+        counter='photoshop_cache_hits' if comp['photoshop_cache_hit'] else 'photoshop_exports'
+        result['cost'][counter]=result['cost'].get(counter,0)+1
+        return comp
 
     def reuse_completed(self,source,implementation):
         source=Path(source).resolve()
@@ -1023,8 +904,18 @@ class Pipeline:
             'scene_references':self.config.scene_reference_registry}.items()}
 
     async def run(self,*,reuse_from=None):
+        with batch_lock(self.out):
+            return await self._run_pinned(reuse_from)
+
+    async def _run_pinned(self, reuse_from):
         started=time.monotonic();state='complete';error=None
-        jobs=make_jobs(self.config,self.catalog)
+        pinned = read_snapshot(self.out, self.config)
+        if pinned is None:
+            jobs = make_jobs(self.config, self.catalog)
+            pinned = snapshot(self.config, jobs, self.catalog)
+        else:
+            jobs, self.catalog = pinned['jobs'], pinned['catalog']
+        self.input_snapshot = pinned
         reference_snapshot=await asyncio.to_thread(self.prepare_reference_inputs,jobs)
         implementation=implementation_manifest()
         inputs = (VERSION,self.config.model_dump(exclude={'offline'}),jobs,
@@ -1036,66 +927,75 @@ class Pipeline:
         if reference_snapshot is not None:
             inputs = (*inputs, ('reference-material-snapshot', reference_snapshot['signature']))
         config_signature=signature(*inputs)
-        with batch_lock(self.out):
-            self.store.initialize(config_signature,jobs);self.store.recover()
-            atomic_json(self.out/'config.json',self.config.model_dump())
+        self.store.initialize(config_signature,jobs);self.store.recover()
+        save_snapshot(self.out, pinned)
+        atomic_json(self.out/'config.json',self.config.model_dump())
+        atomic_json(self.out/'inputs.json',jobs)
+        atomic_json(self.out/'implementation.json',implementation)
+        atomic_json(self.out/'vision-signature.json',{'signature':signature(self.vision.endpoint.model_dump())})
+        atomic_json(self.out/'dimension-reference-signature.json',self.dimension_reference_signature())
+        if reference_snapshot is not None:
+            atomic_json(self.out/'reference-material-snapshot.json',reference_snapshot)
+        try:
+            if issue := await asyncio.to_thread(mismatched_inputs, pinned):
+                raise ReferenceInputChanged(issue)
             atomic_json(self.out/'catalog-preflight.json',catalog_preflight(self.catalog))
-            atomic_json(self.out/'inputs.json',jobs)
-            atomic_json(self.out/'implementation.json',implementation)
-            atomic_json(self.out/'vision-signature.json',{'signature':signature(self.vision.endpoint.model_dump())})
-            atomic_json(self.out/'dimension-reference-signature.json',self.dimension_reference_signature())
-            if reference_snapshot is not None:
-                atomic_json(self.out/'reference-material-snapshot.json',reference_snapshot)
-            try:
-                if reuse_from:self.reuse_completed(reuse_from,implementation)
-                if not self.config.offline and self.store.counts().get('queued'):
-                    probe_path=self.out/'capability-probe.jpg'
-                    with Image.open(jobs[0]['background']) as im:
-                        im=im.convert('RGB');im.thumbnail((512,512));im.save(probe_path,quality=80)
-                    probe=await self.vision.ask('capability',Probe,'Confirm the supplied image is visible; describe it briefly.',{},[probe_path],
-                                                plain_json=self.config.appearance in ('native','local'))
-                    if not probe.image_visible:raise ProviderUnavailable('视觉服务未确认图像可见')
-                stop=asyncio.Event()
-                async def consumer():
-                    nonlocal state,error
-                    while not stop.is_set():
-                        job=self.store.claim(group_size=4)
-                        if not job:return
-                        print(json.dumps({'event':'start','job':job['id'],'asset':job['payload']['asset_id']},ensure_ascii=False),flush=True)
-                        try:result=await self.job(job)
-                        except (ProviderUnavailable,RenderUnavailable,ReferenceInputChanged) as failure:
-                            self.store.pause(job['id'])
-                            state=('paused_inputs' if isinstance(failure,ReferenceInputChanged) else
-                                   'paused_provider' if isinstance(failure,ProviderUnavailable) else 'paused_renderer')
-                            error=str(failure);stop.set();return
-                        self.store.finish(job['id'],result['status'],result)
-                        progress=write_summary(self.out,self.store,self.vision.usage(),{'id':self.run_id,'state':'running'})
-                        print(json.dumps({'event':'done','job':job['id'],'status':result['status'],
-                                          'reason':result['reason'],'seconds':result['seconds'],
-                                          'cost_total':cost_label(progress['cost_total'])},ensure_ascii=False),flush=True)
-                await asyncio.gather(*(consumer() for _ in range(self.config.cpu_concurrency)))
-            except ProviderUnavailable as failure:
-                state='paused_provider';error=str(failure)
-            finally:
-                await self.blender.close();await self.vision.close()
-                summary=write_summary(self.out,self.store,self.vision.usage(),
-                    {'id':self.run_id,'state':state,'error':error,'seconds':round(time.monotonic()-started,3),
-                     'gpu_seconds':round(self.blender.seconds,3)})
-                summary['run']['worker_operations_seconds']=self.blender.operation_seconds
-                summary['run']['worker_launch_seconds']=self.blender.start_seconds
-                summary['run']['gpu_wait_seconds']=self.blender.wait_seconds
-                summary['run']['api_seconds']=round(sum(c['seconds'] for c in self.vision.calls),3)
-                summary['run']['render_counts']=dict(self.renders.totals)
-                summary['run']['render_stage_seconds']=dict(self.renders.timings)
-                summary['run']['memory_retries']=self.blender.memory_retries
-                if self.config.workflow=='evidence_v1':
-                    from scrap_composite.knowledge import archive_run
-                    import sqlite3
-                    try:
-                        summary['knowledge_archive']=archive_run(self.out,resolve('work/knowledge/history-v2.sqlite'))
-                    except (OSError,ValueError,sqlite3.Error) as failure:
-                        summary['knowledge_archive']={'error_kind':type(failure).__name__}
-                atomic_json(self.out/f'run-{self.run_id}.json',summary['run'])
-                atomic_json(self.out/'summary.json',summary)
-                self.store.close()
-            return summary
+            if self.config.photoshop_mode == 'always' and self.store.counts().get('queued'):
+                await PhotoshopExecutor().preflight()
+            if reuse_from:self.reuse_completed(reuse_from,implementation)
+            if not self.config.offline and self.store.counts().get('queued'):
+                probe_path=self.out/'capability-probe.jpg'
+                with Image.open(jobs[0]['background']) as im:
+                    im=im.convert('RGB');im.thumbnail((512,512));im.save(probe_path,quality=80)
+                probe=await self.vision.ask('capability',Probe,'Confirm the supplied image is visible; describe it briefly.',{},[probe_path],
+                                            plain_json=self.config.appearance in ('native','local'))
+                if not probe.image_visible:raise ProviderUnavailable('视觉服务未确认图像可见')
+            stop=asyncio.Event()
+            async def consumer():
+                nonlocal state,error
+                while not stop.is_set():
+                    job=self.store.claim(group_size=4)
+                    if not job:return
+                    print(json.dumps({'event':'start','job':job['id'],'asset':job['payload']['asset_id']},ensure_ascii=False),flush=True)
+                    try:result=await self.job(job)
+                    except (ProviderUnavailable,RenderUnavailable,ReferenceInputChanged,PhotoshopUnavailable) as failure:
+                        self.store.pause(job['id'])
+                        state=('paused_inputs' if isinstance(failure,ReferenceInputChanged) else
+                               'paused_provider' if isinstance(failure,ProviderUnavailable) else
+                               'paused_photoshop' if isinstance(failure,PhotoshopUnavailable) else 'paused_renderer')
+                        error=str(failure);stop.set();return
+                    self.store.finish(job['id'],result['status'],result)
+                    progress=write_summary(self.out,self.store,self.vision.usage(),{'id':self.run_id,'state':'running'})
+                    print(json.dumps({'event':'done','job':job['id'],'status':result['status'],
+                                      'reason':result['reason'],'seconds':result['seconds'],
+                                      'cost_total':cost_label(progress['cost_total'])},ensure_ascii=False),flush=True)
+            await asyncio.gather(*(consumer() for _ in range(self.config.cpu_concurrency)))
+        except ProviderUnavailable as failure:
+            state='paused_provider';error=str(failure)
+        except ReferenceInputChanged as failure:
+            state='paused_inputs';error=str(failure)
+        except PhotoshopUnavailable as failure:
+            state='paused_photoshop';error=str(failure)
+        finally:
+            await self.blender.close();await self.vision.close()
+            summary=write_summary(self.out,self.store,self.vision.usage(),
+                {'id':self.run_id,'state':state,'error':error,'seconds':round(time.monotonic()-started,3),
+                 'gpu_seconds':round(self.blender.seconds,3)})
+            summary['run']['worker_operations_seconds']=self.blender.operation_seconds
+            summary['run']['worker_launch_seconds']=self.blender.start_seconds
+            summary['run']['gpu_wait_seconds']=self.blender.wait_seconds
+            summary['run']['api_seconds']=round(sum(c['seconds'] for c in self.vision.calls),3)
+            summary['run']['render_counts']=dict(self.renders.totals)
+            summary['run']['render_stage_seconds']=dict(self.renders.timings)
+            summary['run']['memory_retries']=self.blender.memory_retries
+            if self.config.workflow=='evidence_v1':
+                from scrap_composite.knowledge import archive_run
+                import sqlite3
+                try:
+                    summary['knowledge_archive']=archive_run(self.out,resolve('work/knowledge/history-v2.sqlite'))
+                except (OSError,ValueError,sqlite3.Error) as failure:
+                    summary['knowledge_archive']={'error_kind':type(failure).__name__}
+            atomic_json(self.out/f'run-{self.run_id}.json',summary['run'])
+            atomic_json(self.out/'summary.json',summary)
+            self.store.close()
+        return summary

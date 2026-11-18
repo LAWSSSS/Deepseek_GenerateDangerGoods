@@ -100,7 +100,7 @@ class ReviewViewerTests(unittest.TestCase):
                     self.assertEqual(transmission.get('transmissionFactor', 0), 0)
 
     def test_missing_revision_does_not_reexpose_group_models(self):
-        with patch.object(viewer,'load_feedback',return_value={'approved':set(),'requested':{10,13,19,31},'revisions':{},'error':'missing'}):
+        with patch('scrap_composite.data.catalog.load_feedback',return_value={'approved':set(),'requested':{10,13,19,31},'revisions':{},'error':'missing'}):
             current=viewer.load_catalog()
         self.assertFalse(current['10']['available'])
         self.assertFalse(current['13']['available'])
@@ -120,8 +120,8 @@ class ReviewViewerTests(unittest.TestCase):
             review['revision_manifest'] = str(old_manifest)
             old_review.write_text(json.dumps(review, ensure_ascii=False), encoding='utf8')
             validate = review_feedback.inside_outputs
-            def allow_fixture(raw, suffixes):
-                return old_manifest if Path(raw) == old_manifest else validate(raw, suffixes)
+            def allow_fixture(raw, suffixes, root=None):
+                return old_manifest if Path(raw) == old_manifest else validate(raw, suffixes, root)
             with patch.object(review_feedback, 'DECISIONS', old_review), \
                  patch.object(review_feedback, 'inside_outputs', side_effect=allow_fixture):
                 prior = review_feedback.load_feedback()

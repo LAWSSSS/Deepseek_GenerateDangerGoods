@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image
 from pydantic import Field
 
+from display_batch.rendering import source_path
 from display_batch.ai import InvalidStructuredReply, ProviderUnavailable
 from display_batch.common import ROOT, atomic_json, file_hash, implementation_manifest, resolve, signature
 from display_batch.compose import compose, object_window, warp

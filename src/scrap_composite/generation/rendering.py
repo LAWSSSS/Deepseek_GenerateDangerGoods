@@ -80,17 +80,23 @@ def reference_path(cache,asset,candidate,params,environment,device='OPTIX',resol
     return Path(cache)/'renders'/key,request
 
 
+def source_path(name):
+    folder, _, filename = name.partition('/')
+    module = Path(__file__).with_name(filename) if folder == 'display_batch' else None
+    return module if module and module.is_file() else HERE / name
+
+
 @lru_cache(maxsize=1)
 def render_dependencies():
     files=['blender_display_worker.py','blender_worker.py','display_batch/geometry.py',
            'display_batch/framing.py','display_batch/materials.py','display_batch/rendering.py','display_batch/contact_geometry.py',
            'display_batch/scanned_shader.py','display_batch/local_light.py','display_batch/render_readback.py']
-    return signature('blender-4.5.3',{name:file_hash(HERE/name) for name in files})
+    return signature('blender-4.5.3',{name:file_hash(source_path(name)) for name in files})
 
 
 @lru_cache(maxsize=1)
 def finish_dependencies():
-    return signature(*(file_hash(HERE / 'display_batch' / name)
+    return signature(*(file_hash(source_path('display_batch/' + name))
                        for name in ('generated_material.py', 'generated_shader.py', 'surface_maps.py', 'cylinder_wear.py')))
 
 
@@ -103,7 +109,7 @@ def part_keys(request, device, dependencies, *, include_detail=True):
     shared=(RENDER_VERSION,dependencies,device,request['appearance'],request['camera'],
             request['plane_normal'],request.get('receiver',{}).get('patches',[]),light,request['light_gain'],request.get('integration_mode','legacy'))
     if environment.get('realism_light'):
-        shared=(*shared,file_hash(HERE/'display_batch/realism_light.py'))
+        shared=(*shared,file_hash(source_path('display_batch/realism_light.py')))
     if include_detail:
         shared=(*shared,request.get('render_detail','standard'))
     if request.get('contact_band'):shared=(*shared,request['contact_band'])
@@ -125,12 +131,12 @@ def part_keys(request, device, dependencies, *, include_detail=True):
     if finish := request.get('generated_finish'):
         surface=(*surface, finish['signature'], finish['regions']['signature'], finish_dependencies())
         if finish.get('version')=='physical-layers-v1':
-            surface=(*surface,signature(*(file_hash(HERE/'display_batch'/name)
+            surface=(*surface,signature(*(file_hash(source_path('display_batch/' + name))
                                          for name in ('physical_layers.py','physical_material.py'))))
             if finish.get('reference') is not None:
-                surface=(*surface,finish['reference'],file_hash(HERE/'display_batch/reference_shader.py'))
+                surface=(*surface,finish['reference'],file_hash(source_path('display_batch/reference_shader.py')))
                 if 'packages' in finish['reference']:
-                    surface=(*surface,file_hash(HERE/'display_batch/component_shader.py'))
+                    surface=(*surface,file_hash(source_path('display_batch/component_shader.py')))
         reference = environment.get('nearby_weathered_steel', {})
         if reference.get('applied'):
             surface=(*surface,reference['pigment_linear'])

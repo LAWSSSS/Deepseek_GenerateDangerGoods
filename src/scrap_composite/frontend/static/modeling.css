@@ -1,0 +1,19 @@
+body { overflow: auto; }
+header nav, .modeling-actions { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+header a, .modeling-actions a { color: #93d8c5; }
+.modeling-workbench { display: grid; grid-template-columns: minmax(295px, .85fr) minmax(360px, 1.15fr); height: auto; max-width: 1250px; margin: 24px auto; padding: 0 16px 24px; gap: 16px; }
+.modeling-panel { background: #18252d; border: 1px solid #43545c; border-radius: 8px; padding: 20px; min-width: 0; }
+.modeling-panel h1, .modeling-panel h2 { margin: 0 0 16px; font-size: 21px; }
+.modeling-panel form, .modeling-panel label { display: grid; gap: 7px; }
+.modeling-panel form { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; }
+.modeling-panel label { font-size: 14px; }
+.modeling-panel input, .modeling-panel select { max-width: 100%; box-sizing: border-box; }
+.view-fields, #submit { grid-column: 1 / -1; }
+.view-fields div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 8px 0; }
+summary { cursor: pointer; }
+.modeling-board { width: 100%; border-radius: 5px; }
+.modeling-actions { margin: 12px 0; }
+#checks { white-space: pre-wrap; overflow-wrap: anywhere; }
+#message { color: #c7dfd7; min-height: 24px; overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+@media (max-width: 810px) { .modeling-workbench { grid-template-columns: minmax(0, 1fr); } }

@@ -16,6 +16,7 @@ from PIL import Image
 
 import display_batch.compose as compose_module
 import display_batch.scene as scene_module
+from display_batch.rendering import source_path
 from display_batch.common import atomic_json,file_hash,load_catalog,resolve,signature
 from display_batch.compose import compose,sample_environment
 from display_batch.effects import lighting_for
@@ -109,7 +110,7 @@ async def run(source,out):
          'image_sha256':file_hash(r['image']),'background_sha256':file_hash(r['background']),
          'best_iteration':r['best_iteration']} for r in rows],
         'comparison':'legacy versus camera_pipeline=premultiplied','geometry':'frozen',
-        'camera_source_hash':file_hash(Path(__file__).parent/'display_batch/local.py')}
+        'camera_source_hash':file_hash(source_path('display_batch/local.py'))}
     if (out/'manifest.json').is_file() and signature(read(out/'manifest.json'))!=signature(frozen):
         raise ValueError('offline_comparison_inputs_changed_use_new_directory')
     atomic_json(out/'manifest.json',frozen)

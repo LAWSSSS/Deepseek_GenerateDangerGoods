@@ -11,6 +11,7 @@ import time
 import numpy as np
 from PIL import Image
 
+from display_batch.rendering import source_path
 from display_batch.ai import Vision
 from display_batch.common import HERE, atomic_json, file_hash, load_catalog, resolve
 from display_batch.compose import compose, cv2, sample_environment
@@ -345,20 +346,20 @@ async def run_locked(args,out,start):
     fog_levels=(.35,) if combined or dust else FINE_FOG if fine else WIDE_FOG if wide else FOG
     inputs = {'cohort':file_hash(rollback/'cases.json'),'pool':pool_levels,
         'fog':fog_levels,'profile':PROFILE,'experiment':experiment,
-        'device':args.device,'renderer':render_dependencies(),'sources':{name:file_hash(HERE/name) for name in
+        'device':args.device,'renderer':render_dependencies(),'sources':{name:file_hash(source_path(name)) for name in
         (Path(__file__).name,'display_batch/compose.py','display_batch/local.py','display_batch/local_light.py',
          'display_batch/photography.py','display_batch/surface_maps.py','validate_display_gradients.py','display_batch/wide_trial.py')},
         'passes':{str(i):v[3] for i,v in passes.items()},'previous':file_hash(previous_root/'results.json')}
-    if fine:inputs['sources']['display_batch/global_light.py']=file_hash(HERE/'display_batch/global_light.py')
+    if fine:inputs['sources']['display_batch/global_light.py']=file_hash(source_path('display_batch/global_light.py'))
     if dust:
         from display_batch.surface_dust_trial import dust_profile
         inputs['profile']=dust_profile(scale)
         for name in ('display_batch/global_light.py','display_batch/surface_dust_trial.py'):
-            inputs['sources'][name]=file_hash(HERE/name)
+            inputs['sources'][name]=file_hash(source_path(name))
         inputs['user_confirmed_style']={'pool_kernel':3,'fog_extra':.35}
     if combined:
         for name in ('display_batch/global_light.py','display_batch/combined_trial.py'):
-            inputs['sources'][name]=file_hash(HERE/name)
+            inputs['sources'][name]=file_hash(source_path(name))
         if comparison_rows:inputs['pool_comparison']=file_hash(resolve(COMBINED_OUTPUT)/'results.json')
     inputs = json.loads(json.dumps(inputs))
     if (out/'inputs.json').is_file() and read(out/'inputs.json')!=inputs:

@@ -9,12 +9,18 @@ description = "Evidence, placement and execution contracts for scrap composites"
 requires-python = ">=3.11"
 dependencies = ["pydantic>=2,<3", "numpy>=1.26,<3", "opencv-python>=4.8,<5", "Pillow>=10"]
 
+[project.scripts]
+scrap-composite = "scrap_composite.cli:main"
+
 [project.optional-dependencies]
 photoshop = ["mcp>=1,<2", "httpx>=0.27,<1"]
 photography = ["pydantic-graph==2.68.0"]
+web = ["starlette>=0.40,<1", "uvicorn>=0.30,<1", "python-multipart>=0.0.18,<1", "httpx>=0.27,<1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
 scrap_composite = ["*.jsx", "photo_*.txt"]
+"scrap_composite.data" = ["*.json"]
+"scrap_composite.frontend" = ["static/*.html", "static/*.js", "static/*.css", "static/package*.json"]

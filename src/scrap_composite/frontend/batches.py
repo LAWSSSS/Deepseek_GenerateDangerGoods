@@ -11,9 +11,14 @@ import asyncio
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
-from .common import ROOT, HERE, atomic_json, load_catalog, FileLease
-from .schema import BatchConfig, EffectSettings, EFFECT_ACTIONS
-from .store import Store
+from scrap_composite.generation.common import ROOT, HERE, atomic_json, load_catalog, FileLease
+from scrap_composite.generation.schema import BatchConfig, EffectSettings, EFFECT_ACTIONS
+from scrap_composite.data.store import Store
+from scrap_composite.data.backgrounds import background_files
+from scrap_composite.data.snapshot import FILENAME, save_snapshot, snapshot
+from scrap_composite.runtime import resolve
+
+STATIC = Path(__file__).with_name('static')
 
 DATA=ROOT/'work/placement-web/batches'
 PROCESSES={}
@@ -31,6 +36,8 @@ def launch(ident):
     if current and current.poll() is None:raise ValueError('批次正在运行')
     config=config_path(ident)
     parsed=BatchConfig.model_validate_json(config.read_text(encoding='utf8'))
+    if (Path(parsed.output)/'jobs.sqlite').exists() and not (Path(parsed.output)/FILENAME).exists():
+        raise ValueError('历史批次请在建立任务时的原实现版本续跑')
     lease=FileLease(Path(parsed.output)/'.batch.lock')
     if not lease.acquire():raise ValueError('批次正在运行')
     lease.release()
@@ -43,7 +50,7 @@ def launch(ident):
 
 
 async def page(request):
-    return FileResponse(HERE/'placement-web/batch.html')
+    return FileResponse(STATIC/'batch.html')
 
 
 async def create(request):
@@ -65,12 +72,13 @@ async def create(request):
         raw['output']=str(ROOT/'outputs'/('批量展示-'+time.strftime('%Y%m%d-%H%M%S')+'-'+ident[:6]))
         config=BatchConfig.model_validate(raw)
         if test and config.count>15:raise ValueError('在线小样测试每批最多 15 项')
-        if not Path(config.backgrounds).is_dir():raise ValueError('背景目录不存在')
-        from .pipeline import make_jobs
+        if not config.manifest and not resolve(config.backgrounds).is_dir():raise ValueError('背景目录不存在')
+        from scrap_composite.generation.pipeline import make_jobs
         catalog=await asyncio.to_thread(load_catalog)
         jobs=await asyncio.to_thread(make_jobs,config,catalog)
         if test and len(jobs)>15:raise ValueError('在线小样清单最多 15 项')
         DATA.mkdir(parents=True,exist_ok=True)
+        await asyncio.to_thread(save_snapshot, config.output, await asyncio.to_thread(snapshot,config,jobs,catalog))
         atomic_json(DATA/(ident+'.json'),config.model_dump())
         launch(ident)
         return JSONResponse({'id':ident,'output':config.output,
@@ -79,6 +87,7 @@ async def create(request):
             'integration_mode':config.integration_mode,
             'workflow':config.workflow,
             'review_profile':config.review_profile,
+            'photoshop_mode':config.photoshop_mode,
             'effective_modes':{'scale':config.scale_mode,'contact':config.contact_mode,'chroma':config.chroma_mode,
                                'integration':config.integration_mode},
             'effects':config.effects.model_dump() if config.effects else None,
@@ -98,10 +107,11 @@ async def status(request):
         result['integration_mode']=config.integration_mode
         result['workflow']=config.workflow
         result['review_profile']=config.review_profile
+        result['photoshop_mode']=config.photoshop_mode
         result['preset']=config.preset
         result['vehicle_reference']=config.vehicle_reference
-        from .collision import VERSION as collision_version
-        from .vehicle_scale import VERSION as scale_version
+        from scrap_composite.generation.collision import VERSION as collision_version
+        from scrap_composite.generation.vehicle_scale import VERSION as scale_version
         result['effective_geometry']={'scale_mode':config.scale_mode,'contact_mode':config.contact_mode,
             'collision_version':collision_version if config.contact_mode=='strict' else 'legacy',
             'vehicle_scale_version':scale_version if config.geometry_preset=='rebuild' else None}
@@ -116,7 +126,10 @@ async def status(request):
             result['counts']=store.counts()
             result['active']=[{'id':r['id'],'stage':r['stage']} for r in store.rows() if r['state']=='running']
             store.close()
-        result['resumable']=not result['running'] and any(result.get('counts',{}).get(k,0) for k in ('queued','running'))
+        legacy = (out/'jobs.sqlite').exists() and not (out/FILENAME).is_file()
+        result['legacy_runtime_required'] = legacy
+        result['resumable'] = not (legacy or result['running']) and any(
+            result.get('counts',{}).get(k,0) for k in ('queued','running'))
         result['has_results']=(out/'index.html').is_file()
         proc=PROCESSES.get(ident)
         if proc and proc.poll() not in (None,0):result['process_error']='执行进程提前退出，请检查批次日志或使用新输出目录'
@@ -134,7 +147,7 @@ async def artifact(request):
     try:
         config=BatchConfig.model_validate_json(config_path(request.path_params['ident']).read_text(encoding='utf8'))
         root=Path(config.output).resolve();path=(root/request.path_params['path']).resolve()
-        if not path.is_relative_to(root) or path.suffix not in ('.png','.jpg','.html','.json','.jsonl') or not path.is_file():
+        if not path.is_relative_to(root) or path.suffix not in ('.png','.jpg','.html','.json','.jsonl','.psd') or not path.is_file():
             raise ValueError('文件不存在')
         return FileResponse(path)
     except (ValueError,OSError):return JSONResponse({'error':'文件不存在'},status_code=404)
@@ -148,6 +161,7 @@ async def effect_options(request):
             {'value':'coherent','label':'局部受光与反射协同（小样）'}],
             'promoted_default':False,'dependency':'lighting_material_render_shadow_compose_review'},
         'workflows':['legacy','evidence_v1'],
+        'photoshop_modes':['off','always','on_issue'],
         'review_profiles':['legacy','photographer'] if find_spec('pydantic_graph') is not None else ['legacy'],
         'recommended':{'scale_mode':'physical_consistent','effects':{
             **EffectSettings().model_dump(),'fog_mode':'local_auto','weathering':'preserve_source',
@@ -175,7 +189,16 @@ async def photography_options(request):
     return JSONResponse({**interface(), 'available':find_spec('pydantic_graph') is not None})
 
 
-routes=[Route('/batch',page),Route('/api/batches',create,methods=['POST']),
+async def backgrounds(request):
+    try:
+        directory = resolve(request.query_params.get('directory') or 'external/backgrounds')
+        files = await asyncio.to_thread(background_files, directory)
+        return JSONResponse([path.name for path in files])
+    except (OSError, ValueError) as error:
+        return JSONResponse({'error': str(error)}, status_code=400)
+
+
+routes=[Route('/batch',page),Route('/api/backgrounds',backgrounds),Route('/api/batches',create,methods=['POST']),
         Route('/api/photography/schema',photography_options),
         Route('/api/batches/effects',effect_options),Route('/api/batches/test',create,methods=['POST']),
         Route('/api/batches/{ident}',status),Route('/api/batches/{ident}/resume',resume,methods=['POST']),

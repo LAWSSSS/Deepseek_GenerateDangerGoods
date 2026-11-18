@@ -140,7 +140,7 @@ class VehicleCalibrationHealthTests(unittest.TestCase):
             pipeline.blender=SimpleNamespace(ask=AsyncMock(side_effect=AssertionError('GPU must not run')))
             with patch('display_batch.specifications.identify',new=AsyncMock(side_effect=AssertionError('asset identification must not run'))) as identify,\
                  patch('display_batch.strict_contact.simulate',new=AsyncMock(side_effect=AssertionError('physics must not run'))) as simulate,\
-                 patch('display_batch.pipeline.choose_candidates',side_effect=AssertionError('candidate search must not run')) as choose:
+                 patch('scrap_composite.generation.placement.choose_candidates',side_effect=AssertionError('candidate search must not run')) as choose:
                 candidates,rejections=asyncio.run(pipeline.choose_placements({},scene,123))
             self.assertEqual(candidates,[])
             self.assertEqual(rejections[0]['reason'],'high_risk_vehicle_projection')

@@ -14,6 +14,7 @@ import numpy as np
 from PIL import Image
 from pydantic import Field
 
+from display_batch.rendering import source_path
 from display_batch.ai import ProviderUnavailable, Vision
 from display_batch.common import HERE, atomic_json, file_hash, load_catalog, resolve, signature
 from display_batch.compose import compose, cv2, object_window, sample_environment, warp
@@ -287,7 +288,7 @@ async def run_locked(args, started, out, rollback, library):
     cache = resolve(config.cache)
     signature_inputs = {
         "cohort": file_hash(rollback / "cases.json"), "scans": scan["signature"], "hdri": hdri["sha256"],
-        "render": render_dependencies(), "sources": {name: file_hash(HERE / name) for name in
+        "render": render_dependencies(), "sources": {name: file_hash(source_path(name)) for name in
             (Path(__file__).name, "display_batch/compose.py", "display_batch/surface_maps.py", "display_batch/photography.py")},
         "pilot": [r["number"] for r in rows if r["asset_id"] in PILOT], "provider_config": args.provider_config,
     }

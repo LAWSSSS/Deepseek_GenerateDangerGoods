@@ -38,7 +38,10 @@ def frame_inputs(asset, comp):
 async def inspect_frame(client, asset, comp, image_hash, *, profile='legacy', parameters=None):
     if profile == 'photographer':
         if parameters is not None:
-            comp={**comp,'execution_state':{'parameters':dict(parameters), 'image_sha256':image_hash}}
+            prior = dict(comp.get('execution_state', {}))
+            if prior.get('backend') == 'photoshop':
+                prior['photoshop_parameters'] = prior.pop('parameters')
+            comp={**comp,'execution_state':{**prior,'parameters':dict(parameters), 'image_sha256':image_hash}}
         context, images = frame_inputs(asset, comp)
         decision = await run_photography(client, context, image_hash, images=images, parameters=parameters)
         return decision.report, _review(decision.report.legacy(), comp['checks'])
@@ -49,7 +52,8 @@ async def inspect_frame(client, asset, comp, image_hash, *, profile='legacy', pa
         client, image_hash, [comp['image'], comp['crop'], asset['board']],
         {'name': asset['name'], 'target_region_in_first_image': target_region,
          'pose_measurement': pose_review_context(comp['checks']),
-         'program_checks': {key: value['status'] for key, value in comp['checks'].items()}},
+         'program_checks': {key: value['status'] for key, value in comp['checks'].items()},
+         'execution_state': comp.get('execution_state', {})},
         prompt='Preserve original material and identifying structures. Judge the actual image, including '
                'lying pose, floating, penetration, occlusion, local light, contrast, haze and camera edges. '
                'The screen angle alone does not establish an upright pose. Call a contact or depth-order '
