@@ -1,0 +1,49 @@
+{
+  "asset_id": "32",
+  "asset_name": "black hydraulic cylinder",
+  "version": "v46",
+  "status": "candidate_visual_review_not_published",
+  "file": "32-black-hydraulic-cylinder-v46.blend",
+  "sha256": "86e114beb38ebd68d6ff78b534a84a7368de0dfe494bb24a6028f08648eaf386",
+  "source_candidate": "v45",
+  "mesh_geometry_fingerprint": "a31ba779684e92d7b79e8be9bfa40c0616dc9c1dec156146b799c86aee20212c",
+  "mesh_geometry_changed": false,
+  "blender": "4.5.3 LTS",
+  "model_readback": {
+    "object": "PublishedSubject",
+    "vertices": 204061,
+    "faces": 182144,
+    "used_materials": 10,
+    "packed_image_count": 19,
+    "unpacked_image_count": 0,
+    "render_engine": "CYCLES",
+    "feature_set": "EXPERIMENTAL"
+  },
+  "surface_candidate": {
+    "oxide_grain_pitch_mm_estimate": 2.78,
+    "bump_distance_mm": 1.0,
+    "shader_displacement_max_mm_estimate": 1.3,
+    "exposed_steel_roughness_multiplier": 0.5,
+    "exposed_steel_metallic": 1.0,
+    "anisotropy": 0.2,
+    "modified_materials": [
+      "Component PBR 01 cylinder_black_enamel",
+      "Component PBR 02 cylinder_black_enamel",
+      "Component PBR 03 cylinder_black_enamel",
+      "Component PBR 04 cast_steel",
+      "Component PBR 05 machined_steel",
+      "Component PBR 07 machined_steel",
+      "Component PBR 08 machined_steel"
+    ]
+  },
+  "visual_scope": "Same source mesh and UV; v46 strengthens the existing oxide grain relief and exposed-steel response. It does not claim an approved production asset.",
+  "environment_preview": {
+    "rendered": true,
+    "resolution": [3840, 2160],
+    "placement_reused": true,
+    "physical_contact": "unknown",
+    "scale_evidence": "estimated",
+    "api_calls": 0,
+    "preview_not_in_repository": true
+  }
+}

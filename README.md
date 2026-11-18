@@ -40,3 +40,5 @@ npm ci --prefix src/scrap_composite/frontend/static
 用户六视图的材质参考、资产绑定、保护区域及完整模型对照入口见[六视图参考材质](docs/reference-material-workflow.md)。新材质仍为候选，不替换源模型和批量默认。
 
 按金属、漆、锈、橡胶和塑料独立复用库贴图，见[分件 PBR 材质](docs/component-pbr-materials.md)及其中的三件试验配置。
+
+32 号黑色液压缸 v46 的候选模型、材质反馈归纳与可复用步骤见[模型记录](docs/modeling/32-hydraulic-cylinder-v46.md)。
