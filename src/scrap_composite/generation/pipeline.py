@@ -6,15 +6,17 @@ import math
 import os
 from pathlib import Path
 import random
+import re
 import shutil
 import statistics
 import time
+from uuid import uuid4
 import numpy as np
 
 from PIL import Image, ImageOps
 
 from . import VERSION
-from .ai import Vision, ProviderUnavailable, token_summary
+from .ai import InvalidStructuredReply, Vision, ProviderUnavailable, token_summary
 from .assets import prepare as prepare_asset
 from .common import ROOT, HERE, atomic_json, file_hash, load_catalog, resolve, signature, implementation_manifest
 from .estimated_scale import allows_estimate, prepare_preview_scale
@@ -23,8 +25,9 @@ from .scene import Scenes
 from .placement import Placement
 from .schema import (Review, FusionReview, EffectsReview, Probe, PHOTO_CONTROLS, StructureConfirmation, version_rank)
 from .pile import diagnostic, receiver_mesh
+from scrap_composite.data.files import atomic_text
 from scrap_composite.data.store import Store
-from .worker import Blender, RenderUnavailable
+from .worker import Blender, RenderOperationFailed, RenderUnavailable
 from .framing import edit_bounds, final_resolution
 from .rendering import RenderCache, RENDER_VERSION
 from .review import allowed_actions, evidence_status, PLACEMENT_DEFECTS
@@ -64,6 +67,21 @@ or below readable pixel size has visibility occluded/unassessable: do not claim 
 Only visible, evidenced geometry loss can be asset scope; a separate unobstructed review must confirm it.
 Chroma/dust/contrast/haze/sharpness actions use auto/less/more; more chroma means MORE desaturation.
 Do not demand an occluded identifying feature to become visible, and do not confuse dust with missing geometry.'''
+
+
+PAUSED_STATES = (
+    (ProviderUnavailable, 'paused_provider'),
+    (RenderUnavailable, 'paused_renderer'),
+    (ReferenceInputChanged, 'paused_inputs'),
+    (PhotoshopUnavailable, 'paused_photoshop'),
+)
+
+
+def failure_reason(exc):
+    message = str(exc).partition('\n')[0][:300]
+    if isinstance(exc, asyncio.CancelledError):
+        return '本次运行已取消' if not message else '运行已取消：' + message
+    return f'{type(exc).__name__}: {message}' if message else type(exc).__name__
 
 
 @contextmanager
@@ -141,7 +159,7 @@ def catalog_preflight(catalog):
 def write_summary(out,store,usage=None,run=None):
     out=Path(out).resolve()
     rows=store.rows();records=[r['result'] for r in rows if r['result']]
-    with (out/'results.jsonl').open('w',encoding='utf8') as f:
+    with atomic_text(out/'results.jsonl') as f:
         for record in records:f.write(json.dumps(record,ensure_ascii=False)+'\n')
     groups={}
     for row in rows:
@@ -170,7 +188,6 @@ def write_summary(out,store,usage=None,run=None):
     if any('insertion_trace' in r for r in records):
         summary['insertion_traces']={status:sum(r.get('insertion_trace')==status for r in records)
                                      for status in ('none','uncertain','visible')}
-    atomic_json(out/'summary.json',summary)
     sections=[]
     for r in records:
         image=Path(r['image']).relative_to(out).as_posix() if r.get('image') else None
@@ -197,7 +214,9 @@ def write_summary(out,store,usage=None,run=None):
                         ('<details><summary>每轮完整画面与实际参数</summary>'+''.join(history)+'</details>' if history else '')+'</section>')
     page='<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>多背景批量结果</title><style>body{background:#172128;color:#eee;font:15px sans-serif;margin:30px auto;max-width:1600px;padding:16px}section{border-top:1px solid #456;padding:15px}img{display:block;width:100%;height:auto}a{color:#b1dfce}h2{font-size:16px}</style><h1>多背景批量展示结果</h1><p>完整画面可点击查看原尺寸。场景依据为估计，展示合格不等于旧流程正式验收。</p><pre>'+html.escape(json.dumps(summary['counts'],ensure_ascii=False))+'</pre>'+''.join(sections)
     page=page.replace('<h1>多背景批量展示结果</h1>','<h1>多背景批量展示结果</h1><p>'+html.escape(cost_label(summary['cost_total']))+'</p>')
-    (out/'index.html').write_text(page,encoding='utf8')
+    with atomic_text(out/'index.html') as stream:
+        stream.write(page)
+    atomic_json(out/'summary.json',summary)
     return summary
 
 
@@ -210,7 +229,8 @@ class Pipeline:
         if config.effects and config.effects.surface_finish in ('generated_pbr', 'physical_layers'):
             from .generated_material import load_pack
             self.surface_pack = load_pack(resolve(config.effects.surface_finish_manifest))
-        self.run_id=time.strftime('%Y%m%d-%H%M%S')+f'-{os.getpid()}'
+        requested_run = os.environ.get('SCRAP_BATCH_RUN_ID', '')
+        self.run_id = requested_run if re.fullmatch(r'[0-9a-f]{32}', requested_run) else uuid4().hex
         self.vision=Vision(config,self.cache/'vision',self.out/f'usage-{self.run_id}.json')
         self.blender=Blender(self.cache/('worker-'+str(os.getpid())),config.render_device)
         self.renders=RenderCache(self.cache,self.blender)
@@ -260,7 +280,7 @@ class Pipeline:
                 else:
                     try:self.assets[k]=await prepare_asset(row,self.cache,self.blender,self.vision,strict=self.config.contact_mode=='strict')
                     except (ProviderUnavailable,RenderUnavailable):raise
-                    except Exception as error:
+                    except (ValueError, InvalidStructuredReply, RenderOperationFailed) as error:
                         self.assets[k]={**row,'signature':key,'poses':[],
                             'reason':f'asset_preparation_failed: {type(error).__name__}: {str(error)[:220]}'}
                         atomic_json(failure_path,self.assets[k])
@@ -277,7 +297,7 @@ class Pipeline:
                     gate=await preflight_visible_width(payload['background'],size,self.config.vehicle_reference,self.vision)
                 except ProviderUnavailable:
                     raise
-                except (ValueError,RuntimeError) as failure:
+                except (ValueError, InvalidStructuredReply) as failure:
                     gate={'status':'unknown','allow_expensive_steps':False,
                           'risk_codes':['width_observation_unavailable'],'reason':str(failure)[:180]}
                 self.width_gates[key]=gate
@@ -306,12 +326,12 @@ class Pipeline:
         key=payload['background_hash']
         async with self.prepare_lock:
             if key in self.scene_format_failures:
-                raise RuntimeError(self.scene_format_failures[key])
+                raise ValueError(self.scene_format_failures[key])
             try:
                 return await self.scenes.prepare(payload['background'])
             except ProviderUnavailable:
                 raise
-            except (ValueError,RuntimeError) as failure:
+            except (ValueError, InvalidStructuredReply) as failure:
                 self.scene_format_failures[key]=str(failure)[:220]
                 raise
 
@@ -811,9 +831,9 @@ class Pipeline:
             raise
         except (ProviderUnavailable,RenderUnavailable,ReferenceInputChanged):
             raise
-        except Exception as error:
+        except (ValueError, InvalidStructuredReply, RenderOperationFailed) as error:
             result.update(status='failed',reason=f'{type(error).__name__}: {str(error)[:260]}')
-            if type(error).__name__ == 'InvalidStructuredReply':
+            if isinstance(error, InvalidStructuredReply):
                 result.update(status='review',visual_status='unknown',photo_status='unknown',
                               reason='review_invalid_after_one_repair')
             if best:
@@ -823,7 +843,7 @@ class Pipeline:
                 result.update(checks=draft['checks'],draft_record=str(folder/f"draft-{draft['iteration']}.json"),
                     unreviewed_draft=True,measured_major_px=draft['measured_major_px'],
                     evidence_status=evidence_status(draft['checks']))
-                if (type(error).__name__=='InvalidStructuredReply' and self.config.preset=='realism_v1'
+                if (isinstance(error, InvalidStructuredReply) and self.config.preset=='realism_v1'
                         and self.config.uncertain_policy=='render_review'
                         and evidence_status(draft['checks'])!='fail'):
                     entry={**draft,'review':None,'review_status':'unknown','unreviewed_draft':True,
@@ -907,8 +927,7 @@ class Pipeline:
         with batch_lock(self.out):
             return await self._run_pinned(reuse_from)
 
-    async def _run_pinned(self, reuse_from):
-        started=time.monotonic();state='complete';error=None
+    async def _prepare_queue(self):
         pinned = read_snapshot(self.out, self.config)
         if pinned is None:
             jobs = make_jobs(self.config, self.catalog)
@@ -927,7 +946,8 @@ class Pipeline:
         if reference_snapshot is not None:
             inputs = (*inputs, ('reference-material-snapshot', reference_snapshot['signature']))
         config_signature=signature(*inputs)
-        self.store.initialize(config_signature,jobs);self.store.recover()
+        self.store.initialize(config_signature,jobs)
+        self.store.recover()
         save_snapshot(self.out, pinned)
         atomic_json(self.out/'config.json',self.config.model_dump())
         atomic_json(self.out/'inputs.json',jobs)
@@ -936,66 +956,165 @@ class Pipeline:
         atomic_json(self.out/'dimension-reference-signature.json',self.dimension_reference_signature())
         if reference_snapshot is not None:
             atomic_json(self.out/'reference-material-snapshot.json',reference_snapshot)
-        try:
-            if issue := await asyncio.to_thread(mismatched_inputs, pinned):
-                raise ReferenceInputChanged(issue)
-            atomic_json(self.out/'catalog-preflight.json',catalog_preflight(self.catalog))
-            if self.config.photoshop_mode == 'always' and self.store.counts().get('queued'):
-                await PhotoshopExecutor().preflight()
-            if reuse_from:self.reuse_completed(reuse_from,implementation)
-            if not self.config.offline and self.store.counts().get('queued'):
-                probe_path=self.out/'capability-probe.jpg'
-                with Image.open(jobs[0]['background']) as im:
-                    im=im.convert('RGB');im.thumbnail((512,512));im.save(probe_path,quality=80)
-                probe=await self.vision.ask('capability',Probe,'Confirm the supplied image is visible; describe it briefly.',{},[probe_path],
-                                            plain_json=self.config.appearance in ('native','local'))
-                if not probe.image_visible:raise ProviderUnavailable('视觉服务未确认图像可见')
-            stop=asyncio.Event()
-            async def consumer():
-                nonlocal state,error
-                while not stop.is_set():
-                    job=self.store.claim(group_size=4)
-                    if not job:return
-                    print(json.dumps({'event':'start','job':job['id'],'asset':job['payload']['asset_id']},ensure_ascii=False),flush=True)
-                    try:result=await self.job(job)
-                    except (ProviderUnavailable,RenderUnavailable,ReferenceInputChanged,PhotoshopUnavailable) as failure:
-                        self.store.pause(job['id'])
-                        state=('paused_inputs' if isinstance(failure,ReferenceInputChanged) else
-                               'paused_provider' if isinstance(failure,ProviderUnavailable) else
-                               'paused_photoshop' if isinstance(failure,PhotoshopUnavailable) else 'paused_renderer')
-                        error=str(failure);stop.set();return
-                    self.store.finish(job['id'],result['status'],result)
-                    progress=write_summary(self.out,self.store,self.vision.usage(),{'id':self.run_id,'state':'running'})
-                    print(json.dumps({'event':'done','job':job['id'],'status':result['status'],
-                                      'reason':result['reason'],'seconds':result['seconds'],
-                                      'cost_total':cost_label(progress['cost_total'])},ensure_ascii=False),flush=True)
-            await asyncio.gather(*(consumer() for _ in range(self.config.cpu_concurrency)))
-        except ProviderUnavailable as failure:
-            state='paused_provider';error=str(failure)
-        except ReferenceInputChanged as failure:
-            state='paused_inputs';error=str(failure)
-        except PhotoshopUnavailable as failure:
-            state='paused_photoshop';error=str(failure)
-        finally:
-            await self.blender.close();await self.vision.close()
-            summary=write_summary(self.out,self.store,self.vision.usage(),
-                {'id':self.run_id,'state':state,'error':error,'seconds':round(time.monotonic()-started,3),
-                 'gpu_seconds':round(self.blender.seconds,3)})
-            summary['run']['worker_operations_seconds']=self.blender.operation_seconds
-            summary['run']['worker_launch_seconds']=self.blender.start_seconds
-            summary['run']['gpu_wait_seconds']=self.blender.wait_seconds
-            summary['run']['api_seconds']=round(sum(c['seconds'] for c in self.vision.calls),3)
-            summary['run']['render_counts']=dict(self.renders.totals)
-            summary['run']['render_stage_seconds']=dict(self.renders.timings)
-            summary['run']['memory_retries']=self.blender.memory_retries
-            if self.config.workflow=='evidence_v1':
-                from scrap_composite.knowledge import archive_run
-                import sqlite3
+        return implementation
+
+    async def _consume_queue(self, run):
+        stop = asyncio.Event()
+
+        async def consumer():
+            while not stop.is_set():
+                job = self.store.claim(group_size=4)
+                if job is None:
+                    return
+                ident = job['id']
+                committed = False
                 try:
-                    summary['knowledge_archive']=archive_run(self.out,resolve('work/knowledge/history-v2.sqlite'))
-                except (OSError,ValueError,sqlite3.Error) as failure:
-                    summary['knowledge_archive']={'error_kind':type(failure).__name__}
-            atomic_json(self.out/f'run-{self.run_id}.json',summary['run'])
-            atomic_json(self.out/'summary.json',summary)
+                    print(json.dumps({'event':'start','job':ident,'asset':job['payload']['asset_id']},
+                                     ensure_ascii=False), flush=True)
+                    result = await self.job(job)
+                    self.store.finish(ident, result['status'], result)
+                    committed = True
+                    progress = write_summary(self.out, self.store, self.vision.usage(),
+                                             {**run, 'remaining':self.store.remaining()})
+                    print(json.dumps({'event':'done','job':ident,'status':result['status'],
+                                      'reason':result['reason'],'seconds':result['seconds'],
+                                      'cost_total':cost_label(progress['cost_total'])},
+                                     ensure_ascii=False), flush=True)
+                except (Exception, asyncio.CancelledError) as failure:
+                    if not stop.is_set():
+                        stop.set()
+                        run.update(job_id=ident, stage='summary' if committed else self.store.job_stage(ident),
+                                   error=failure_reason(failure), remaining=self.store.remaining())
+                        self.store.record_run(run)
+                    if not committed:
+                        self.store.pause(ident)
+                    raise
+
+        tasks = [asyncio.create_task(consumer()) for _ in range(self.config.cpu_concurrency)]
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            # A failing worker must stop new claims. Allow already claimed work to settle
+            # before releasing Blender, the ledger or the exclusive process lock.
+            stop.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _run_pinned(self, reuse_from):
+        started = time.monotonic()
+        run = self.store.begin_run(self.run_id, 'prepare_inputs')
+        ready = False
+        failure = None
+        unexpected = False
+
+        def enter(stage):
+            run.update(stage=stage, job_id=None, remaining=self.store.remaining())
+            self.store.record_run(run)
+
+        def interrupted(exc, stage=None):
+            nonlocal failure, unexpected
+            state = next((name for kind, name in PAUSED_STATES if isinstance(exc, kind)), 'interrupted')
+            unexpected |= state == 'interrupted'
+            if failure is not None:
+                failure.add_note(f'{stage or run["stage"]}: {failure_reason(exc)}')
+                return
+            failure = exc
+            run.update(state=state, error=failure_reason(exc))
+            if stage:
+                run.update(stage=stage, job_id=None)
+            self.store.record_run(run)
+
+        try:
+            try:
+                implementation = await self._prepare_queue()
+                ready = True
+                enter('preflight')
+                pinned = self.input_snapshot
+                if issue := await asyncio.to_thread(mismatched_inputs, pinned):
+                    raise ReferenceInputChanged(issue)
+                atomic_json(self.out/'catalog-preflight.json', catalog_preflight(self.catalog))
+                if self.config.photoshop_mode == 'always' and self.store.remaining():
+                    enter('photoshop_preflight')
+                    await PhotoshopExecutor().preflight()
+                if reuse_from:
+                    enter('reuse')
+                    self.reuse_completed(reuse_from, implementation)
+                if not self.config.offline and self.store.remaining():
+                    enter('provider_probe')
+                    probe_path = self.out/'capability-probe.jpg'
+                    with Image.open(pinned['jobs'][0]['background']) as im:
+                        im = im.convert('RGB')
+                        im.thumbnail((512,512))
+                        im.save(probe_path, quality=80)
+                    probe = await self.vision.ask('capability', Probe,
+                        'Confirm the supplied image is visible; describe it briefly.', {}, [probe_path],
+                        plain_json=self.config.appearance in ('native','local'))
+                    if not probe.image_visible:
+                        raise ProviderUnavailable('视觉服务未确认图像可见')
+                enter('dispatch')
+                await self._consume_queue(run)
+                counts = self.store.counts()
+                finished = sum(counts.get(state, 0) for state in ('accepted_display', 'review', 'failed'))
+                if finished != len(pinned['jobs']) or finished != sum(counts.values()):
+                    raise RuntimeError('计划任务与账本终态数量不一致')
+            except (Exception, asyncio.CancelledError) as exc:
+                interrupted(exc)
+
+            for stage, close in [('close_renderer', self.blender.close), ('close_provider', self.vision.close)]:
+                if failure is None:
+                    enter(stage)
+                try:
+                    await close()
+                except (Exception, asyncio.CancelledError) as exc:
+                    interrupted(exc, stage)
+
+            # An incompatible resume attempt must never replace a previous batch's summary.
+            publish_summary = ready or not (self.out/'summary.json').is_file()
+            if self.store.counts():
+                run['remaining'] = self.store.remaining()
+            elif getattr(self, 'input_snapshot', None):
+                run['remaining'] = len(self.input_snapshot['jobs'])
+            if failure is None:
+                enter('summary')
+            try:
+                run.update(seconds=round(time.monotonic()-started,3), gpu_seconds=round(self.blender.seconds,3),
+                           worker_operations_seconds=self.blender.operation_seconds,
+                           worker_launch_seconds=self.blender.start_seconds, gpu_wait_seconds=self.blender.wait_seconds,
+                           api_seconds=round(sum(c['seconds'] for c in self.vision.calls),3),
+                           render_counts=dict(self.renders.totals), render_stage_seconds=dict(self.renders.timings),
+                           memory_retries=self.blender.memory_retries)
+                if failure is None:
+                    run.update(state='complete', stage='complete')
+                if publish_summary:
+                    summary = write_summary(self.out, self.store, self.vision.usage(), run)
+                    if self.config.workflow == 'evidence_v1':
+                        from scrap_composite.knowledge import archive_run
+                        import sqlite3
+                        try:
+                            summary['knowledge_archive'] = archive_run(self.out, resolve('work/knowledge/history-v2.sqlite'))
+                        except (OSError,ValueError,sqlite3.Error) as exc:
+                            summary['knowledge_archive'] = {'error_kind':type(exc).__name__}
+                        atomic_json(self.out/'summary.json', summary)
+                atomic_json(self.out/f'run-{self.run_id}.json', run)
+                self.store.record_run(run)
+            except (Exception, asyncio.CancelledError) as exc:
+                interrupted(exc, 'summary')
+                # Even if the report itself is broken, the durable ledger carries the
+                # original cause. Update its JSON mirrors if the filesystem is writable.
+                self.store.record_run(run)
+                try:
+                    atomic_json(self.out/f'run-{self.run_id}.json', run)
+                    if publish_summary:
+                        summary = {'run':run, 'counts':self.store.counts()}
+                        try:
+                            summary['cost_total'] = cumulative(self.out)
+                        except (OSError, ValueError, TypeError) as cost_error:
+                            failure.add_note(failure_reason(cost_error))
+                        atomic_json(self.out/'summary.json', summary)
+                except OSError as mirror_error:
+                    failure.add_note(failure_reason(mirror_error))
+                    unexpected = True
+            if failure is not None and (not publish_summary or unexpected):
+                raise failure
+            return summary
+        finally:
             self.store.close()
-        return summary

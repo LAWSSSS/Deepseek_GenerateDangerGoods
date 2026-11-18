@@ -461,12 +461,12 @@ class LoopTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls,3);self.assertEqual(len(result['iterations']),3)
 
     async def test_failed_later_review_preserves_best_reviewed_image(self):
-        result,calls=await self.run_loop(2,[review(2,[Action(kind='tone',value='darker')]),RuntimeError('invalid response')])
+        result,calls=await self.run_loop(2,[review(2,[Action(kind='tone',value='darker')]),ValueError('invalid response')])
         self.assertEqual(result['status'],'failed');self.assertEqual(result['best_iteration'],0)
         self.assertEqual(result['_copied_hash'],result['iterations'][0]['image_hash']);self.assertEqual(calls,2)
 
     async def test_failed_first_review_keeps_program_checks(self):
-        result,calls=await self.run_loop(0,[RuntimeError('invalid response')])
+        result,calls=await self.run_loop(0,[ValueError('invalid response')])
         self.assertEqual(result['status'],'failed');self.assertTrue(result['unreviewed_draft'])
         self.assertEqual(result['checks']['support']['status'],'pass');self.assertEqual(calls,1)
         self.assertNotIn('image',result)

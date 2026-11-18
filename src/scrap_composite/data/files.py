@@ -1,4 +1,5 @@
 """Content fingerprints and atomic persistence for local inputs."""
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -16,17 +17,23 @@ def file_hash(path):
         return hashlib.file_digest(f, "sha256").hexdigest()
 
 
-def atomic_json(path, data):
+@contextmanager
+def atomic_text(path):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(dir=path.parent, prefix=path.name, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2, default=str, allow_nan=False)
+            yield f
         os.replace(name, path)
     finally:
         if os.path.exists(name):
             os.unlink(name)
+
+
+def atomic_json(path, data):
+    with atomic_text(path) as stream:
+        json.dump(data, stream, ensure_ascii=False, indent=2, default=str, allow_nan=False)
 
 
 class FileLease:

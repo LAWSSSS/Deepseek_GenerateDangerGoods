@@ -184,6 +184,10 @@ function batchPayload() {
 const stageNames = {
   photoshop: 'Photoshop 导出', asset: '准备模型', scene: '分析背景',
   review: '复核成图', review_request: '复核图片', queued: '等待执行',
+  launch: '启动工作进程', prepare_inputs: '准备输入与队列', preflight: '运行前检查',
+  photoshop_preflight: '检查 Photoshop', reuse: '复用已有结果', provider_probe: '检查视觉服务',
+  dispatch: '分派任务', close_renderer: '关闭渲染器', close_provider: '关闭视觉服务',
+  summary: '写入批次摘要', complete: '处理结束',
 };
 
 function showRunDetails(data) {
@@ -195,6 +199,17 @@ function showRunDetails(data) {
     const description = document.createElement('dd');
     description.textContent = value;
     list.append(term, description);
+  }
+  const run = data.run;
+  if (run?.id) row('本次运行编号', run.id);
+  if (run?.stage) row('最后记录阶段', stageNames[run.stage] || run.stage);
+  if (run?.job_id) row('对应任务', run.job_id);
+  if (run?.remaining != null) row('剩余任务', String(run.remaining));
+  const previous = data.previous_interruption;
+  if (previous) {
+    const details = [previous.id, stageNames[previous.stage] || previous.stage, previous.job_id, previous.error];
+    if (previous.remaining != null) details.push(`当时剩余 ${previous.remaining} 项`);
+    row('上一次中断', details.filter(Boolean).join(' · '));
   }
   const trace = data.insertion_traces;
   if (trace) row('插入痕迹', `未见 ${trace.none ?? 0} · 不确定 ${trace.uncertain ?? 0} · 可见 ${trace.visible ?? 0}`);
@@ -223,6 +238,8 @@ function showStatus(data) {
   const done = (counts.accepted_display || 0) + (counts.review || 0) + (counts.failed || 0);
   const error = data.run?.error || data.process_error;
   if (data.running) setState('运行中', 'running');
+  else if (data.run?.state === 'interrupted') setState('已中断', 'warning');
+  else if (data.run?.state?.startsWith('paused_')) setState('已暂停', 'warning');
   else if (error) setState('运行异常', 'warning');
   else if (data.resumable) setState('可继续', 'warning');
   else if (total && done === total) setState('处理结束');
@@ -239,7 +256,7 @@ function showStatus(data) {
     field('accepted').textContent = counts.accepted_display || 0;
     field('review').textContent = counts.review || 0;
     field('failed').textContent = counts.failed || 0;
-    field('queued').textContent = `排队 ${counts.queued || 0} 项 · 执行中 ${counts.running || 0} 项 · 展示合格率 ${(100 * (counts.accepted_display || 0) / total).toFixed(1)}%`;
+    field('queued').textContent = `排队 ${counts.queued || 0} 项 · ${data.running ? '执行中' : '中断待续'} ${counts.running || 0} 项 · 展示合格率 ${(100 * (counts.accepted_display || 0) / total).toFixed(1)}%`;
   }
   const imageRate = data.image_rate == null ? '' : ` · 有图率 ${(100 * data.image_rate).toFixed(1)}%`;
   field('images').textContent = data.generated_pngs == null ? '' : `已出图 ${data.generated_pngs} 张${imageRate}`;
@@ -248,7 +265,12 @@ function showStatus(data) {
     item.textContent = `${job.id} · ${stageNames[job.stage] || job.stage}`;
     return item;
   }));
-  field('runError').textContent = error || (data.legacy_runtime_required ? '历史批次请在创建它的原实现版本续跑。' : '');
+  const location = [data.run?.job_id, stageNames[data.run?.stage] || data.run?.stage].filter(Boolean);
+  const remaining = data.run?.remaining;
+  if (remaining != null) location.push(`剩余 ${remaining} 项`);
+  const failure = error ? [...location, error].join(' · ') : '';
+  const legacyNote = data.legacy_runtime_required ? '历史批次请在创建它的原实现版本续跑。' : '';
+  field('runError').textContent = [failure, legacyNote].filter(Boolean).join(' ');
   field('results').hidden = !data.has_results;
   field('results').href = `/api/batches/${encodeURIComponent(batch)}/files/index.html`;
   showRunDetails(data);

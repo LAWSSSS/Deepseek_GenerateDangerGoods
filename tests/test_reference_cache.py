@@ -99,7 +99,7 @@ class ReferenceCacheTests(unittest.TestCase):
                     captured.append(value);raise CapturedSignature()
                 pipe.store=SimpleNamespace(initialize=initialize)
                 with patch('display_batch.pipeline.make_jobs',return_value=jobs),patch('display_batch.pipeline.implementation_manifest',return_value={}):
-                    with self.assertRaises(CapturedSignature):asyncio.run(pipe.run())
+                    with self.assertRaises(CapturedSignature):asyncio.run(pipe._prepare_queue())
                 return captured[0],getattr(pipe,'reference_snapshot',None)
             config=BatchConfig(backgrounds=str(root),output=str(root),effects={
                 'surface_finish':'physical_layers','surface_finish_manifest':'fixture',

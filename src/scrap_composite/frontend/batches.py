@@ -1,5 +1,9 @@
 """Local batch controls; subprocess receives paths, never credentials in argv."""
+from contextlib import closing, suppress
 import json
+import queue
+import re
+import threading
 from importlib.util import find_spec
 from pathlib import Path
 import secrets
@@ -14,6 +18,7 @@ from starlette.routing import Route
 from scrap_composite.generation.common import ROOT, HERE, atomic_json, load_catalog, FileLease
 from scrap_composite.generation.schema import BatchConfig, EffectSettings, EFFECT_ACTIONS
 from scrap_composite.data.store import Store
+from .batch_worker import record_start_failure
 from scrap_composite.data.backgrounds import background_files
 from scrap_composite.data.snapshot import FILENAME, save_snapshot, snapshot
 from scrap_composite.runtime import resolve
@@ -31,22 +36,119 @@ def config_path(ident):
     return path
 
 
-def launch(ident):
-    current=PROCESSES.get(ident)
-    if current and current.poll() is None:raise ValueError('批次正在运行')
-    config=config_path(ident)
-    parsed=BatchConfig.model_validate_json(config.read_text(encoding='utf8'))
-    if (Path(parsed.output)/'jobs.sqlite').exists() and not (Path(parsed.output)/FILENAME).exists():
-        raise ValueError('历史批次请在建立任务时的原实现版本续跑')
-    lease=FileLease(Path(parsed.output)/'.batch.lock')
-    if not lease.acquire():raise ValueError('批次正在运行')
+def lock_held(path):
+    lease = FileLease(path)
+    if not lease.acquire():
+        return True
     lease.release()
-    log=(DATA/(ident+'.log')).open('a',encoding='utf8')
+    return False
+
+
+def read_summary(out):
+    path = out / 'summary.json'
+    return json.loads(path.read_text(encoding='utf8')) if path.is_file() else {}
+
+
+def receipt_path(out, run):
+    ident = run.get('id')
+    if not isinstance(ident, str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}', ident):
+        raise ValueError('运行记录中的编号无效')
+    return out / f'run-{ident}.json'
+
+
+def reconcile_interruption(out, store, summary):
+    """Called with the batch lease and no active web worker."""
+    before = store.last_run()
+    legacy = summary.get('run') or {}
+    if not before and legacy.get('state') == 'complete' and store.remaining():
+        legacy = {**legacy, 'state':'running', 'stage':'dispatch', 'error':
+                  '历史摘要标为完成，但任务账本仍有未处理项。原运行未记录具体原因。'}
+    run = store.interrupt_stale_run(legacy)
+    if not run or run['state'] != 'interrupted':
+        return run
+    receipt = receipt_path(out, run)
+    if before and before['state'] != 'running' and receipt.is_file():
+        # A rejected configuration can legitimately retain the previous summary.
+        # Only the caller's current status view should overlay the new error.
+        return run
+    if run.get('stage') == 'launch' or not store.counts():
+        summary.update(run=run, counts=store.counts(), usage_current_run=None)
+        atomic_json(out / 'summary.json', summary)
+    else:
+        from scrap_composite.generation.pipeline import write_summary
+        usage_file = out / f"usage-{run['id']}.json"
+        usage = json.loads(usage_file.read_text(encoding='utf8')) if usage_file.is_file() else None
+        summary.update(write_summary(out, store, usage, run))
+    atomic_json(receipt, run)
+    return run
+
+
+def wait_for_worker(proc):
+    reply = queue.Queue(maxsize=1)
+
+    def read_ready():
+        reply.put(proc.stdout.readline().strip())
+    threading.Thread(target=read_ready, daemon=True).start()
     try:
-        PROCESSES[ident]=subprocess.Popen([sys.executable,'-X','utf8','-u',str(HERE/'batch_display.py'),
-            'run','--config',str(config)],cwd=str(ROOT),stdout=log,stderr=subprocess.STDOUT,
-            creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
-    finally:log.close()
+        if reply.get(timeout=10) != b'ready':
+            raise OSError('工作进程在启动握手前退出，请检查批次日志')
+    except queue.Empty:
+        raise TimeoutError('工作进程启动握手超时') from None
+
+
+def launch(ident):
+    config = config_path(ident)
+    parsed = BatchConfig.model_validate_json(config.read_text(encoding='utf8'))
+    out = Path(parsed.output)
+    database = out / 'jobs.sqlite'
+    if database.exists() and not (out / FILENAME).exists():
+        raise ValueError('历史批次请在建立任务时的原实现版本续跑')
+    lease = FileLease(out / '.batch.lock')
+    if not lease.acquire():
+        raise ValueError('批次正在运行')
+    try:
+        if lock_held(out / '.web-worker.lock'):
+            raise ValueError('批次正在运行')
+        previous = PROCESSES.get(ident)
+        if previous:
+            previous.poll()  # Reap the prior child if this web process started it.
+        with closing(Store(database)) as store:
+            reconcile_interruption(out, store, read_summary(out))
+            if store.counts() and not store.remaining():
+                raise ValueError('所有任务都已处理，当前批次没有可续跑的任务')
+            run_id = secrets.token_hex(16)
+            run = store.begin_run(run_id, 'launch')
+            if run['remaining'] is None and (out / FILENAME).is_file():
+                run['remaining'] = len(json.loads((out / FILENAME).read_text(encoding='utf8'))['jobs'])
+                store.record_run(run)
+            proc = None
+            try:
+                with (DATA / (ident + '.log')).open('ab') as log:
+                    proc = subprocess.Popen([
+                        sys.executable, '-X', 'utf8', '-u', str(Path(__file__).with_name('batch_worker.py')),
+                        str(out), str(HERE / 'batch_display.py'), str(config), run_id,
+                    ], cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
+                       creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                wait_for_worker(proc)
+                PROCESSES[ident] = proc
+                lease.release()
+                proc.stdin.write(b'run\n')
+                proc.stdin.flush()
+            except (OSError, ValueError) as exc:
+                # The child has not acknowledged the dispatch. Reap this startup
+                # attempt so it cannot acquire the worker lease later.
+                if proc and proc.poll() is None:
+                    proc.kill()
+                    proc.wait()
+                record_start_failure(store, out, run_id, exc)
+                raise
+            finally:
+                if proc:
+                    with suppress(BrokenPipeError):
+                        proc.stdin.close()
+                    proc.stdout.close()
+    finally:
+        lease.release()
 
 
 async def page(request):
@@ -80,8 +182,17 @@ async def create(request):
         DATA.mkdir(parents=True,exist_ok=True)
         await asyncio.to_thread(save_snapshot, config.output, await asyncio.to_thread(snapshot,config,jobs,catalog))
         atomic_json(DATA/(ident+'.json'),config.model_dump())
-        launch(ident)
+        startup_error = None
+        try:
+            await asyncio.to_thread(launch, ident)
+        except OSError as exc:
+            # The request already owns an ID and snapshot. Offer that attempt's
+            # durable error and retry action through the normal status endpoint.
+            if not (Path(config.output) / 'jobs.sqlite').exists():
+                raise
+            startup_error = str(exc)[:300]
         return JSONResponse({'id':ident,'output':config.output,
+            **({'startup_error':startup_error} if startup_error else {}),
             'preset':config.preset,
             'geometry_preset':config.geometry_preset,'vehicle_reference':config.vehicle_reference,
             'integration_mode':config.integration_mode,
@@ -92,7 +203,7 @@ async def create(request):
                                'integration':config.integration_mode},
             'effects':config.effects.model_dump() if config.effects else None,
             'status_url':f'/api/batches/{ident}',
-            'report_url':f'/api/batches/{ident}/files/index.html'},status_code=202)
+            'report_url':f'/api/batches/{ident}/files/index.html'},status_code=201 if startup_error else 202)
     except (ValueError,OSError) as error:
         return JSONResponse({'error':str(error)[:300]},status_code=400)
 
@@ -101,7 +212,7 @@ async def status(request):
     try:
         ident=request.path_params['ident'];path=config_path(ident)
         config=BatchConfig.model_validate_json(path.read_text(encoding='utf8'));out=Path(config.output)
-        result={'id':ident,'output':str(out),'running':bool(ident in PROCESSES and PROCESSES[ident].poll() is None)}
+        result={'id':ident,'output':str(out)}
         result['effects']=config.effects.model_dump() if config.effects else None
         result['geometry_preset']=config.geometry_preset
         result['integration_mode']=config.integration_mode
@@ -115,32 +226,67 @@ async def status(request):
         result['effective_geometry']={'scale_mode':config.scale_mode,'contact_mode':config.contact_mode,
             'collision_version':collision_version if config.contact_mode=='strict' else 'legacy',
             'vehicle_scale_version':scale_version if config.geometry_preset=='rebuild' else None}
-        lease=FileLease(out/'.batch.lock')
-        if not lease.acquire():result['running']=True
-        else:lease.release()
-        if (out/'summary.json').is_file():result.update(json.loads((out/'summary.json').read_text(encoding='utf8')))
+        summary = read_summary(out)
+        database = out / 'jobs.sqlite'
+        running = lock_held(out / '.web-worker.lock')
+        if database.is_file():
+            with closing(Store(database)) as store:
+                run = store.last_run()
+                counts = store.counts()
+                legacy = summary.get('run') or {}
+                unfinished_legacy = not run and (counts.get('running', 0) or
+                    (counts.get('queued', 0) and legacy.get('state') == 'complete'))
+                may_be_active = (run or legacy).get('state') == 'running' or unfinished_legacy
+                files_pending = run and run['state'] == 'interrupted' and not receipt_path(out, run).is_file()
+                if not running and (may_be_active or files_pending):
+                    lease = FileLease(out / '.batch.lock')
+                    if lease.acquire():
+                        try:
+                            running = lock_held(out / '.web-worker.lock')
+                            if not running:
+                                summary = read_summary(out)
+                                run = reconcile_interruption(out, store, summary)
+                        finally:
+                            lease.release()
+                    else:
+                        running = True
+                if run is not None:
+                    summary['run'] = dict(run)
+                    if run['state'] == 'running' and counts:
+                        summary['run']['remaining'] = store.remaining()
+                previous = store.last_interruption()
+                if previous and previous['id'] != (run or {}).get('id'):
+                    result['previous_interruption'] = {
+                        key: previous.get(key) for key in ('id', 'stage', 'job_id', 'error', 'remaining')
+                    }
+                summary['counts'] = store.counts()
+                result['active'] = [
+                    {'id': r['id'], 'stage': r['stage']} for r in store.rows() if r['state'] == 'running'
+                ] if running and summary['counts'].get('running') else []
+        result.update(summary)
+        result['running'] = running
         if result.get('usage_current_run'):
-            result['usage_current_run']={k:v for k,v in result['usage_current_run'].items() if k!='calls'}
-        if (out/'jobs.sqlite').is_file():
-            store=Store(out/'jobs.sqlite')
-            result['counts']=store.counts()
-            result['active']=[{'id':r['id'],'stage':r['stage']} for r in store.rows() if r['state']=='running']
-            store.close()
-        legacy = (out/'jobs.sqlite').exists() and not (out/FILENAME).is_file()
+            result['usage_current_run'] = {k:v for k,v in result['usage_current_run'].items() if k != 'calls'}
+        counts = result.get('counts', {})
+        remaining = counts.get('queued', 0) + counts.get('running', 0)
+        legacy = database.exists() and not (out / FILENAME).is_file()
         result['legacy_runtime_required'] = legacy
-        result['resumable'] = not (legacy or result['running']) and any(
-            result.get('counts',{}).get(k,0) for k in ('queued','running'))
-        result['has_results']=(out/'index.html').is_file()
-        proc=PROCESSES.get(ident)
-        if proc and proc.poll() not in (None,0):result['process_error']='执行进程提前退出，请检查批次日志或使用新输出目录'
+        # A run can fail during import/preflight before the queue is initialized.
+        result['resumable'] = (not legacy and not running and
+                               (remaining > 0 or not counts and (out / FILENAME).is_file()))
+        result['has_results'] = (out / 'index.html').is_file()
+        proc = PROCESSES.get(ident)
+        if proc:
+            proc.poll()
         return JSONResponse(result)
     except ValueError as error:return JSONResponse({'error':str(error)},status_code=404)
 
 
 async def resume(request):
     try:
-        launch(request.path_params['ident']);return JSONResponse({'status':'started'},status_code=202)
-    except ValueError as error:return JSONResponse({'error':str(error)},status_code=400)
+        await asyncio.to_thread(launch, request.path_params['ident'])
+        return JSONResponse({'status':'started'},status_code=202)
+    except (ValueError, OSError) as error:return JSONResponse({'error':str(error)},status_code=400)
 
 
 async def artifact(request):

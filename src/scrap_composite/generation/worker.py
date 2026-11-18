@@ -11,6 +11,10 @@ class RenderUnavailable(RuntimeError):
     pass
 
 
+class RenderOperationFailed(RuntimeError):
+    """Blender rejected a specific asset or render operation."""
+
+
 class Blender:
     def __init__(self, root, device='OPTIX'):
         self.root=Path(root); self.root.mkdir(parents=True,exist_ok=True)
@@ -61,7 +65,7 @@ class Blender:
                 error=data['error']
                 if any(s in error.lower() for s in ('no device','cuda','optix','out of memory','failed to allocate')):
                     raise RenderUnavailable('Blender: '+error)
-                raise RuntimeError('Blender: '+error)
+                raise RenderOperationFailed('Blender: '+error)
             return data
 
     async def roundtrip(self,operation,payload,timeout):
