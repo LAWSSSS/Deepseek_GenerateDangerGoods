@@ -1,13 +1,49 @@
-'use strict';
+import {setupExportSettings} from './batch-local.js';
+import {setupMaterials} from './batch-materials.js';
+import {setupPreview} from './batch-preview.js';
 
 const field = id => document.getElementById(id);
-const selectedValues = select => Array.from(select.selectedOptions, option => option.value);
-let batch = localStorage.getItem('displayBatchId');
+let batch = readPreference('displayBatchId');
 let pollTimer;
 let latestStatus;
 let actionPending = false;
-let statusPending = Boolean(batch);
-let directoryVersion = 0;
+let statusPending = false;
+
+function readPreference(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function remember(key, value) {
+  try { localStorage.setItem(key, value); } catch {
+    // The current tab can still run if browser persistence is disabled.
+  }
+}
+
+const materials = setupMaterials({
+  requestJson, onChange: updateActions, savedDirectory: readPreference('displayBackgrounds'),
+  rememberDirectory: directory => remember('displayBackgrounds', directory),
+});
+const preview = setupPreview(setupExportSettings());
+
+const views = new Map([...document.querySelectorAll('[data-workbench-page]')].map(page => [page.id, page]));
+let currentView;
+
+function showView(name, focus = false) {
+  if (!views.has(name) || currentView === name) return;
+  currentView = name;
+  for (const [id, page] of views) page.hidden = id !== name;
+  for (const link of document.querySelectorAll('[data-workbench-link]')) {
+    if (link.dataset.workbenchLink === name) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  }
+  if (focus) {
+    window.scrollTo(0, 0);
+    views.get(name).querySelector('h1').focus({preventScroll: true});
+  }
+}
+
+showView(views.has(location.hash.slice(1)) ? location.hash.slice(1) : 'generate');
+window.addEventListener('hashchange', () => showView(location.hash.slice(1) || 'generate', true));
 
 async function requestJson(path, options) {
   const response = await fetch(path, options);
@@ -21,7 +57,9 @@ async function requestJson(path, options) {
 }
 
 function updateActions() {
-  field('start').disabled = actionPending || statusPending || Boolean(latestStatus?.running);
+  const eligibility = materials.selection();
+  field('selection-error').textContent = eligibility.error || '';
+  field('start').disabled = Boolean(eligibility.error || actionPending || statusPending || latestStatus?.running);
   field('resume').hidden = !latestStatus?.resumable;
   field('resume').disabled = !latestStatus?.resumable || actionPending || statusPending;
   field('refresh').disabled = actionPending || statusPending;
@@ -81,76 +119,14 @@ async function checkModes() {
   }
 }
 
-function syncModelSelection() {
-  const ids = new Set(field('assets').value.split(',').map(value => value.trim()));
-  for (const option of field('assetChoices').options) option.selected = ids.has(option.value);
-}
-
-async function listAssets() {
-  try {
-    const models = await requestJson('/api/modeling/assets');
-    const available = models.filter(model => model.available && !model.archived);
-    field('assetChoices').replaceChildren(...available.map(model => new Option(`${model.id} · ${model.name}`, model.id)));
-    field('assetChoices').hidden = available.length === 0;
-    field('assetListStatus').textContent = available.length
-      ? `可选模型 ${available.length} 个，支持多选。`
-      : '目录中暂无可选的已发布模型，可在建模工作台查看。';
-    syncModelSelection();
-  } catch (error) {
-    field('assetListStatus').textContent = `模型目录读取失败。${error.message}`;
-  }
-}
-
-field('assets').oninput = syncModelSelection;
-field('assetChoices').onchange = () => {
-  field('assets').value = selectedValues(field('assetChoices')).join(',');
-};
-
-function resetBackgroundList() {
-  directoryVersion++;
-  field('backgroundFiles').replaceChildren();
-  field('backgroundFilter').hidden = true;
-  field('listBackgrounds').disabled = false;
-  field('backgroundNote').textContent = '默认使用目录内全部背景图。';
-}
-
-field('backgrounds').oninput = resetBackgroundList;
-field('listBackgrounds').onclick = async () => {
-  const directory = field('backgrounds').value.trim();
-  if (!directory) {
-    field('backgroundNote').textContent = '请先填写运行服务所在电脑上的背景目录。';
-    field('backgrounds').focus();
-    return;
-  }
-  const version = ++directoryVersion;
-  field('listBackgrounds').disabled = true;
-  field('backgroundNote').textContent = '正在读取背景目录…';
-  try {
-    const names = await requestJson('/api/backgrounds?directory=' + encodeURIComponent(directory));
-    if (version !== directoryVersion) return;
-    const selected = new Set(selectedValues(field('backgroundFiles')));
-    field('backgroundFiles').replaceChildren(...names.map(name => new Option(name, name, false, selected.has(name))));
-    field('backgroundFilter').hidden = !names.length;
-    field('backgroundNote').textContent = names.length
-      ? `找到 ${names.length} 张背景图，可多选；留空使用全部。`
-      : '这个目录里没有可用的背景图。';
-  } catch (error) {
-    if (version !== directoryVersion) return;
-    field('backgroundFiles').replaceChildren();
-    field('backgroundFilter').hidden = true;
-    field('backgroundNote').textContent = `背景目录读取失败。${error.message}`;
-  } finally {
-    if (version === directoryVersion) field('listBackgrounds').disabled = false;
-  }
-};
-
-function batchPayload() {
+function batchPayload(selection) {
   const value = id => field(id).value;
   const number = id => Number(value(id));
   const payload = {
-    backgrounds: value('backgrounds').trim(), background_files: selectedValues(field('backgroundFiles')),
-    count: number('count'), max_iterations: number('iterations'), seed: number('seed'),
-    assets: value('assets').split(',').map(id => id.trim()).filter(Boolean), render_device: value('device'),
+    ...selection,
+    count: number('count'), max_iterations: number('iterations'),
+    seed: value('seed') === '' ? crypto.getRandomValues(new Uint32Array(1))[0] : number('seed'),
+    render_device: value('device'),
     photo_style: value('photoStyle'), appearance: value('appearance'), atmosphere: value('atmosphere'),
     placement_mode: value('placementMode'), uncertain_policy: value('uncertainPolicy'),
     integration_mode: value('integrationMode'), photoshop_mode: value('photoshopMode'),
@@ -229,7 +205,7 @@ function showRunDetails(data) {
     if (data.effective_geometry) row('本次几何设置', JSON.stringify(data.effective_geometry));
   }
   if (data.run?.seconds != null) row('本次耗时', `${Math.round(data.run.seconds)} 秒`);
-  if (data.output) row('保存位置', data.output);
+  if (data.output) row('服务端结果目录', data.output);
 }
 
 function showStatus(data) {
@@ -246,7 +222,7 @@ function showStatus(data) {
   else setState('未运行');
 
   field('progress').hidden = false;
-  field('noBatch').hidden = true;
+  field('batchIdentity').hidden = false;
   field('batchIdentity').textContent = `批次 ${data.id || batch}`;
   field('countsPanel').hidden = !total;
   if (total) {
@@ -258,8 +234,7 @@ function showStatus(data) {
     field('failed').textContent = counts.failed || 0;
     field('queued').textContent = `排队 ${counts.queued || 0} 项 · ${data.running ? '执行中' : '中断待续'} ${counts.running || 0} 项 · 展示合格率 ${(100 * (counts.accepted_display || 0) / total).toFixed(1)}%`;
   }
-  const imageRate = data.image_rate == null ? '' : ` · 有图率 ${(100 * data.image_rate).toFixed(1)}%`;
-  field('images').textContent = data.generated_pngs == null ? '' : `已出图 ${data.generated_pngs} 张${imageRate}`;
+  field('images').textContent = data.generated_pngs ?? '—';
   field('activeJobs').replaceChildren(...(data.active || []).map(job => {
     const item = document.createElement('li');
     item.textContent = `${job.id} · ${stageNames[job.stage] || job.stage}`;
@@ -276,24 +251,26 @@ function showStatus(data) {
   showRunDetails(data);
 }
 
-async function refreshStatus() {
+async function refreshStatus(force = false) {
+  if (statusPending) return;
   clearTimeout(pollTimer);
   if (!batch) return;
   const id = batch;
   statusPending = true;
   updateActions();
   try {
-    const data = await requestJson('/api/batches/' + encodeURIComponent(id));
+    const data = await requestJson('/api/batches/' + encodeURIComponent(id), {cache: 'no-store'});
     if (id !== batch) return;
     latestStatus = data;
     showStatus(data);
     field('message').textContent = '';
-    field('refresh').hidden = true;
+    const ready = await preview.sync(id, data, force);
+    if (id !== batch) return;
+    field('refresh').hidden = ready;
     if (data.running) pollTimer = setTimeout(refreshStatus, 2500);
   } catch (error) {
     if (id !== batch) return;
     latestStatus = null;
-    field('noBatch').hidden = true;
     field('progress').hidden = true;
     field('results').hidden = true;
     field('refresh').hidden = false;
@@ -325,24 +302,37 @@ async function runAction(action) {
   }
 }
 
+field('form').addEventListener('invalid', event => {
+  for (let details = event.target.closest('details'); details; details = details.parentElement.closest('details')) {
+    details.open = true;
+  }
+}, true);
+
 field('form').onsubmit = event => {
   event.preventDefault();
   if (field('start').disabled) return;
-  const payload = batchPayload();
+  const selection = materials.selection();
+  if (selection.error) {
+    updateActions();
+    return;
+  }
+  const payload = batchPayload(selection);
   const endpoint = field('testMode').value === 'batch' ? '/api/batches' : '/api/batches/test';
-  if (window.matchMedia('(max-width: 839px)').matches) field('runPanel').scrollIntoView();
+  if (window.matchMedia('(max-width: 900px)').matches) field('runPanel').scrollIntoView();
   runAction(async () => {
     field('message').textContent = '正在创建批次…';
     const result = await requestJson(endpoint, {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
     });
     batch = result.id;
-    localStorage.setItem('displayBatchId', batch);
-    localStorage.setItem('displayBackgrounds', payload.backgrounds);
+    remember('displayBatchId', batch);
     latestStatus = null;
     field('progress').hidden = true;
-    field('noBatch').hidden = true;
+    field('countsPanel').hidden = true;
+    field('batchIdentity').hidden = true;
+    field('runError').textContent = '';
     field('results').hidden = true;
+    preview.reset(batch);
     setState('读取状态');
   });
 };
@@ -350,14 +340,13 @@ field('resume').onclick = () => runAction(async () => {
   field('message').textContent = '正在继续此批次…';
   await requestJson(`/api/batches/${encodeURIComponent(batch)}/resume`, {method: 'POST'});
 });
-field('refresh').onclick = refreshStatus;
-field('backgrounds').value = localStorage.getItem('displayBackgrounds') || '';
+field('refresh').onclick = () => refreshStatus(true);
 updateMode();
 updateActions();
 checkModes();
-listAssets();
+materials.start();
 if (batch) {
   setState('读取状态');
-  field('noBatch').hidden = true;
+  preview.reset(batch);
   refreshStatus();
 }

@@ -3,141 +3,278 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>多背景批量生成 · 废钢场景合成</title>
+  <title>生图工作台 · 废钢场景合成</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/batch.css">
-  <link rel="stylesheet" href="/static/workbench.css">
-  <script defer src="/static/batch.js"></script>
+  <script type="module" src="/static/batch.js"></script>
 </head>
 <body class="batch-page">
-  <header class="workbench-header">
-    <div class="brand">废钢场景合成</div>
-    <nav aria-label="工作台导航">
-      <a href="/">放置工作台</a><a href="/batch" aria-current="page">批量生成</a><a href="/modeling">建模工作台</a>
-    </nav>
-  </header>
-  <main class="batch-main">
-    <div class="page-title">
-      <h1>多背景批量生成</h1>
-      <p>每张背景放置一件横躺物品。程序先选择承托位置，再匹配视角和环境光色。</p>
-      <a class="run-jump" href="#runPanel">查看批次状态</a>
+  <a class="skip-link" href="#main">跳到工作区</a>
+  <header class="batch-header">
+    <div class="header-inner">
+      <a class="brand" href="/batch"><span class="brand-mark" aria-hidden="true"></span>废钢场景合成</a>
+      <nav aria-label="工作台导航">
+        <a href="#import" data-workbench-link="import">导入</a>
+        <a href="#generate" data-workbench-link="generate" aria-current="page">生图</a>
+        <a href="#settings" data-workbench-link="settings">设置</a>
+      </nav>
+      <a class="manual-link" href="/">人工摆放</a>
     </div>
-    <div class="batch-layout">
-      <form id="form" class="batch-form">
-        <section class="form-section" aria-labelledby="sourceTitle">
-          <h2 id="sourceTitle">背景与模型</h2>
-          <label for="backgrounds">背景目录</label>
-          <div class="path-line">
-            <input id="backgrounds" required placeholder="输入运行服务所在电脑上的背景目录">
-            <button id="listBackgrounds" type="button" class="secondary">读取目录</button>
+  </header>
+
+  <main class="batch-main" id="main" tabindex="-1">
+    <section id="import" data-workbench-page hidden aria-labelledby="import-title">
+      <header class="page-heading">
+        <h1 id="import-title" tabindex="-1">导入</h1>
+        <p>在此浏览器中整理背景图和物品照片。</p>
+      </header>
+      <div class="import-layout">
+        <section class="glass import-panel" aria-labelledby="background-title">
+          <div class="section-heading">
+            <h2 id="background-title">背景图</h2>
+            <p id="local-background-count" class="muted"></p>
           </div>
-          <p class="field-note" id="backgroundNote" role="status">默认使用目录内全部背景图。</p>
-          <div id="backgroundFilter" class="filter-block" hidden>
-            <label for="backgroundFiles">筛选背景图</label>
-            <select id="backgroundFiles" size="4" multiple aria-describedby="backgroundNote"></select>
+          <label class="drop-zone" id="background-drop">
+            <input id="background-upload" type="file" accept=".jpg,.jpeg,.png,.webp" multiple>
+            <span class="upload-symbol" aria-hidden="true"></span>
+            <strong>拖放或选择背景图</strong>
+            <small>JPG、PNG、WebP，可一次选择多张</small>
+          </label>
+          <p class="feedback" id="background-import-status" role="status"></p>
+          <ul class="file-errors" id="background-errors" aria-label="背景导入错误" aria-live="polite"></ul>
+          <ul class="local-gallery" id="local-backgrounds" aria-label="本机背景图"></ul>
+          <input id="background-replacement" type="file" accept=".jpg,.jpeg,.png,.webp" hidden>
+
+          <div class="server-source">
+            <label for="backgrounds">服务端背景目录</label>
+            <div class="path-line">
+              <input id="backgrounds" type="text" autocomplete="off" spellcheck="false" placeholder="运行生成服务的电脑上的目录">
+              <button id="listBackgrounds" type="button" class="secondary">读取目录</button>
+            </div>
+            <p class="feedback" id="backgroundNote" role="status">正在读取背景目录…</p>
           </div>
-          <label for="assets">模型编号</label>
-          <input id="assets" placeholder="例如 1,3,19-1" aria-describedby="assetNote">
-          <p class="field-note" id="assetNote">编号用英文逗号分隔，留空使用全部可选模型。</p>
-          <details class="model-picker">
-            <summary>从已发布模型中选择</summary>
-            <p id="assetListStatus" role="status">正在读取模型目录…</p>
-            <select id="assetChoices" size="4" multiple aria-label="已发布模型" hidden></select>
-          </details>
         </section>
-        <section class="form-section" aria-labelledby="runTitle">
-          <h2 id="runTitle">运行参数</h2>
-          <div class="field-grid">
+        <section class="glass import-panel" aria-labelledby="object-title">
+          <div class="section-heading">
+            <h2 id="object-title">物品照片</h2>
+            <a href="/modeling">建模工作台</a>
+          </div>
+          <form id="object-import-form" aria-labelledby="object-title">
+            <fieldset class="segmented" aria-label="物品照片类型">
+              <label><input type="radio" name="photo-mode" value="single" checked><span>单张照片</span></label>
+              <label><input type="radio" name="photo-mode" value="six"><span>六视图</span></label>
+            </fieldset>
+            <label class="object-name" for="object-name">物品名称 <small>选填</small>
+              <input id="object-name" type="text" maxlength="100" placeholder="默认使用照片文件名">
+            </label>
+            <div id="object-slots" class="object-slots"></div>
+            <div class="inline-actions object-save">
+              <button id="save-object" type="submit" class="primary" disabled>保存物品</button>
+              <button id="cancel-object-edit" type="button" class="secondary" hidden>取消编辑</button>
+            </div>
+            <p class="feedback" id="object-import-status" role="status"></p>
+          </form>
+          <ul class="local-gallery" id="local-objects" aria-label="本机物品照片"></ul>
+          <div class="server-source model-source">
+            <p class="field-note" id="model-directory-note" role="status">正在读取模型目录…</p>
+            <button id="refresh-models" type="button" class="secondary">刷新模型目录</button>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="generate" data-workbench-page aria-labelledby="generate-title">
+      <header class="page-heading">
+        <h1 id="generate-title" tabindex="-1">生图</h1>
+      </header>
+      <div class="generation-layout">
+        <form id="form" class="glass batch-form" aria-labelledby="configuration-title">
+          <h2 id="configuration-title">批次配置</h2>
+          <fieldset class="source-group">
+            <legend>背景</legend>
+            <div class="segmented">
+              <label><input type="radio" name="background-mode" value="random" checked><span>随机背景</span></label>
+              <label><input type="radio" name="background-mode" value="specified"><span>指定背景</span></label>
+            </div>
+            <p class="field-note" id="background-availability" role="status">正在读取背景目录…</p>
+            <div id="background-choices" class="source-choices" role="group" aria-label="指定背景选项" hidden></div>
+            <a class="source-link" href="#import">管理背景图</a>
+          </fieldset>
+          <fieldset class="source-group">
+            <legend>物品</legend>
+            <div class="segmented">
+              <label><input type="radio" name="object-mode" value="random" checked><span>随机物品</span></label>
+              <label><input type="radio" name="object-mode" value="specified"><span>指定物品</span></label>
+            </div>
+            <p class="field-note" id="object-availability" role="status">正在读取模型目录…</p>
+            <div id="object-choices" class="source-choices" role="group" aria-label="指定物品选项" hidden></div>
+            <a class="source-link" href="#import">管理物品照片</a>
+          </fieldset>
+          <div class="quantity">
+            <label for="count">生图任务数</label>
+            <input id="count" type="number" min="1" max="1000" step="1" value="1" required aria-describedby="count-note">
+            <p id="count-note" class="field-note">每项任务尝试生成一张图。</p>
+          </div>
+          <p id="selection-error" class="feedback validation" role="status"></p>
+          <button id="start" class="primary start-button" type="submit" disabled>开始生图</button>
+
+          <details class="advanced">
+            <summary>高级参数</summary>
+            <div class="field-grid">
               <label>运行方式<select id="testMode"><option value="batch">原批量流程</option><option value="test">在线效果小样（最多 15 项）</option><option value="rebuild" disabled>尺度与摆位重生成（最多 15 项）</option></select></label>
               <label>渲染设备<select id="device"><option value="OPTIX">NVIDIA OptiX</option><option value="CUDA">NVIDIA CUDA</option><option value="CPU">CPU</option></select></label>
-              <label>生成任务数<input id="count" type="number" min="1" max="1000" value="100" required></label>
               <label>初稿后的修正轮数<input id="iterations" type="number" min="0" max="10" value="2" required></label>
-              <label>随机种子<input id="seed" type="number" min="0" value="20261110"></label>
+              <label>随机种子<input id="seed" type="number" min="0" placeholder="留空时为新批次随机选择"></label>
               <label>证据不足时<select id="uncertainPolicy"><option value="render_review">生成效果图并标注待审</option><option value="skip">跳过不确定候选</option></select></label>
+            </div>
+            <p class="field-note" id="geometryAvailability">正在检查重生成模式…</p>
+            <details class="settings-group">
+              <summary>摆放、摄影与融合</summary>
+              <div class="field-grid">
+                <label>摆放方式<select id="placementMode"><option value="auto">自动选择承托与嵌入</option><option value="surface">表面放置</option><option value="combined">组合承托</option><option value="embedded">局部嵌入</option></select></label>
+                <label>摄影风格<select id="photoStyle"><option value="scrap_gray">废钢灰强融合</option><option value="dusty_scrap">低饱和与局部扬尘（点评中）</option><option value="retain_color">保留更多本色</option></select></label>
+                <label>融合方式<select id="appearance"><option value="reference">归档版摄影风格</option><option value="local">局部环境融合（小样验证中）</option><option value="native">上一版薄雾融合（诊断）</option></select></label>
+                <label>合成流程<select id="integrationMode"><option value="legacy">原融合流程</option><option value="coherent" disabled>局部受光与反射协同（小样）</option><option value="evidence_v1" disabled>凹处与结构化复核（小样）</option></select></label>
+                <label>试验预设<select id="realismPreset"><option value="existing">当前配置</option><option value="realism_v1">分层写实小样</option></select></label>
+                <label>空气与薄雾<select id="atmosphere"><option value="auto">自动适配局部薄雾与眩光</option><option value="off">关闭空气遮蔽（诊断）</option></select></label>
+              </div>
+            </details>
+            <details class="settings-group">
+              <summary>导出与复核</summary>
+              <div class="field-grid">
+                <label>批次 Photoshop 模式<select id="photoshopMode"><option value="off">关闭</option><option value="always">全部经 Photoshop</option><option value="on_issue">发现可修问题时调用</option></select></label>
+                <label>摄影复核<select id="reviewProfile"><option value="legacy">原复核协议</option><option value="photographer" disabled>摄影师诊断与修正</option></select></label>
+              </div>
+            </details>
+            <details class="settings-group">
+              <summary>尺度、接触与车厢参照</summary>
+              <div class="field-grid">
+                <label>车厢内宽（米，主要尺度依据）<input id="vehicleWidth" type="number" min="1.01" max="3.99" step="0.01" value="2.45"></label>
+                <label>车厢名义内高（米，仅辅助估计）<input id="vehicleHeight" type="number" min="0.5" max="5" step="0.1" value="2.2"></label>
+                <label>尺度模式<select id="scaleMode"><option value="reference_projection">实物规格与参照投影（新小样）</option><option value="physical_consistent">统一物品长度与场景标定（小样）</option><option value="legacy">旧尺度估计</option></select></label>
+                <label>接触检查<select id="contactMode"><option value="strict">严格接触，悬空不出图</option><option value="legacy">旧流程复现</option></select></label>
+              </div>
+            </details>
+            <details class="settings-group">
+              <summary>薄雾、浮灰与材质</summary>
+              <div class="field-grid">
+                <label>鲜艳度约束<select id="chromaMode"><option value="local_budget">附近同层色度上限</option><option value="global_mean">再限于全图平均饱和度（诊断）</option><option value="legacy">旧摄影处理</option></select></label>
+                <label>薄雾模式<select id="fogMode"><option value="local_auto">局部自动估计总雾量</option><option value="manual_extra">手动追加薄雾</option></select></label>
+                <label>做旧模式<select id="weathering"><option value="preserve_source">保留原貌·中度做旧（浮灰最高 0.5）</option><option value="legacy_matte">旧哑光覆盖</option></select></label>
+                <label>局部雾量修正倍数<input id="fogGain" type="number" min="0" max="1.5" step="0.25" value="1"></label>
+                <label>手动追加薄雾（%）<input id="fogExtra" type="number" min="0" max="85" step="1" value="35"></label>
+                <label>均匀池化格大小（1 为关闭）<input id="poolKernel" type="number" min="1" max="64" step="1" value="3"></label>
+                <label>表面浮灰倍率<input id="surfaceDust" type="number" min="0" max="1" step="0.05" value="0.5"></label>
+                <label>自动调整效果<select id="adjustEffects"><option value="yes">允许 AI 依据缺陷调整</option><option value="no">固定这三个参数</option></select></label>
+              </div>
+              <p class="field-note">尺度与摆位重生成使用 3×3 池化、0.5 浮灰和局部自动雾化。漆面浮灰减半，塑料保留原材质。</p>
+            </details>
+          </details>
+        </form>
+
+        <section class="glass run-panel" aria-labelledby="progressTitle" id="runPanel">
+          <div class="section-heading preview-heading">
+            <h2 id="progressTitle">成图预览</h2>
+            <span id="batchState" class="status-pill" role="status">尚未开始</span>
           </div>
-          <p class="field-note" id="geometryAvailability">正在检查重生成模式…</p>
-        </section>
-        <section class="form-section advanced" aria-labelledby="advancedTitle">
-          <h2 id="advancedTitle">高级设置</h2>
-          <details class="settings-group">
-            <summary>摆放、摄影与融合</summary>
-            <div class="field-grid">
-              <label>摆放方式<select id="placementMode"><option value="auto">自动选择承托与嵌入</option><option value="surface">表面放置</option><option value="combined">组合承托</option><option value="embedded">局部嵌入</option></select></label>
-              <label>摄影风格<select id="photoStyle"><option value="scrap_gray">废钢灰强融合</option><option value="dusty_scrap">低饱和与局部扬尘（点评中）</option><option value="retain_color">保留更多本色</option></select></label>
-              <label>融合方式<select id="appearance"><option value="reference">归档版摄影风格</option><option value="local">局部环境融合（小样验证中）</option><option value="native">上一版薄雾融合（诊断）</option></select></label>
-              <label>合成流程<select id="integrationMode"><option value="legacy">原融合流程</option><option value="coherent" disabled>局部受光与反射协同（小样）</option><option value="evidence_v1" disabled>凹处与结构化复核（小样）</option></select></label>
-              <label>试验预设<select id="realismPreset"><option value="existing">当前配置</option><option value="realism_v1">分层写实小样：材质、受光与雾场分开</option></select></label>
-              <label>空气与薄雾<select id="atmosphere"><option value="auto">自动适配局部薄雾与眩光</option><option value="off">关闭空气遮蔽（诊断）</option></select></label>
-            </div>
-          </details>
-          <details class="settings-group">
-            <summary>导出与复核</summary>
-            <div class="field-grid">
-              <label>Photoshop<select id="photoshopMode"><option value="off">关闭</option><option value="always">全部经 Photoshop</option><option value="on_issue">发现可修问题时调用</option></select></label>
-              <label>摄影复核<select id="reviewProfile"><option value="legacy">原复核协议</option><option value="photographer" disabled>摄影师诊断与修正</option></select></label>
-            </div>
-          </details>
-          <details class="settings-group">
-            <summary>尺度、接触与车厢参照</summary>
-            <div class="field-grid">
-              <label>车厢内宽（米，主要尺度依据）<input id="vehicleWidth" type="number" min="1.01" max="3.99" step="0.01" value="2.45"></label>
-              <label>车厢名义内高（米，仅辅助估计）<input id="vehicleHeight" type="number" min="0.5" max="5" step="0.1" value="2.2"></label>
-              <label>尺度模式<select id="scaleMode"><option value="reference_projection">实物规格与参照投影（新小样，不用旧缩放）</option><option value="physical_consistent">统一物品长度与场景标定（小样）</option><option value="legacy">旧尺度估计</option></select></label>
-              <label>接触检查<select id="contactMode"><option value="strict">严格接触，悬空不出图</option><option value="legacy">旧流程复现</option></select></label>
-            </div>
-          </details>
-          <details class="settings-group">
-            <summary>薄雾、浮灰与材质</summary>
-            <div class="field-grid">
-              <label>鲜艳度约束<select id="chromaMode"><option value="local_budget">附近同层色度上限</option><option value="global_mean">再限于全图平均饱和度（诊断）</option><option value="legacy">旧摄影处理</option></select></label>
-              <label>薄雾模式<select id="fogMode"><option value="local_auto">局部自动估计总雾量</option><option value="manual_extra">手动追加薄雾</option></select></label>
-              <label>做旧模式<select id="weathering"><option value="preserve_source">保留原貌·中度做旧（浮灰最高 0.5）</option><option value="legacy_matte">旧哑光覆盖</option></select></label>
-              <label>局部雾量修正倍数<input id="fogGain" type="number" min="0" max="1.5" step="0.25" value="1"></label>
-              <label>手动追加薄雾（%）<input id="fogExtra" type="number" min="0" max="85" step="1" value="35"></label>
-              <label>均匀池化格大小（1 为关闭）<input id="poolKernel" type="number" min="1" max="64" step="1" value="3"></label>
-              <label>表面浮灰倍率<input id="surfaceDust" type="number" min="0" max="1" step="0.05" value="0.5"></label>
-              <label>自动调整效果<select id="adjustEffects"><option value="yes">允许 AI 依据缺陷调整</option><option value="no">固定这三个参数</option></select></label>
-            </div>
-            <p class="field-note">在线效果小样可分别设置薄雾、池化和浮灰。尺度与摆位重生成使用 3×3 池化、0.5 浮灰和局部自动雾化。漆面浮灰减半，塑料保留原材质。</p>
-          </details>
-        </section>
-      </form>
-      <aside class="run-panel" aria-labelledby="progressTitle" id="runPanel">
-        <div class="panel-title"><h2 id="progressTitle">批次状态</h2><span id="batchState" class="state" role="status">尚未开始</span></div>
-        <p id="message" role="status"></p>
-        <p id="noBatch" class="panel-note">启动批次后，可在这里查看进度、成图数量和验证记录。</p>
-        <div id="progress" hidden>
-          <p id="batchIdentity" class="batch-id"></p>
-          <div id="countsPanel" hidden>
-            <div class="meter-heading"><span>任务进度</span><b id="completion"></b></div>
+          <p id="message" class="feedback" role="status"></p>
+          <div id="countsPanel" class="batch-metrics" hidden>
+            <div class="meter-heading"><span>任务进度</span><strong id="completion"></strong></div>
             <progress id="jobMeter" max="1" value="0" aria-label="已处理任务占比"></progress>
             <dl class="counts">
+              <div><dt>实际成图</dt><dd id="images">—</dd></div>
               <div><dt>展示合格</dt><dd id="accepted"></dd></div>
               <div><dt>待审</dt><dd id="review"></dd></div>
               <div><dt>失败</dt><dd id="failed"></dd></div>
             </dl>
-            <p id="queued" class="panel-note"></p>
           </div>
-          <p id="images" class="panel-note"></p>
-          <ul id="activeJobs"></ul>
-          <p id="runError" class="run-error"></p>
-          <details class="run-record">
-            <summary>运行明细与保存位置</summary>
-            <dl id="runDetails"></dl>
-          </details>
+
+          <div class="preview-canvas" id="preview-canvas">
+            <div id="preview-empty" class="preview-empty">
+              <span class="preview-symbol" aria-hidden="true"></span>
+              <strong id="preview-headline">暂无成图</strong>
+              <p id="preview-hint">开始生图后，已完成的图片会显示在这里。</p>
+            </div>
+          </div>
+          <div id="preview-tools" class="preview-tools" hidden>
+            <div class="result-label">
+              <strong id="preview-name"></strong>
+              <span class="status-pill" id="preview-status"></span>
+              <p id="preview-reason" class="field-note"></p>
+            </div>
+            <div class="inline-actions">
+              <a id="preview-original" class="button-link" target="_blank" rel="noopener">查看原尺寸</a>
+              <button id="export-png" type="button" class="secondary">导出 PNG</button>
+              <button id="export-psd" type="button" class="secondary" hidden>下载 PSD</button>
+              <button id="toggle-agent" type="button" class="secondary agent-toggle" aria-expanded="false" aria-controls="agent-panel">Photoshop Agent</button>
+            </div>
+          </div>
+          <p id="preview-feedback" class="feedback" role="status"></p>
+          <p id="export-feedback" class="feedback" role="status"></p>
+          <button id="export-fallback" type="button" class="secondary" hidden>使用浏览器下载</button>
+          <div class="result-gallery" id="result-gallery" hidden>
+            <div id="result-thumbnails" class="result-thumbnails" role="group" aria-label="成图列表"></div>
+            <div id="result-pagination" class="result-pagination" hidden>
+              <button id="previous-results" type="button" class="secondary">上一组</button>
+              <span id="result-range"></span>
+              <button id="next-results" type="button" class="secondary">下一组</button>
+            </div>
+          </div>
+
+          <section id="agent-panel" class="agent-panel" aria-labelledby="agent-title" hidden>
+            <div class="section-heading">
+              <h3 id="agent-title">Photoshop Agent</h3>
+              <span class="status-pill" data-tone="warning">待接入</span>
+            </div>
+            <p id="agent-context" class="field-note"></p>
+            <label for="agent-draft">修改指令</label>
+            <textarea id="agent-draft" rows="3" placeholder="例如：减弱金属高光，保留锈迹和遮挡。"></textarea>
+            <div class="inline-actions">
+              <button id="save-agent-draft" type="button" class="secondary">保存草稿</button>
+              <button id="copy-agent-draft" type="button" class="secondary">复制指令</button>
+            </div>
+            <p id="agent-feedback" class="feedback" role="status"></p>
+          </section>
+
+          <div class="run-footer">
+            <p id="batchIdentity" class="batch-id" hidden></p>
+            <p id="runError" class="feedback validation" role="status"></p>
+            <div class="inline-actions">
+              <button id="refresh" type="button" class="secondary" hidden>刷新状态</button>
+              <button id="resume" type="button" class="primary" hidden disabled>继续此批次</button>
+              <a id="results" class="button-link" hidden target="_blank" rel="noopener">查看批次报告</a>
+            </div>
+            <div id="progress" hidden>
+              <details class="run-record">
+                <summary>运行明细</summary>
+                <p id="queued" class="field-note"></p>
+                <ul id="activeJobs"></ul>
+                <dl id="runDetails"></dl>
+              </details>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="settings" data-workbench-page hidden aria-labelledby="settings-title">
+      <header class="page-heading">
+        <h1 id="settings-title" tabindex="-1">设置</h1>
+      </header>
+      <section class="glass settings-panel" aria-labelledby="export-title">
+        <h2 id="export-title">导出位置</h2>
+        <p class="muted">导出文件保存到当前浏览器所在的电脑。</p>
+        <div class="export-location">
+          <span class="folder-symbol" aria-hidden="true"></span>
+          <div><strong id="export-location-name">使用浏览器下载</strong><p id="export-location-note" class="field-note"></p></div>
         </div>
-        <div class="batch-actions">
-          <button id="start" type="submit" form="form">开始批量生成</button>
-          <button id="refresh" type="button" class="secondary" hidden>刷新状态</button>
-          <button id="resume" type="button" class="secondary" hidden disabled>继续此批次</button>
-          <a id="results" hidden target="_blank" rel="noopener">查看效果与验证记录</a>
+        <div class="inline-actions">
+          <button id="choose-export-folder" type="button" class="primary">选择文件夹</button>
+          <button id="clear-export-folder" type="button" class="secondary" hidden>改用浏览器下载</button>
         </div>
-        <details class="run-rules">
-          <summary>生成与复核规则</summary>
-          <p>达到修正上限时保存最佳版本。默认允许钢料遮挡物品约 10%–40%。按所选策略处理尺度或隐藏接触证据不足的候选；发现明确穿透、悬空或保护区冲突时拒绝。展示合格与待审图片分别保存，有图率和展示合格率分别统计。</p>
-        </details>
-      </aside>
-    </div>
+        <p id="settings-feedback" class="feedback" role="status"></p>
+      </section>
+    </section>
   </main>
 </body>
 </html>
